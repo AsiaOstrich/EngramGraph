@@ -33,14 +33,36 @@ npm run build
 node poc/d4/verify-callgraph.mjs   # expect: all callers match ground truth, exit 0
 ```
 
-## Experiment outline (next: P5)
+## Run the experiment (P5)
 
-Two arms via VibeOps `prompt-experiment-runner`:
-- **control** — Builder, no call-chain context.
-- **treatment** — Builder + CodeSage `callers`/`callees` of the task's target symbol.
+`run-experiment.mjs` wires the whole A/B loop. The REAL parts run locally:
+index fixture → per-task CodeSage call-chain context (direct callers/callees,
+depth 1, matching `groundTruthCallers`) → two arms (control / treatment) →
+metrics (missed call-sites, first-pass pass, iterations, cost) → aggregate →
+pre-registered GO/NO-GO gate (decision driven by the positive-control tasks).
 
-For each task × N runs, measure: missed call-sites (vs `groundTruthCallers`),
-first-pass test pass / self-debug iterations, regressions, token cost, UAT
-6-dimension score. Apply the pre-registered GO/NO-GO thresholds in the design
-doc. Negative-control tasks must show no treatment advantage (else the signal
-is prompt-length noise, not the call chain).
+```bash
+npm run build
+node poc/d4/run-experiment.mjs        # MODE=mock smoke (default)
+N=5 node poc/d4/run-experiment.mjs    # 5 runs/arm/task
+```
+
+The Builder call is behind a pluggable adapter:
+
+- **MODE=mock** (default) — a NEUTRAL synthetic builder returning the *same*
+  result for both arms. It validates the harness plumbing end-to-end and, by
+  construction, yields no signal (tie → NO-GO). The numbers are synthetic and
+  clearly banner-labelled; this is **not** a measurement.
+- **MODE=real** — not runnable yet. Two real prerequisites:
+  1. **An LLM provider key** (none configured in the dev sandbox: no
+     ANTHROPIC/XAI/GROQ/OPENROUTER key, no local ollama). The real run costs
+     tokens.
+  2. **A brownfield-task → BuilderInput adapter.** VibeOps's Builder input is
+     greenfield-pipeline-shaped (`source_agent: ui-ux`, upstream PRD/design/
+     test-plan artifacts). A "modify function X, update callers" task must be
+     adapted into that shape (or a different VibeOps entrypoint used) before the
+     real arm can run and its patches be applied + tested against the fixture.
+
+Negative-control tasks (`shouldCallChainHelp: false`) must show no treatment
+advantage in a real run, else the signal is prompt-length noise rather than the
+call chain.
