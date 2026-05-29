@@ -27,7 +27,9 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { writeFileSync } from "node:fs";
 import { GraphConnection, initSchema, indexProject, callChain } from "../../dist/index.js";
+import { toBuilderInput, validateBuilderInput } from "./brownfield-adapter.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, "fixture", "src");
@@ -79,14 +81,28 @@ async function buildContexts() {
  */
 async function runBuilder(task, arm, ctx) {
   if (MODE === "real") {
-    // Real run: build a BuilderInput from the brownfield task (+ ctx.block for
-    // the treatment arm), shell out to `vibeops run builder --input <file>`,
-    // apply its patches to a fixture copy, run the fixture tests, and diff the
-    // touched files against task.groundTruthCallers. Requires an LLM key and
-    // the task→BuilderInput adapter — intentionally not implemented here.
+    // 1. Adapter (wired): brownfield task → schema-valid BuilderInput + spec.
+    const stamp = new Date().toISOString();
+    const { builderInput, specArtifact, specPath } = toBuilderInput(
+      task,
+      fixtureFiles,
+      arm === "treatment" ? ctx : null,
+      stamp,
+    );
+    const errors = validateBuilderInput(builderInput);
+    if (errors.length) throw new Error(`adapter produced invalid BuilderInput: ${errors.join("; ")}`);
+    const stage = join(tmpdir(), `codesage-d4-real-${task.id}-${arm}`);
+    mkdirSync(join(stage, dirname(specPath)), { recursive: true });
+    writeFileSync(join(stage, "builder-input.json"), JSON.stringify(builderInput, null, 2));
+    writeFileSync(join(stage, specPath), JSON.stringify(specArtifact, null, 2));
+
+    // 2. Invoke VibeOps Builder (blocked here): needs a workspace copy of the
+    //    fixture, an LLM provider key, then `vibeops run builder --input
+    //    <builder-input.json>`; apply patches → run fixture tests → diff
+    //    touched files vs task.groundTruthCallers for the metrics below.
     throw new Error(
-      "MODE=real not wired: needs an LLM provider key + a brownfield-task→BuilderInput adapter. " +
-        "See poc/d4/README.md.",
+      `MODE=real: valid BuilderInput staged at ${stage}, but invoking the VibeOps Builder ` +
+        `requires VIBEOPS_DIR + an LLM provider key (none in this sandbox). See poc/d4/README.md.`,
     );
   }
   // MODE=mock — NEUTRAL synthetic result: identical for both arms, so the

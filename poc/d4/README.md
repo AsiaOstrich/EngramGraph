@@ -53,15 +53,27 @@ The Builder call is behind a pluggable adapter:
   result for both arms. It validates the harness plumbing end-to-end and, by
   construction, yields no signal (tie → NO-GO). The numbers are synthetic and
   clearly banner-labelled; this is **not** a measurement.
-- **MODE=real** — not runnable yet. Two real prerequisites:
-  1. **An LLM provider key** (none configured in the dev sandbox: no
-     ANTHROPIC/XAI/GROQ/OPENROUTER key, no local ollama). The real run costs
-     tokens.
-  2. **A brownfield-task → BuilderInput adapter.** VibeOps's Builder input is
-     greenfield-pipeline-shaped (`source_agent: ui-ux`, upstream PRD/design/
-     test-plan artifacts). A "modify function X, update callers" task must be
-     adapted into that shape (or a different VibeOps entrypoint used) before the
-     real arm can run and its patches be applied + tested against the fixture.
+- **MODE=real** — the brownfield→BuilderInput adapter is **done** (`brownfield-adapter.mjs`,
+  verified by `verify-adapter.mjs`): each task produces a schema-valid
+  BuilderInput + a designer spec artifact that inlines the existing code,
+  acceptance criteria, and (treatment only) the CodeSage call-chain. MODE=real
+  now runs the adapter and stages `builder-input.json` + `artifacts/` to a temp
+  dir. Two prerequisites remain to actually execute:
+  1. **An LLM provider key** (none in the dev sandbox: no ANTHROPIC/XAI/GROQ/
+     OPENROUTER key, no local ollama). The real run costs tokens.
+  2. **Workspace wiring** — copy the fixture into a VibeOps project, run
+     `vibeops run builder --input builder-input.json`, apply the returned
+     patches, run the fixture tests, and diff touched files vs
+     `groundTruthCallers` for the metrics. (`VIBEOPS_DIR` + key.)
+
+```bash
+# build all per-task control/treatment BuilderInputs and validate them (no LLM)
+node poc/d4/verify-adapter.mjs
+```
+
+> Note: `call_chain_context.callers` (who calls the symbol) is distinct from
+> `groundTruthCallers` (who must be *updated*). For internal-refactor negative
+> controls they differ on purpose — that gap is the discriminating signal.
 
 Negative-control tasks (`shouldCallChainHelp: false`) must show no treatment
 advantage in a real run, else the signal is prompt-length noise rather than the
