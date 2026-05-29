@@ -53,6 +53,25 @@ export type {
 } from "./knowledge-graph/index.js";
 export { impactAnalysis } from "./knowledge-graph/query.js";
 
+// --- sage (self-evolving confidence: writer / reader / evolution loop) ---
+export {
+  applyFeedback,
+  topByConfidence,
+  rankedImpact,
+  feedbackForEventType,
+  ingestFeedback,
+  runEvolution,
+  STEP,
+  MIN_CONFIDENCE,
+  MAX_CONFIDENCE,
+} from "./sage/index.js";
+export type {
+  ConfidenceLabel,
+  ConfidenceUpdate,
+  RankedNode,
+  IngestEventType,
+} from "./sage/index.js";
+
 // --- adapters (pluggable interfaces + generic defaults) ---
 export {
   type KnowledgeSource,
