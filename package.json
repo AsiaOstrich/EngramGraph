@@ -25,6 +25,7 @@
   "scripts": {
     "build": "tsup",
     "prepare": "tsup",
+    "health": "node poc/health-check.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
