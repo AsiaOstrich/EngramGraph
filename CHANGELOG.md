@@ -41,7 +41,10 @@ on embedded Kuzu, usable as a library, REST service, MCP server, or CLI.
   named graph; `index --clean` rebuilds to prune deleted nodes; `gc` removes
   graphs of deleted branches. New `GitBranchIsolation` adapter + `clearGraph`,
   `resolveDbPath`, `openGraph` exports. Default stays single-graph (unchanged).
-- **embedded** — `EmbeddedClient` for in-process, zero-HTTP use.
+- **embedded** — `EmbeddedClient` for in-process, zero-HTTP use, with a
+  high-level facade (`indexCode`, `indexDocs`, `callChain`, `callers`,
+  `callees`, `impactAnalysis`, `ingestFeedback`, `topByConfidence`) mirroring
+  the REST/MCP surfaces so consumers never need the raw `GraphConnection`.
 - Tri-lingual documentation (English / 繁體中文 / 简体中文): README, CLI, MCP,
   API, CONTRIBUTING.
 

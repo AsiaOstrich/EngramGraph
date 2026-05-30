@@ -181,8 +181,19 @@ class EmbeddedClient {
   constructor(isolation?: IsolationModel, ctx?: IsolationContext);
   init(): Promise<void>;                 // 打开 DB + 确保 schema（幂等）
   query(cypher, params?): Promise<GraphRow[]>;
-  close(): Promise<void>;
+  // 高级 facade——与 REST/MCP 相同的操作，免持有原始 GraphConnection：
+  indexCode(files: ProjectFile[]): Promise<ProjectIndexResult>;
+  indexDocs(docs: KnowledgeDoc[]): Promise<KnowledgeIndexResult>;
+  callChain(symbol, direction?, depth?): Promise<CallChainResult>;
+  callers(name, depth?): Promise<CallNode[]>;
+  callees(name, depth?): Promise<CallNode[]>;
+  impactAnalysis(nodeId, maxHops?): Promise<ImpactAnalysisResult>;
+  ingestFeedback(nodeId, type, nodeLabel?, weight?): Promise<ConfidenceUpdate | null>;
+  topByConfidence(label, limit?): Promise<RankedNode[]>;
+  close(): Promise<void>;                // 仅 shutdown 用（销毁注意事项）
 }
 ```
 
 默认 `SingleRepoIsolation`。零 HTTP 开销——直接包住 `GraphConnection` 供同进程使用者使用。
+除原始 `query` 外，高级 facade 暴露与 REST/MCP 相同的操作，因此嵌入使用者（如 VibeOps、
+XSPEC-244）无需持有原始 `GraphConnection`。连接为长生命周期——`init()` 幂等；`close()` 仅供 shutdown。

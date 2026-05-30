@@ -180,9 +180,21 @@ class EmbeddedClient {
   constructor(isolation?: IsolationModel, ctx?: IsolationContext);
   init(): Promise<void>;                 // open DB + ensure schema (idempotent)
   query(cypher, params?): Promise<GraphRow[]>;
-  close(): Promise<void>;
+  // high-level facade — same ops as REST/MCP, no raw GraphConnection needed:
+  indexCode(files: ProjectFile[]): Promise<ProjectIndexResult>;
+  indexDocs(docs: KnowledgeDoc[]): Promise<KnowledgeIndexResult>;
+  callChain(symbol, direction?, depth?): Promise<CallChainResult>;
+  callers(name, depth?): Promise<CallNode[]>;
+  callees(name, depth?): Promise<CallNode[]>;
+  impactAnalysis(nodeId, maxHops?): Promise<ImpactAnalysisResult>;
+  ingestFeedback(nodeId, type, nodeLabel?, weight?): Promise<ConfidenceUpdate | null>;
+  topByConfidence(label, limit?): Promise<RankedNode[]>;
+  close(): Promise<void>;                // shutdown only (teardown caveat)
 }
 ```
 
 Defaults to `SingleRepoIsolation`. Zero HTTP overhead — wraps `GraphConnection`
-directly for same-process consumers.
+directly for same-process consumers. Beyond raw `query`, the high-level facade
+exposes the same operations as the REST/MCP surfaces, so embedded consumers
+(e.g. VibeOps, XSPEC-244) never need to hold the raw `GraphConnection`. The
+connection is long-lived — `init()` is idempotent; `close()` is shutdown-only.
