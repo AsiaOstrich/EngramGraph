@@ -14,8 +14,10 @@ import {
   indexProject, callChain,
   indexKnowledgeDocs, impactAnalysis,
   applyFeedback, topByConfidence,
-  createServer,
+  createServer, createMcpServer,
 } from "../dist/index.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,6 +71,16 @@ const chain = await post("/graph/call-chain", { symbol: "b", direction: "callers
 const ingest = await post("/graph/ingest", { type: "test_fail", nodeId: "DEC-1", nodeLabel: "Decision" });
 check("api: routes", health.status === 200 && impact.status === 200 && chain.status === 200 && ingest.status === 200,
   `/health=${health.status} /impact-analysis=${impact.status} /call-chain=${chain.status} /ingest=${ingest.status}`);
+
+// 6. MCP — tools advertised + callable over the real MCP protocol
+const mcp = createMcpServer(conn);
+const mcpClient = new Client({ name: "health", version: "0" });
+const [ct, st] = InMemoryTransport.createLinkedPair();
+await Promise.all([mcp.connect(st), mcpClient.connect(ct)]);
+const { tools } = await mcpClient.listTools();
+const callRes = await mcpClient.callTool({ name: "call_chain", arguments: { symbol: "b", direction: "callers" } });
+check("mcp: tools + protocol", tools.length === 5 && !callRes.isError,
+  `${tools.length} tools (${tools.map((t) => t.name).join(", ")})`);
 
 rmSync(dir, { recursive: true, force: true });
 // NOTE: no conn.close() — Kuzu's native close can deadlock with tree-sitter

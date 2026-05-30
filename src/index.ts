@@ -96,8 +96,11 @@ export {
   TestExitCodeSignalSource,
 } from "./adapters/index.js";
 
-// --- api (REST / MCP server) ---
+// --- api (REST) ---
 export { createServer } from "./api/server.js";
+
+// --- mcp (Model Context Protocol server for coding assistants) ---
+export { createMcpServer } from "./mcp/server.js";
 
 // --- embedded mode (in-process, zero HTTP) ---
 export { EmbeddedClient } from "../clients/node-sdk/embedded.js";

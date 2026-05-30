@@ -45,7 +45,26 @@ structurally related nodes") are complementary. CodeSage adds the graph half:
 |------|-------|----------|
 | **Embedded** | `EmbeddedClient` | Same-process, zero HTTP overhead (e.g. VibeOps integration) |
 | **REST** | `createServer()` (Hono) | Standalone graph service; routes under `/graph/*` |
-| **MCP** | _(planned)_ | Model Context Protocol server for agents |
+| **MCP** | `codesage-mcp` (stdio bin) | Plug-and-play for coding assistants (Claude Code, Codex, Cursor, ...) |
+
+## MCP — use CodeSage from a coding assistant
+
+CodeSage ships an MCP server (stdio) exposing 5 tools — `index_code`,
+`index_docs`, `call_chain`, `impact_analysis`, `ingest_feedback` — so any
+MCP-capable assistant can use it as a code + knowledge graph. Zero LLM,
+deterministic.
+
+```bash
+# Claude Code
+claude mcp add codesage -- node /abs/path/to/codesage/dist/mcp/stdio.js
+# or, once installed as a package, the bin:
+claude mcp add codesage -- npx codesage-mcp
+```
+
+The graph DB path is `CODESAGE_DB` (default `./.codesage/graph.db`). Example
+assistant flow: `index_code` your repo → ask "what calls `execute`?" →
+`call_chain` returns the callers; `impact_analysis` returns the decisions
+behind a spec. Any MCP client works (Cursor/Windsurf/Codex via their MCP config).
 
 ## Quickstart
 
