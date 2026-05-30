@@ -1,9 +1,13 @@
 name: Publish to npm
 
 # Triggered by publishing a GitHub Release. Builds, verifies, then publishes
-# @asiaostrich/codesage to npm. Requires the repo secret NPM_TOKEN_ASIAOSTRICH
-# (an npm token with publish rights to the @asiaostrich scope), and the repo to
-# be public for provenance.
+# @asiaostrich/codesage to npm via OIDC Trusted Publishing — NO token needed.
+#
+# Setup (one-time, on npmjs.com → @asiaostrich/codesage → Settings → Trusted
+# Publisher): add a GitHub Actions trusted publisher with
+#   organization/user: AsiaOstrich   repository: CodeSage   workflow: publish.yml
+# npm then mints short-lived credentials from this job's OIDC id-token; the repo
+# must be public. Provenance is generated automatically.
 
 on:
   release:
@@ -15,13 +19,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # OIDC trusted publishing + provenance
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: "https://registry.npmjs.org"
+
+      # OIDC trusted publishing requires npm >= 11.5.1 (newer than the bundled npm).
+      - run: npm install -g npm@latest
+      - run: npm --version
 
       - run: npm install --legacy-peer-deps
 
@@ -40,7 +48,7 @@ jobs:
             echo "tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish @asiaostrich/codesage
-        run: npm publish --provenance --access public --tag ${{ steps.tag.outputs.tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_ASIAOSTRICH }}
+      # No NODE_AUTH_TOKEN: npm authenticates via the OIDC id-token against the
+      # trusted publisher configured on npmjs. Provenance is automatic.
+      - name: Publish @asiaostrich/codesage (OIDC trusted publishing)
+        run: npm publish --access public --tag ${{ steps.tag.outputs.tag }}
