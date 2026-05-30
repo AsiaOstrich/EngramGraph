@@ -14,3 +14,6 @@ coverage/
 # Editor / OS
 .DS_Store
 *.log
+
+# MCP server local graph DB
+.codesage/
