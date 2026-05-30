@@ -1,0 +1,46 @@
+name: Publish to npm
+
+# Triggered by publishing a GitHub Release. Builds, verifies, then publishes
+# @asiaostrich/codesage to npm. Requires the repo secret NPM_TOKEN_ASIAOSTRICH
+# (an npm token with publish rights to the @asiaostrich scope), and the repo to
+# be public for provenance.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm install --legacy-peer-deps
+
+      # Build + verify before publishing (native: kuzu + tree-sitter compile here).
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Determine npm dist-tag
+        id: tag
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if echo "$VERSION" | grep -qE '\-(beta|alpha|rc)\.'; then
+            echo "tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish @asiaostrich/codesage
+        run: npm publish --provenance --access public --tag ${{ steps.tag.outputs.tag }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_ASIAOSTRICH }}
