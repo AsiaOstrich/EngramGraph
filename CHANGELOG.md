@@ -4,7 +4,22 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] — unreleased
+## [0.1.1] — 2026-05-31
+
+First release via OIDC Trusted Publishing (no token). Renamed from CodeSage /
+`@asiaostrich/codesage` to the unscoped `engramgraph`.
+
+### Changed
+
+- Package renamed `@asiaostrich/codesage` → `engramgraph`; CLI `codesage` → `egr`
+  (plus `engramgraph` alias, MCP bin `egr-mcp`); env `CODESAGE_DB` → `ENGRAM_DB`
+  (legacy honored as fallback); default dir `.codesage/` → `.engram/`.
+
+### Fixed
+
+- Bin paths drop the `./` prefix to silence npm's publish auto-correct warning.
+
+## [0.1.0] — 2026-05-30
 
 First public release. A code + knowledge graph memory engine (SAGE + CodeGraph)
 on embedded Kuzu, usable as a library, REST service, MCP server, or CLI.
@@ -48,4 +63,5 @@ on embedded Kuzu, usable as a library, REST service, MCP server, or CLI.
 - Tri-lingual documentation (English / 繁體中文 / 简体中文): README, CLI, MCP,
   API, CONTRIBUTING.
 
+[0.1.1]: https://github.com/AsiaOstrich/EngramGraph/releases/tag/v0.1.1
 [0.1.0]: https://github.com/AsiaOstrich/EngramGraph/releases/tag/v0.1.0
