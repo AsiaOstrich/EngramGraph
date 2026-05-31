@@ -2,7 +2,7 @@
  * Start the EngramGraph MCP server over stdio. Shared by the `egr-mcp` bin
  * (src/mcp/stdio.ts) and the `egr mcp` CLI subcommand.
  *
- * The graph DB is resolved ONCE at startup (XSPEC-245 strategy "c"): a long-
+ * The graph DB is resolved ONCE at startup: a long-
  * lived server binds to one graph for its lifetime. To follow a `git checkout`
  * onto another branch's graph, reconnect/restart the server. The resolved path
  * is logged to stderr (stdout is reserved for the MCP protocol).

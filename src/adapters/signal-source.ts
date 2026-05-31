@@ -1,10 +1,10 @@
 /**
- * Pluggable SAGE signal-source adapter (XSPEC-237 §"Core vs Adapter 邊界" #3).
+ * Pluggable SAGE signal-source adapter.
  *
  * A signal source produces generic {@link FeedbackEvent}s that the SAGE writer
- * (Phase 4) consumes to evolve node confidence. Core stays VibeOps-agnostic:
+ * (Phase 4) consumes to evolve node confidence. Core stays host-agnostic:
  * the defaults below describe generic producers (git history, local test exit
- * codes). The VibeOps pipeline pass/fail adapter is a reference impl (Phase 6).
+ * codes). A host pipeline pass/fail adapter is a reference impl (Phase 6).
  */
 
 /** Direction/strength hint for a feedback event. */

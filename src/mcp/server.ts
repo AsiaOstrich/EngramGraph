@@ -1,5 +1,5 @@
 /**
- * EngramGraph MCP server (XSPEC-237 G5).
+ * EngramGraph MCP server.
  *
  * Exposes the graph-memory queries as MCP tools so any MCP-capable coding
  * assistant (Claude Code, Codex, Cursor, Windsurf, ...) can use EngramGraph as a
@@ -97,7 +97,7 @@ export function createMcpServer(conn: GraphConnection): McpServer {
     {
       title: "Impact analysis",
       description:
-        "Decisions in the impact chain of a spec (cross-domain: which DEC affect this XSPEC), via IMPACTS + multi-hop SUPERSEDES.",
+        "Decisions in the impact chain of a spec (cross-domain: which decisions affect this spec), via IMPACTS + multi-hop SUPERSEDES.",
       inputSchema: {
         nodeId: z.string(),
         maxHops: z.number().int().optional(),

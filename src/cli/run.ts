@@ -86,7 +86,7 @@ export interface GcResult {
 
 /**
  * `egr gc [--dry-run]` — remove per-branch graphs whose branch no longer
- * exists (XSPEC-245). Inspects `<git-common-dir>/engram/`; a `<name>.db` is an
+ * exists. Inspects `<git-common-dir>/engram/`; a `<name>.db` is an
  * orphan when no current local branch sanitizes to `<name>`. Also clears the
  * sibling `<name>.db.wal` left by Kuzu.
  */

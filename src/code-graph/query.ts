@@ -1,5 +1,5 @@
 /**
- * CodeGraph call-chain queries (XSPEC-237 D4 P2).
+ * CodeGraph call-chain queries.
  *
  * The structural questions the D4 PoC needs and the D3 sidecar exposes:
  *   - callers(X): functions that (transitively) call X — "what breaks if I

@@ -1,7 +1,7 @@
 /**
- * XSPEC/DEC knowledge parser — the AsiaOstrich *reference* knowledge adapter.
+ * spec/decision knowledge parser — a *reference* knowledge adapter.
  *
- * Each document becomes a Spec (XSPEC-NNN) or Decision (DEC-NNN / ADR-NNN)
+ * Each document becomes a Spec (SPEC-NNN) or Decision (DEC-NNN / ADR-NNN)
  * node, and every `[[ref]]` link becomes a typed cross-domain edge:
  *   - Decision → Spec link  ⇒ IMPACTS (Decision → Spec)
  *   - Spec → Decision link  ⇒ IMPACTS (Decision → Spec)  (decision impacts spec)
@@ -53,7 +53,7 @@ function stubNode(kind: KnowledgeNodeKind, id: string): GraphNode {
 }
 
 /**
- * Parse a single knowledge document, or null when no XSPEC/DEC/ADR id can be
+ * Parse a single knowledge document, or null when no spec/decision/ADR id can be
  * resolved (from front-matter `id`, the fallback id, or the body).
  */
 export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null {
@@ -86,7 +86,7 @@ export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null 
   for (const field of RELATIONSHIP_FIELDS) {
     const value = fields[field];
     if (!value) continue;
-    for (const m of value.matchAll(/\b(?:XSPEC|SPEC|DEC|ADR)-\d+/gi)) addRef(m[0]);
+    for (const m of value.matchAll(/\b(?:SPEC|DEC|ADR)-\d+/gi)) addRef(m[0]);
   }
 
   return { id, kind, title, refs, node: makeNode(kind, id, title, fields) };
@@ -96,9 +96,9 @@ export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null 
 const RELATIONSHIP_FIELDS = ["related", "impacts", "impacted_by", "supersedes", "implements"] as const;
 
 /**
- * AsiaOstrich reference knowledge source: XSPEC/DEC markdown → graph fragment.
+ * reference knowledge source: spec/decision markdown → graph fragment.
  */
-export class XspecDecKnowledgeSource {
+export class SpecDecisionKnowledgeSource {
   constructor(private readonly docs: KnowledgeDoc[]) {}
 
   async ingest(): Promise<GraphFragment> {
@@ -156,12 +156,12 @@ export interface KnowledgeIndexResult {
   supersedes: number;
 }
 
-/** Ingest XSPEC/DEC docs and write them to the graph. */
+/** Ingest spec/decision docs and write them to the graph. */
 export async function indexKnowledgeDocs(
   conn: GraphConnection,
   docs: KnowledgeDoc[],
 ): Promise<KnowledgeIndexResult> {
-  const fragment = await new XspecDecKnowledgeSource(docs).ingest();
+  const fragment = await new SpecDecisionKnowledgeSource(docs).ingest();
   await writeFragment(conn, fragment);
   return {
     specs: fragment.nodes.filter((n) => n.label === "Spec").length,

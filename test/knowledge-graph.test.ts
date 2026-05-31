@@ -10,12 +10,12 @@ import { parseKnowledgeDoc, indexKnowledgeDocs } from "../src/knowledge-graph/pa
 import { impactAnalysis } from "../src/knowledge-graph/query.js";
 import { createServer } from "../src/api/server.js";
 
-const XSPEC_205 = `---
-id: XSPEC-205
+const SPEC_205 = `---
+id: SPEC-205
 title: Agent/Role Spec SDD Variant
 status: Implemented
 ---
-# XSPEC-205
+# SPEC-205
 Builds on [[DEC-062]] harness engineering.
 `;
 
@@ -25,7 +25,7 @@ title: Harness Engineering 2026 Adoption
 date: 2026-05-07
 ---
 # DEC-062
-Impacts [[XSPEC-205]] and others.
+Impacts [[SPEC-205]] and others.
 `;
 
 const DEC_069 = `---
@@ -37,40 +37,40 @@ date: 2026-05-27
 Supersedes [[DEC-062]].
 `;
 
-const CORPUS = [{ content: XSPEC_205 }, { content: DEC_062 }, { content: DEC_069 }];
+const CORPUS = [{ content: SPEC_205 }, { content: DEC_062 }, { content: DEC_069 }];
 
 describe("KnowledgeGraph parser/linker (Phase 3)", () => {
-  it("classifies XSPEC → Spec and DEC/ADR → Decision", () => {
-    expect(classifyRef("XSPEC-205")).toEqual({ kind: "Spec", id: "XSPEC-205" });
+  it("classifies SPEC → Spec and DEC/ADR → Decision", () => {
+    expect(classifyRef("SPEC-205")).toEqual({ kind: "Spec", id: "SPEC-205" });
     expect(classifyRef("[[DEC-062]]")).toEqual({ kind: "Decision", id: "DEC-062" });
     expect(classifyRef("ADR-001 something")).toEqual({ kind: "Decision", id: "ADR-001" });
     expect(classifyRef("no id here")).toBeNull();
   });
 
   it("parses a spec doc with refs", () => {
-    const parsed = parseKnowledgeDoc({ content: XSPEC_205 });
+    const parsed = parseKnowledgeDoc({ content: SPEC_205 });
     expect(parsed?.kind).toBe("Spec");
-    expect(parsed?.id).toBe("XSPEC-205");
+    expect(parsed?.id).toBe("SPEC-205");
     expect(parsed?.title).toBe("Agent/Role Spec SDD Variant");
     expect(parsed?.refs).toEqual([{ kind: "Decision", id: "DEC-062" }]);
   });
 
   it("derives id from fallbackId when front-matter omits it", () => {
-    const parsed = parseKnowledgeDoc({ content: "# notes\nsee [[XSPEC-1]]", fallbackId: "specs/DEC-099-foo.md" });
+    const parsed = parseKnowledgeDoc({ content: "# notes\nsee [[SPEC-1]]", fallbackId: "specs/DEC-099-foo.md" });
     expect(parsed?.kind).toBe("Decision");
     expect(parsed?.id).toBe("DEC-099");
   });
 
   it("reads relationship front-matter fields (related/impacts/impacted_by/supersedes)", () => {
     const spec = parseKnowledgeDoc({
-      content: "---\nid: XSPEC-555\nimpacted_by: [DEC-555, DEC-554]\nrelated: [XSPEC-556]\n---\n# spec\n",
+      content: "---\nid: SPEC-555\nimpacted_by: [DEC-555, DEC-554]\nrelated: [SPEC-556]\n---\n# spec\n",
     });
-    expect(spec?.refs.map((r) => r.id).sort()).toEqual(["DEC-554", "DEC-555", "XSPEC-556"]);
+    expect(spec?.refs.map((r) => r.id).sort()).toEqual(["DEC-554", "DEC-555", "SPEC-556"]);
 
     const dec = parseKnowledgeDoc({
-      content: "---\nid: DEC-555\nsupersedes: [DEC-554]\nimpacts: [XSPEC-555]\n---\n# dec\n",
+      content: "---\nid: DEC-555\nsupersedes: [DEC-554]\nimpacts: [SPEC-555]\n---\n# dec\n",
     });
-    expect(dec?.refs.map((r) => r.id).sort()).toEqual(["DEC-554", "XSPEC-555"]);
+    expect(dec?.refs.map((r) => r.id).sort()).toEqual(["DEC-554", "SPEC-555"]);
   });
 });
 
@@ -102,16 +102,16 @@ describe("KnowledgeGraph ingest + AC-3 impact analysis", () => {
   });
 
   // AC-3: impact analysis on a spec returns an impact chain with ≥1 Decision.
-  it("AC-3: impactAnalysis(XSPEC-205, 3) returns the decision impact chain", async () => {
+  it("AC-3: impactAnalysis(SPEC-205, 3) returns the decision impact chain", async () => {
     await indexKnowledgeDocs(conn, CORPUS);
-    const result = await impactAnalysis(conn, "XSPEC-205", 3);
+    const result = await impactAnalysis(conn, "SPEC-205", 3);
 
-    expect(result.nodeId).toBe("XSPEC-205");
+    expect(result.nodeId).toBe("SPEC-205");
     expect(result.decisions.length).toBeGreaterThanOrEqual(1);
 
     const ids = result.decisions.map((d) => d.id).sort();
     expect(ids).toContain("DEC-062"); // direct IMPACTS
-    expect(ids).toContain("DEC-069"); // via SUPERSEDES → DEC-062 → XSPEC-205
+    expect(ids).toContain("DEC-069"); // via SUPERSEDES → DEC-062 → SPEC-205
 
     const direct = result.decisions.find((d) => d.id === "DEC-062");
     expect(direct?.via).toBe("direct");
@@ -119,10 +119,10 @@ describe("KnowledgeGraph ingest + AC-3 impact analysis", () => {
 
   it("builds edges from front-matter relationship fields (no [[ref]] needed)", async () => {
     await indexKnowledgeDocs(conn, [
-      { content: "---\nid: XSPEC-557\nimpacted_by: [DEC-557]\n---\n# spec 557\n" },
+      { content: "---\nid: SPEC-557\nimpacted_by: [DEC-557]\n---\n# spec 557\n" },
       { content: "---\nid: DEC-557\ndate: 2026-05-30\n---\n# dec 557\n" },
     ]);
-    const result = await impactAnalysis(conn, "XSPEC-557", 1);
+    const result = await impactAnalysis(conn, "SPEC-557", 1);
     expect(result.decisions.map((d) => d.id)).toContain("DEC-557");
   });
 
@@ -134,7 +134,7 @@ describe("KnowledgeGraph ingest + AC-3 impact analysis", () => {
       new Request("http://localhost/graph/impact-analysis", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ nodeId: "XSPEC-205", maxHops: 3 }),
+        body: JSON.stringify({ nodeId: "SPEC-205", maxHops: 3 }),
       }),
     );
     expect(res.status).toBe(200);

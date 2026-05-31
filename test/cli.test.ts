@@ -20,7 +20,7 @@ beforeAll(async () => {
   mkdirSync(src, { recursive: true });
   writeFileSync(join(src, "a.ts"), "import {b} from './b';\nexport function a(){ return b(); }");
   writeFileSync(join(src, "b.ts"), "export function b(){ return 1; }");
-  writeFileSync(join(src, "XSPEC-1.md"), "---\nid: XSPEC-1\nimpacted_by: [DEC-1]\n---\n# spec");
+  writeFileSync(join(src, "SPEC-1.md"), "---\nid: SPEC-1\nimpacted_by: [DEC-1]\n---\n# spec");
   writeFileSync(join(src, "DEC-1.md"), "---\nid: DEC-1\n---\n# decision");
   conn = GraphConnection.open(join(dir, "g.db"));
   await initSchema(conn);
@@ -45,7 +45,7 @@ describe("egr CLI commands", () => {
   });
 
   it("impact returns the decision chain", async () => {
-    const r = await cmdImpact(conn, "XSPEC-1", 2);
+    const r = await cmdImpact(conn, "SPEC-1", 2);
     expect(r.decisions.map((d) => d.id)).toContain("DEC-1");
   });
 

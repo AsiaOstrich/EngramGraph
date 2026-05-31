@@ -1,5 +1,5 @@
 /**
- * SAGE writer (XSPEC-237 Phase 4) — apply feedback events to node confidence.
+ * SAGE writer — apply feedback events to node confidence.
  *
  * Confidence lives in [MIN_CONFIDENCE, 1.0]. A negative signal lowers it, a
  * positive signal raises it, scaled by the event `weight` and a fixed STEP.

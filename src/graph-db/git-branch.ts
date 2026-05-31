@@ -1,5 +1,5 @@
 /**
- * Git-branch isolation helpers (XSPEC-245).
+ * Git-branch isolation helpers.
  *
  * Per-branch graph DBs live under the repo's git common dir
  * (`<git-common-dir>/engram/<sanitized-branch>.db`) so they survive

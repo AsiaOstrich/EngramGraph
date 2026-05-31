@@ -1,7 +1,7 @@
 import type { GraphConnection } from "./connection.js";
 
 /**
- * Kuzu schema for EngramGraph (XSPEC-237 §"Kuzu 核心 Schema").
+ * Kuzu schema for EngramGraph.
  *
  * NODE tables: Function, Class, Module, Spec, Decision (+ generic Doc).
  * REL  tables: CALLS, IMPORTS, DEFINES, IMPLEMENTS, IMPACTS, SUPERSEDES
@@ -79,7 +79,7 @@ export async function initSchema(conn: GraphConnection): Promise<void> {
 }
 
 /**
- * Delete all data while keeping the tables (XSPEC-245 `--clean`).
+ * Delete all data while keeping the tables.
  *
  * `DETACH DELETE` removes each node together with its relationships, so a
  * subsequent re-index rebuilds the graph from scratch — pruning nodes that no

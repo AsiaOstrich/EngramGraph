@@ -32,7 +32,7 @@ describe("sanitizeBranch", () => {
   });
 });
 
-describe("resolveDbPath priority (XSPEC-245)", () => {
+describe("resolveDbPath priority (SPEC-245)", () => {
   const saved = { db: process.env.ENGRAM_DB, iso: process.env.ENGRAM_ISOLATION };
   beforeEach(() => {
     delete process.env.ENGRAM_DB;
@@ -83,7 +83,7 @@ describe("resolveDbPath priority (XSPEC-245)", () => {
   });
 });
 
-describe("cmdGc (XSPEC-245 AC-4)", () => {
+describe("cmdGc (SPEC-245 AC-4)", () => {
   it("lists/removes orphan branch graphs, keeps live ones", () => {
     const repo = initRepo();
     try {
@@ -121,7 +121,7 @@ describe("cmdGc (XSPEC-245 AC-4)", () => {
 });
 
 // Native (kuzu + tree-sitter): single shared conn, no awaited close (teardown caveat).
-describe("clearGraph prune (XSPEC-245 AC-2)", () => {
+describe("clearGraph prune (SPEC-245 AC-2)", () => {
   let dir: string;
   let conn: GraphConnection;
 

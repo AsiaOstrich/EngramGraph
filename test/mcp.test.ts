@@ -67,11 +67,11 @@ describe("EngramGraph MCP server", () => {
   it("index_docs + impact_analysis returns the impact chain", async () => {
     await callJson(client, "index_docs", {
       docs: [
-        { content: "---\nid: XSPEC-1\nimpacted_by: [DEC-1]\n---\n# s" },
+        { content: "---\nid: SPEC-1\nimpacted_by: [DEC-1]\n---\n# s" },
         { content: "---\nid: DEC-1\n---\n# d" },
       ],
     });
-    const ia = (await callJson(client, "impact_analysis", { nodeId: "XSPEC-1", maxHops: 2 })) as {
+    const ia = (await callJson(client, "impact_analysis", { nodeId: "SPEC-1", maxHops: 2 })) as {
       decisions: Array<{ id: string }>;
     };
     expect(ia.decisions.map((d) => d.id)).toContain("DEC-1");

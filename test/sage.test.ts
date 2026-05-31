@@ -97,13 +97,13 @@ describe("SAGE reader (Phase 4)", () => {
 
   it("rankedImpact returns decisions ordered by confidence", async () => {
     await indexKnowledgeDocs(conn, [
-      { content: "---\nid: XSPEC-900\n---\n# s\nsee [[DEC-900]] [[DEC-901]]" },
-      { content: "---\nid: DEC-900\n---\n# d\nimpacts [[XSPEC-900]]" },
+      { content: "---\nid: SPEC-900\n---\n# s\nsee [[DEC-900]] [[DEC-901]]" },
+      { content: "---\nid: DEC-900\n---\n# d\nimpacts [[SPEC-900]]" },
       { content: "---\nid: DEC-901\n---\n# d\nsupersedes [[DEC-900]]" },
     ]);
     // lower DEC-900 confidence so DEC-901 ranks first
     await applyFeedback(conn, { nodeId: "DEC-900", signal: "negative", weight: 1 }, "Decision");
-    const ranked = await rankedImpact(conn, "XSPEC-900", 3);
+    const ranked = await rankedImpact(conn, "SPEC-900", 3);
     expect(ranked.length).toBeGreaterThanOrEqual(2);
     expect(ranked[0]!.confidence).toBeGreaterThanOrEqual(ranked[1]!.confidence);
   });

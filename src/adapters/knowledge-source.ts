@@ -1,12 +1,12 @@
 import type { GraphFragment, GraphNode, GraphEdge } from "../graph-db/types.js";
 
 /**
- * Pluggable knowledge-source adapter (XSPEC-237 §"Core vs Adapter 邊界" #1).
+ * Pluggable knowledge-source adapter.
  *
  * A knowledge source ingests some external corpus (markdown docs, GitHub
  * issues, RFCs, ...) and yields a provider-agnostic {@link GraphFragment}.
  *
- * The AsiaOstrich XSPEC/DEC/ADR parser is a *reference* implementation living
+ * The spec/decision/ADR parser is a *reference* implementation living
  * outside core (Phase 3); core only ships the generic markdown default below.
  */
 export interface KnowledgeSource {
@@ -30,7 +30,7 @@ interface ParsedFrontMatter {
  * Parse a leading YAML-ish front-matter block delimited by `---` lines.
  *
  * Intentionally minimal (flat `key: value` pairs) to avoid a YAML dependency;
- * this is the generic, zero-AsiaOstrich default.
+ * this is the generic default.
  */
 export function parseFrontMatter(content: string): ParsedFrontMatter {
   const normalized = content.replace(/^﻿/, "");
@@ -72,7 +72,7 @@ export function extractRefs(body: string): string[] {
  *
  * Each document becomes a `Doc` node keyed by its `id` front-matter field
  * (or `fallbackId`). Every `[[ref]]` link becomes a `REFERENCES` edge to a
- * `Doc` node with that id. No AsiaOstrich (XSPEC/DEC) semantics are baked in.
+ * `Doc` node with that id. No project-specific semantics are baked in.
  */
 export class MarkdownKnowledgeSource implements KnowledgeSource {
   constructor(private readonly docs: MarkdownDoc[]) {}

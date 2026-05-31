@@ -4,6 +4,24 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-05-31
+
+Positions EngramGraph as a standalone, general-purpose engine — docs and source
+no longer reference any specific consuming project.
+
+### Changed (BREAKING)
+
+- Renamed export `XspecDecKnowledgeSource` → `SpecDecisionKnowledgeSource`
+  (same behaviour, generic name).
+- The reference knowledge adapter recognizes `SPEC-` / `DEC-` / `ADR-` id
+  conventions; the project-specific `XSPEC-` alias is dropped (`SPEC-` covers the
+  generic spec case). Generic spec/decision/ADR classification is unchanged.
+
+### Docs
+
+- Removed project-specific narrative (and example ids) from the README, docs,
+  and source comments; the project now reads as a standalone OSS engine.
+
 ## [0.1.1] — 2026-05-31
 
 First release via OIDC Trusted Publishing (no token). Renamed from CodeSage /
@@ -63,5 +81,6 @@ on embedded Kuzu, usable as a library, REST service, MCP server, or CLI.
 - Tri-lingual documentation (English / 繁體中文 / 简体中文): README, CLI, MCP,
   API, CONTRIBUTING.
 
+[0.2.0]: https://github.com/AsiaOstrich/EngramGraph/releases/tag/v0.2.0
 [0.1.1]: https://github.com/AsiaOstrich/EngramGraph/releases/tag/v0.1.1
 [0.1.0]: https://github.com/AsiaOstrich/EngramGraph/releases/tag/v0.1.0

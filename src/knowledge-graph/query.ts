@@ -1,5 +1,5 @@
 /**
- * Cross-domain impact analysis (XSPEC-237 Phase 3, AC-3).
+ * Cross-domain impact analysis.
  *
  * Given a Spec id, return the Decisions in its impact chain: decisions that
  * IMPACTS it directly, plus decisions that reach it through a SUPERSEDES chain
@@ -19,7 +19,7 @@ function safeHops(maxHops: number): number {
  * Return the impact chain (Decisions) for a Spec.
  *
  * @param conn    open graph connection
- * @param nodeId  the Spec id, e.g. `XSPEC-205`
+ * @param nodeId  the Spec id, e.g. `SPEC-205`
  * @param maxHops max SUPERSEDES depth to traverse (clamped to 1..10; default 3)
  */
 export async function impactAnalysis(

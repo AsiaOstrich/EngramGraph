@@ -1,5 +1,5 @@
 export {
-  XspecDecKnowledgeSource,
+  SpecDecisionKnowledgeSource,
   parseKnowledgeDoc,
   indexKnowledgeDocs,
 } from "./parser.js";

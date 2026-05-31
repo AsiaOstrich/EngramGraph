@@ -6,7 +6,7 @@
  * mid-process (Kuzu's native close can deadlock with tree-sitter co-loaded) —
  * the OS reclaims it on process exit.
  *
- * Path resolution priority (XSPEC-245):
+ * Path resolution priority:
  *   1. explicit `dbPath` (programmatic; caller knows best)
  *   2. env `ENGRAM_DB` (highest user-facing knob — a full path)
  *   3. `graph` name → `<cwd>/.engram/<name>.db`
@@ -41,7 +41,7 @@ function sanitizeGraphName(name: string): string {
   return name.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80) || "graph";
 }
 
-/** Resolve the graph DB path per the XSPEC-245 priority order. */
+/** Resolve the graph DB path per the SPEC-245 priority order. */
 export function resolveDbPath(loc: string | GraphLocationOptions = {}): string {
   const o: GraphLocationOptions = typeof loc === "string" ? { dbPath: loc } : loc;
   const cwd = o.cwd ?? process.cwd();

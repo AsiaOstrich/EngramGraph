@@ -4,7 +4,7 @@ import type { GraphConnection } from "../../graph-db/connection.js";
 import { impactAnalysis } from "../../knowledge-graph/query.js";
 
 /**
- * Impact-analysis route (XSPEC-237 Phase 3, AC-3).
+ * Impact-analysis route.
  *
  * `POST /graph/impact-analysis { nodeId, maxHops? }` returns the Decisions in
  * the impact chain of a Spec. Backed by a caller-provided graph connection.

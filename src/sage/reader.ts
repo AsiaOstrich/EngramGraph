@@ -1,5 +1,5 @@
 /**
- * SAGE reader (XSPEC-237 Phase 4) — confidence-ranked, multi-hop reads.
+ * SAGE reader — confidence-ranked, multi-hop reads.
  *
  * The reader side of the evolution loop: surface high-confidence nodes first so
  * an agent's context is biased toward what feedback has reinforced.

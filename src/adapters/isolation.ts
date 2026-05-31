@@ -3,12 +3,12 @@ import { join, resolve } from "node:path";
 import { gitBranchDbPath } from "../graph-db/git-branch.js";
 
 /**
- * Pluggable isolation-model adapter (XSPEC-237 §"Core vs Adapter 邊界" #2).
+ * Pluggable isolation-model adapter.
  *
  * Decides where a given context's graph database lives on disk. Keeps any
  * multi-tenant (org/project) assumptions out of core: the default is a single
  * graph file with zero org concept; the two-tier org/project model is opt-in
- * for VibeOps enterprise (Phase 6).
+ * for multi-tenant deployments.
  */
 export interface IsolationModel {
   /** Resolve the on-disk path of the graph DB for `ctx`. */
@@ -38,7 +38,7 @@ export class SingleRepoIsolation implements IsolationModel {
 }
 
 /**
- * Opt-in two-tier physical isolation (VibeOps enterprise, Phase 6).
+ * Opt-in two-tier physical isolation (multi-tenant deployments).
  *
  * Layout: `{baseDir}/org-{orgId}/project-{projectId}/graph.db`.
  *
@@ -67,7 +67,7 @@ export class OrgProjectIsolation implements IsolationModel {
 }
 
 /**
- * Opt-in git-branch isolation (XSPEC-245).
+ * Opt-in git-branch isolation.
  *
  * Resolves the graph DB to `<git-common-dir>/engram/<sanitized-branch>.db`,
  * so each branch (often a distinct project) gets its own graph that survives

@@ -1,8 +1,8 @@
 /**
  * EngramGraph — open-source code + knowledge graph memory engine.
  *
- * Library-mode entry point. AsiaOstrich (XSPEC/DEC/org/VibeOps) is only a
- * reference consumer; nothing here depends on it.
+ * Library-mode entry point. The engine is general-purpose; project-specific
+ * conventions live in pluggable adapters, not here.
  */
 
 // --- graph-db (Kuzu abstraction) ---
@@ -47,9 +47,9 @@ export type {
   CallChainResult,
 } from "./code-graph/index.js";
 
-// --- knowledge-graph (XSPEC/DEC markdown → Spec/Decision + IMPACTS) ---
+// --- knowledge-graph (spec/decision markdown → Spec/Decision + IMPACTS) ---
 export {
-  XspecDecKnowledgeSource,
+  SpecDecisionKnowledgeSource,
   parseKnowledgeDoc,
   classifyRef,
   indexKnowledgeDocs,

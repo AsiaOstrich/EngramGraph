@@ -49,7 +49,7 @@ export interface DecisionNode {
 }
 
 /**
- * Generic document node produced by the default (non-AsiaOstrich) knowledge
+ * Generic document node produced by the default knowledge
  * source. Any front-matter markdown maps to a `Doc` node.
  */
 export interface DocNode {

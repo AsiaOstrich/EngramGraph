@@ -7,7 +7,7 @@ import { feedbackForEventType } from "../../sage/evolution-loop.js";
 const CONFIDENCE_LABELS: ReadonlySet<string> = new Set(["Function", "Spec", "Decision", "Doc"]);
 
 /**
- * SAGE ingest route (XSPEC-237 Phase 4, AC-4).
+ * SAGE ingest route.
  *
  * `POST /graph/ingest { type, functionId | nodeId, nodeLabel?, weight? }`
  * applies a feedback event to a node's confidence and returns before/after.

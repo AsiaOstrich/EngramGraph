@@ -6,7 +6,7 @@ import { callChain, type CallDirection } from "../../code-graph/query.js";
 const DIRECTIONS: ReadonlySet<string> = new Set(["callers", "callees", "both"]);
 
 /**
- * Call-chain route (XSPEC-237 D4 P2; D3 sidecar API).
+ * Call-chain route.
  *
  * `POST /graph/call-chain { symbol, direction?, depth? }` returns the callers
  * and/or callees of a function symbol.

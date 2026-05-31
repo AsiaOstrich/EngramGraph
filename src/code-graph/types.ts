@@ -1,5 +1,5 @@
 /**
- * CodeGraph module types (XSPEC-237 Phase 2).
+ * CodeGraph module types.
  *
  * The extractor turns source files into a provider-agnostic
  * {@link GraphFragment} (defined in graph-db/types); these types describe the

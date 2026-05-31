@@ -20,7 +20,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("EmbeddedClient facade (XSPEC-244)", () => {
+describe("EmbeddedClient facade (SPEC-244)", () => {
   it("indexCode then callers / callChain (cross-file)", async () => {
     const r = await client.indexCode([
       { path: "a.ts", source: "import {b} from './b';\nexport function a(){ return b(); }" },
@@ -37,10 +37,10 @@ describe("EmbeddedClient facade (XSPEC-244)", () => {
 
   it("indexDocs then impactAnalysis", async () => {
     await client.indexDocs([
-      { content: "---\nid: XSPEC-1\nimpacted_by: [DEC-1]\n---\n# spec", fallbackId: "XSPEC-1" },
+      { content: "---\nid: SPEC-1\nimpacted_by: [DEC-1]\n---\n# spec", fallbackId: "SPEC-1" },
       { content: "---\nid: DEC-1\n---\n# decision", fallbackId: "DEC-1" },
     ]);
-    const r = await client.impactAnalysis("XSPEC-1");
+    const r = await client.impactAnalysis("SPEC-1");
     expect(r.decisions.map((d) => d.id)).toContain("DEC-1");
   });
 

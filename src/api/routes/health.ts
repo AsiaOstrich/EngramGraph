@@ -7,7 +7,7 @@ import { GraphConnection } from "../../graph-db/connection.js";
 import { initSchema } from "../../graph-db/schema.js";
 
 /**
- * Health route (XSPEC-237 AC-1).
+ * Health route.
  *
  * `GET /health` performs a live readiness check: it opens a throwaway Kuzu DB,
  * runs `initSchema`, confirms a trivial query works, then tears down. Returns

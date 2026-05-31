@@ -1,5 +1,5 @@
 /**
- * SAGE evolution loop (XSPEC-237 Phase 4) — wire signal sources to the writer.
+ * SAGE evolution loop — wire signal sources to the writer.
  *
  * collect feedback (from a {@link SignalSource} or a caller-supplied batch) →
  * apply each event to node confidence → return the resulting updates. The

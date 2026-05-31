@@ -47,13 +47,13 @@ check("code-graph: cross-file callers", cc.callers.some((x) => x.name === "a"),
 
 // 3. KnowledgeGraph — front-matter + [[ref]] → impact-analysis (Phase 3 + Phase 5)
 await indexKnowledgeDocs(conn, [
-  { content: "---\nid: XSPEC-1\nimpacted_by: [DEC-1]\n---\n# s\nrefs [[DEC-2]]" },
+  { content: "---\nid: SPEC-1\nimpacted_by: [DEC-1]\n---\n# s\nrefs [[DEC-2]]" },
   { content: "---\nid: DEC-1\n---\n# d" },
   { content: "---\nid: DEC-2\n---\n# d2" },
 ]);
-const ia = await impactAnalysis(conn, "XSPEC-1", 2);
+const ia = await impactAnalysis(conn, "SPEC-1", 2);
 check("knowledge-graph: impact-analysis", ia.decisions.length === 2,
-  `XSPEC-1 → [${ia.decisions.map((d) => d.id).join(", ")}]`);
+  `SPEC-1 → [${ia.decisions.map((d) => d.id).join(", ")}]`);
 
 // 4. SAGE — confidence evolution (Phase 4)
 await applyFeedback(conn, { nodeId: "DEC-1", signal: "negative", weight: 1 }, "Decision");
@@ -66,7 +66,7 @@ const post = (path, body) => app.fetch(new Request(`http://x${path}`, {
   method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
 }));
 const health = await app.fetch(new Request("http://x/health"));
-const impact = await post("/graph/impact-analysis", { nodeId: "XSPEC-1", maxHops: 2 });
+const impact = await post("/graph/impact-analysis", { nodeId: "SPEC-1", maxHops: 2 });
 const chain = await post("/graph/call-chain", { symbol: "b", direction: "callers" });
 const ingest = await post("/graph/ingest", { type: "test_fail", nodeId: "DEC-1", nodeLabel: "Decision" });
 check("api: routes", health.status === 200 && impact.status === 200 && chain.status === 200 && ingest.status === 200,
