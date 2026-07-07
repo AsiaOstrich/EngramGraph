@@ -33,10 +33,10 @@ EngramGraph 補上圖譜這一半：
 ## 安裝
 
 ```bash
-npm install engramgraph
+npm install -g engramgraph
 ```
 
-或不安裝直接執行 CLI：
+全域安裝會把 `egr` CLI 放上 `PATH`，下方快速上手的指令才能在任何目錄執行。或不做全域安裝、直接執行 CLI：
 
 ```bash
 npx engramgraph index ./src
@@ -59,6 +59,9 @@ egr impact SPEC-001
 完整命令參考：**[docs/CLI.md](./docs/CLI.md)**。
 
 ### 內嵌使用（同行程、零 HTTP）
+
+> **函式庫用途**（下方 Embedded / REST）需要的是本地相依，而非全域 CLI——請用
+> `npm install engramgraph`（不加 `-g`）安裝，`import ... from "engramgraph"` 才解析得到。
 
 ```ts
 import { EmbeddedClient } from "engramgraph";

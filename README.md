@@ -27,10 +27,11 @@ structurally related nodes") are complementary. EngramGraph adds the graph half:
 ## Install
 
 ```bash
-npm install engramgraph
+npm install -g engramgraph
 ```
 
-Or run the CLI without installing:
+This puts the `egr` CLI on your `PATH` so the Quickstart commands below work from
+any directory. Or run the CLI without a global install:
 
 ```bash
 npx engramgraph index ./src
@@ -53,6 +54,10 @@ The graph DB lives at `ENGRAM_DB` (default `./.engram/graph.db`).
 Full command reference: **[docs/CLI.md](./docs/CLI.md)**.
 
 ### Embedded usage (in-process, zero HTTP)
+
+> **Library use** (Embedded / REST below) needs a local dependency, not the
+> global CLI — install with `npm install engramgraph` (no `-g`) so
+> `import ... from "engramgraph"` resolves.
 
 ```ts
 import { EmbeddedClient } from "engramgraph";
