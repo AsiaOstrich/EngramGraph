@@ -14,7 +14,7 @@ import { gitBranchEngramDir, listBranches, sanitizeBranch } from "../graph-db/gi
 import { indexProject, callers, callees, type CallNode } from "../code-graph/index.js";
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType, topByConfidence, type ConfidenceLabel } from "../sage/index.js";
-import { godNodes, communities, type GodNode, type CommunityMember } from "../structural-memory/index.js";
+import { godNodes, communities, related, type GodNode, type CommunityMember, type RelatedNode } from "../structural-memory/index.js";
 import { walkFiles } from "./walk.js";
 
 const CODE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"] as const;
@@ -84,6 +84,11 @@ export function cmdGodNodes(conn: GraphConnection, limit = 10): Promise<GodNode[
 /** `egr communities` — Function-call clusters via Louvain (DEC-027 L3). */
 export function cmdCommunities(conn: GraphConnection): Promise<CommunityMember[]> {
   return communities(conn);
+}
+
+/** `egr related <node-id> [--depth N] [--limit N]` — seed-anchored ranking (DEC-028 L4a). */
+export function cmdRelated(conn: GraphConnection, seedId: string, depth = 2, limit = 10): Promise<RelatedNode[]> {
+  return related(conn, seedId, depth, limit);
 }
 
 export interface GcResult {

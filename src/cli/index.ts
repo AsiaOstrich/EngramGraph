@@ -14,7 +14,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdGc, type GcResult } from "./run.js";
+import { cmdIndex, cmdCallers, cmdCallees, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, type GcResult } from "./run.js";
 import type { ConfidenceLabel } from "../sage/index.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
@@ -33,6 +33,8 @@ Commands:
   top <label> [--limit N]         Highest-confidence nodes (label: Function|Spec|Decision|Doc)
   god-nodes [--limit N]           Highest-importance nodes across code + knowledge (PageRank)
   communities                     Function-call clusters (Louvain over CALLS edges)
+  related <node-id> [--depth N] [--limit N]
+                                  Nodes important *around* a seed (seeded PageRank approx.)
   gc [--dry-run]                  Remove per-branch graphs for deleted branches
   serve [--port 3000]             Run the REST server (routes under /graph/*)
   mcp                             Run the MCP server over stdio (for coding assistants)
@@ -197,6 +199,12 @@ async function main(): Promise<void> {
     case "communities": {
       const rows = await cmdCommunities(conn);
       out(rows, values.json, (d) => `communities:\n${fmtNodes(d as Array<{ name: string; communityId: number }>)}`);
+      break;
+    }
+    case "related": {
+      if (!a1) throw new Error("related requires a <node-id>");
+      const rows = await cmdRelated(conn, a1, num(values.depth, 2), num(values.limit, 10));
+      out(rows, values.json, (d) => `related(${a1}):\n${fmtNodes(d as Array<{ name: string; label: string; rank: number }>)}`);
       break;
     }
     default:
