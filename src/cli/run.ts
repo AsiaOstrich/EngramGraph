@@ -14,6 +14,7 @@ import { gitBranchEngramDir, listBranches, sanitizeBranch } from "../graph-db/gi
 import { indexProject, callers, callees, type CallNode } from "../code-graph/index.js";
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType, topByConfidence, type ConfidenceLabel } from "../sage/index.js";
+import { godNodes, communities, type GodNode, type CommunityMember } from "../structural-memory/index.js";
 import { walkFiles } from "./walk.js";
 
 const CODE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"] as const;
@@ -73,6 +74,16 @@ export function cmdFeedback(
 /** `egr top <label> [--limit N]`. */
 export function cmdTop(conn: GraphConnection, label: ConfidenceLabel, limit = 10) {
   return topByConfidence(conn, label, limit);
+}
+
+/** `egr god-nodes [--limit N]` — highest-importance nodes across code + knowledge (DEC-027 L3). */
+export function cmdGodNodes(conn: GraphConnection, limit = 10): Promise<GodNode[]> {
+  return godNodes(conn, limit);
+}
+
+/** `egr communities` — Function-call clusters via Louvain (DEC-027 L3). */
+export function cmdCommunities(conn: GraphConnection): Promise<CommunityMember[]> {
+  return communities(conn);
 }
 
 export interface GcResult {

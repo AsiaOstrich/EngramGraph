@@ -14,7 +14,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImpact, cmdFeedback, cmdTop, cmdGc, type GcResult } from "./run.js";
+import { cmdIndex, cmdCallers, cmdCallees, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdGc, type GcResult } from "./run.js";
 import type { ConfidenceLabel } from "../sage/index.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
@@ -31,6 +31,8 @@ Commands:
   feedback <type> <node-id> [--label L]
                                   Evolve confidence (type: test_fail|test_pass|human_fix)
   top <label> [--limit N]         Highest-confidence nodes (label: Function|Spec|Decision|Doc)
+  god-nodes [--limit N]           Highest-importance nodes across code + knowledge (PageRank)
+  communities                     Function-call clusters (Louvain over CALLS edges)
   gc [--dry-run]                  Remove per-branch graphs for deleted branches
   serve [--port 3000]             Run the REST server (routes under /graph/*)
   mcp                             Run the MCP server over stdio (for coding assistants)
@@ -52,10 +54,21 @@ function out(data: unknown, json: boolean | undefined, human: (d: unknown) => st
   process.stdout.write((json ? JSON.stringify(data, null, 2) : human(data)) + "\n");
 }
 
-const fmtNodes = (rows: Array<{ name?: string; id?: string; file?: string; confidence?: number }>): string =>
+const fmtNodes = (
+  rows: Array<{ name?: string; id?: string; file?: string; label?: string; confidence?: number; rank?: number; communityId?: number }>,
+): string =>
   rows.length
     ? rows
-        .map((r) => `  ${r.name ?? r.id}${r.file ? ` (${r.file})` : ""}${r.confidence != null ? ` [${r.confidence}]` : ""}`)
+        .map((r) => {
+          const extras = [
+            r.file,
+            r.label,
+            r.confidence != null ? `confidence ${r.confidence}` : undefined,
+            r.rank != null ? `rank ${r.rank.toFixed(4)}` : undefined,
+            r.communityId != null ? `community ${r.communityId}` : undefined,
+          ].filter(Boolean);
+          return `  ${r.name ?? r.id}${extras.length ? ` (${extras.join(", ")})` : ""}`;
+        })
         .join("\n")
     : "  (none)";
 
@@ -174,6 +187,16 @@ async function main(): Promise<void> {
       if (!a1) throw new Error("top requires a <label> (Function|Spec|Decision|Doc)");
       const rows = await cmdTop(conn, a1 as ConfidenceLabel, num(values.limit, 10));
       out(rows, values.json, (d) => `top ${a1}:\n${fmtNodes(d as Array<{ name: string; confidence: number }>)}`);
+      break;
+    }
+    case "god-nodes": {
+      const rows = await cmdGodNodes(conn, num(values.limit, 10));
+      out(rows, values.json, (d) => `god-nodes:\n${fmtNodes(d as Array<{ name: string; label: string; rank: number }>)}`);
+      break;
+    }
+    case "communities": {
+      const rows = await cmdCommunities(conn);
+      out(rows, values.json, (d) => `communities:\n${fmtNodes(d as Array<{ name: string; communityId: number }>)}`);
       break;
     }
     default:
