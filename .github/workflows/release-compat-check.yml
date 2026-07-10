@@ -1,0 +1,98 @@
+name: Cross-Platform Compatibility Check
+
+# Release-time gate — NOT a per-PR check (keeps day-to-day CI cost/time
+# unchanged). Verifies a published npm version actually installs and loads
+# across the real target platform matrix: Windows/Linux/macOS x ARM64/AMD64,
+# plus a Linux glibc-version check. Implements XSPEC-328 R2/R3/R5.
+#
+# Background: on 2026-07-10, engramgraph@0.3.0's dependency ryugraph@25.9.1
+# was found broken on Linux ARM64 (wrong binary shipped, see
+# predictable-labs/ryugraph#48) and on Linux x64 with glibc < 2.38 (e.g.
+# Debian 12 bookworm, Ubuntu 22.04 LTS) — neither was caught by the existing
+# publish.yml CI, which only runs on GitHub's ubuntu-latest (x64, glibc
+# 2.39+, i.e. squarely in the "safe zone" for both bugs).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version to test (default: latest published on npm)'
+        required: false
+        default: ''
+
+jobs:
+  resolve-version:
+    name: Resolve version under test
+    runs-on: ubuntu-latest
+    outputs:
+      package-spec: ${{ steps.resolve.outputs.package-spec }}
+    steps:
+      - name: Determine target version and wait for npm registry propagation
+        id: resolve
+        shell: bash
+        run: |
+          set -e
+          INPUT_VERSION="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            SPEC="engramgraph@${INPUT_VERSION}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            # Strip a leading "v" from the git tag (v0.4.0 -> 0.4.0)
+            TAG="${{ github.event.release.tag_name }}"
+            SPEC="engramgraph@${TAG#v}"
+          else
+            SPEC="engramgraph@latest"
+          fi
+
+          echo "Waiting for $SPEC to be resolvable on the npm registry..."
+          for i in $(seq 1 10); do
+            if npm view "$SPEC" version >/dev/null 2>&1; then
+              echo "Found $SPEC on npm registry."
+              echo "package-spec=$SPEC" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "  attempt $i/10: not yet available, waiting 15s..."
+            sleep 15
+          done
+          echo "::error::$SPEC never became available on the npm registry after 10 attempts (~2.5min)."
+          exit 1
+
+  platform-matrix:
+    name: ${{ matrix.label }}
+    needs: resolve-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+          - os: ubuntu-24.04-arm
+            label: linux-arm64
+          - os: windows-latest
+            label: windows-x64
+          - os: macos-latest
+            label: macos-arm64
+          - os: macos-13
+            label: macos-x64-intel
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: ./.github/actions/fresh-install-smoke-test
+        with:
+          package-spec: ${{ needs.resolve-version.outputs.package-spec }}
+          smoke-command: 'npx egr --version'
+
+  glibc-matrix:
+    name: linux-x64-glibc-compat
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/glibc-compat-check
+        with:
+          package-spec: ${{ needs.resolve-version.outputs.package-spec }}
+          smoke-command: 'npx egr --version'

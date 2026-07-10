@@ -1,0 +1,46 @@
+name: 'glibc Compatibility Check'
+description: >
+  Runs a fresh-install smoke test inside multiple Linux Docker base images
+  spanning old and new glibc versions. GitHub-hosted Linux runners always
+  ship a recent glibc, so this is the only way to catch a prebuilt native
+  binary that requires a newer glibc than common LTS distros provide (e.g.
+  Debian 12 bookworm / Ubuntu 22.04 LTS, glibc ~2.36, vs. a binary requiring
+  glibc >= 2.38). Implements XSPEC-328 R3. Linux-only — no-op on other OSes.
+
+inputs:
+  package-spec:
+    description: 'npm install argument, e.g. "engramgraph@0.3.0" or "engramgraph@latest"'
+    required: true
+  smoke-command:
+    description: 'Shell command to run after install to verify the package actually works'
+    required: true
+  images:
+    description: >
+      Comma-separated Docker images to test against. Default pairs an older
+      glibc baseline (Debian 12 bookworm, the official node:24 default) with
+      a newer one (Debian 13 trixie) so a glibc-version regression shows up
+      as a diff between the two rather than a single opaque failure.
+    default: 'node:24,node:24-trixie'
+
+runs:
+  using: composite
+  steps:
+    - name: Test across glibc baselines
+      shell: bash
+      run: |
+        set -e
+        IFS=',' read -ra IMAGES <<< "${{ inputs.images }}"
+        for img in "${IMAGES[@]}"; do
+          echo "::group::glibc compat — $img"
+          docker run --rm "$img" bash -c '
+            set -e
+            mkdir /app && cd /app
+            npm init -y >/dev/null
+            npm install '"${{ inputs.package-spec }}"'
+            npm approve-scripts --all || true
+            npm rebuild || true
+            echo "os: $(uname -m), glibc: $(ldd --version | head -1)"
+            '"${{ inputs.smoke-command }}"'
+          '
+          echo "::endgroup::"
+        done

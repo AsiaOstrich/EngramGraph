@@ -1,0 +1,41 @@
+name: 'Fresh Install Smoke Test'
+description: >
+  Installs an npm package into a brand-new directory (never reusing this
+  repo's own node_modules) and runs a smoke command against it. Catches
+  failures that only manifest on a genuinely fresh install — e.g. native
+  binaries selected by an install script for the wrong platform/arch, or
+  npm's script-approval gate silently skipping a native dependency's
+  install step. Implements XSPEC-328 R4.
+
+inputs:
+  package-spec:
+    description: 'npm install argument, e.g. "engramgraph@0.3.0" or "engramgraph@latest"'
+    required: true
+  smoke-command:
+    description: 'Shell command to run after install to verify the package actually works'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Fresh install + smoke test
+      shell: bash
+      run: |
+        set -e
+        WORKDIR="${{ runner.temp }}/fresh-install-smoke-test"
+        rm -rf "$WORKDIR"
+        mkdir -p "$WORKDIR"
+        cd "$WORKDIR"
+
+        npm init -y >/dev/null
+        npm install ${{ inputs.package-spec }}
+
+        # npm >= 11 gates native install scripts behind an approval list by
+        # default (see XSPEC-328 motivation) — approve everything pending,
+        # then force a rebuild so approved scripts actually run. On npm < 11
+        # `approve-scripts` doesn't exist; ignore the failure.
+        npm approve-scripts --all || true
+        npm rebuild || true
+
+        echo "--- running smoke command: ${{ inputs.smoke-command }} ---"
+        ${{ inputs.smoke-command }}

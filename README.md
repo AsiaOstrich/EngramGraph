@@ -37,6 +37,48 @@ any directory. Or run the CLI without a global install:
 npx engramgraph index ./src
 ```
 
+### Platform support matrix
+
+EngramGraph depends on [`ryugraph`](https://github.com/predictable-labs/ryugraph) for
+its embedded graph database, which ships prebuilt native binaries per platform. As of
+`ryugraph@25.9.1`, verified support is:
+
+| Platform | Status | Notes |
+|---|---|---|
+| macOS ARM64 (Apple Silicon) | ✅ Works | |
+| macOS x64 (Intel) | ❓ Untested | No known issue, but not yet verified on real hardware |
+| Linux x64, glibc ≥ 2.38 (Ubuntu 24.04+, Debian 13+) | ✅ Works | |
+| Linux x64, glibc < 2.38 (Ubuntu 22.04 LTS, Debian 12) | ❌ Broken | Upstream `ryugraph` binary requires a newer glibc than these still-common LTS distros ship |
+| Linux ARM64 (any glibc) | ❌ Broken | Upstream ships the x86-64 binary under the arm64 filename — tracked in [predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48) |
+| Windows x64 | ❓ Untested | Prebuilt binary format looks correct (valid PE32+ DLL) but not yet execution-tested |
+
+This affects **Docker Desktop on Apple Silicon Macs** (defaults to `linux/arm64`) and
+**AWS Graviton / other ARM64 Linux hosts** — if `egr` fails there, it's very likely
+[#48](https://github.com/predictable-labs/ryugraph/issues/48), not a problem with your
+setup. Forcing `--platform linux/amd64` on affected Docker hosts works around it (at
+the cost of running under emulation on ARM64 hardware) until upstream is fixed.
+
+Also note: npm ≥ 11 gates native install scripts (including `ryugraph`'s) behind an
+approval prompt by default. If `npm install` prints `npm warn allow-scripts`, run
+`npm approve-scripts --all` and reinstall — otherwise the native binary is never
+copied into place.
+
+### Troubleshooting: misleading native-binary errors
+
+Native binary loading failures on Linux surface through Node's `dlopen`, whose error
+text doesn't always describe the real cause:
+
+| Error you see | What it usually means |
+|---|---|
+| `ryujs.node: cannot open shared object file: No such file or directory` (file *does* exist per `ls`) | Wrong CPU architecture — the binary at that path is for a different platform/arch than the one you're running on |
+| `.../libc.so.6: version 'GLIBC_2.38' not found` | Your distro's glibc is older than what the prebuilt binary requires (see matrix above) |
+| `npm warn allow-scripts ... not yet covered by allowScripts` | npm ≥ 11 blocked the install script that copies the native binary — run `npm approve-scripts --all` then reinstall/rebuild |
+
+If you hit something not covered here, please check
+[predictable-labs/ryugraph's issues](https://github.com/predictable-labs/ryugraph/issues)
+before assuming it's an EngramGraph bug — most native-loading failures originate in the
+`ryugraph` dependency, not this package.
+
 ## Quickstart
 
 ```bash
