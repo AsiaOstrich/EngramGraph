@@ -4,6 +4,56 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-07-10
+
+### Added
+
+- `egr god-nodes [--limit N]` — importance ranking via ryugraph's native
+  PageRank extension (DEC-027, structural-memory L3; concept borrowed from
+  [graphify](https://github.com/safishamsi/graphify)'s `god_nodes`, but
+  computed directly against ryugraph's built-in `algo` extension instead of
+  a ported implementation).
+- `egr communities` — clustering via ryugraph's native Louvain extension
+  (DEC-027, L3). Scoped to `Function`/`CALLS` only — ryugraph's Louvain
+  rejects heterogeneous projected graphs at runtime ("only supports
+  operations on one node table"); PageRank has no such restriction.
+- `egr related <node-id> [--depth N] [--limit N]` — seeded-neighborhood
+  importance ranking (DEC-028, structural-memory L4a): a depth-bounded BFS
+  around the seed id, projected to a filtered subgraph, ranked by PageRank.
+  Approximates HippoRAG-style personalized PageRank ("what matters near
+  this node") without a hand-written iterative algorithm, and correctly
+  crosses node types (e.g. `Function` → `Spec` via `IMPLEMENTS`). Does not
+  cover turning a free-text query into seed ids (HippoRAG's OpenIE +
+  fact-reranking layer) — out of scope without a semantic/embedding layer.
+
+### Fixed
+
+- Native-addon crash on teardown: opening and closing more than ~6
+  cumulative `GraphConnection`s in a single process (each loading the
+  ryugraph `algo` extension) could segfault on worker exit, even though
+  every individual test assertion passed. The test suite now shares one
+  connection per file/describe block instead of one per test.
+- Local install docs: `npm install engramgraph` (non-global) does not put
+  `egr` on `PATH`. README now recommends `npm install -g engramgraph` for
+  CLI use, with a separate note for library (`import ... from
+  "engramgraph"`) use cases.
+
+### Known Limitations
+
+- **Linux ARM64**: `ryugraph@25.9.1` ships an incorrect native binary for
+  this platform (byte-identical to the x86-64 build) — tracked upstream at
+  [predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48).
+  Affects Docker Desktop on Apple Silicon Macs (defaults to `linux/arm64`),
+  AWS Graviton, and other ARM64 Linux hosts.
+- **Linux x64 with glibc < 2.38** (e.g. Ubuntu 22.04 LTS, Debian 12): the
+  `ryugraph@25.9.1` native binary requires a newer glibc than these
+  still-common LTS distros ship.
+- See the README's [Platform support matrix](README.md#platform-support-matrix)
+  for the full compatibility table, verification method, and workarounds.
+  Both limitations pre-date this release (present since `ryugraph@25.9.1`
+  was introduced in 0.3.0) — this release does not introduce or worsen
+  either one.
+
 ## [0.3.0] — 2026-06-12
 
 ### Security
@@ -103,6 +153,7 @@ on embedded Kuzu, usable as a library, REST service, MCP server, or CLI.
 - Tri-lingual documentation (English / 繁體中文 / 简体中文): README, CLI, MCP,
   API, CONTRIBUTING.
 
+[0.4.0]: https://github.com/AsiaOstrich/EngramGraph/releases/tag/v0.4.0
 [0.2.0]: https://github.com/AsiaOstrich/EngramGraph/releases/tag/v0.2.0
 [0.1.1]: https://github.com/AsiaOstrich/EngramGraph/releases/tag/v0.1.1
 [0.1.0]: https://github.com/AsiaOstrich/EngramGraph/releases/tag/v0.1.0
