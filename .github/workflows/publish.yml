@@ -46,6 +46,36 @@ jobs:
       # extra step and no silent trust extended to future dependencies.
       - run: npm install --legacy-peer-deps
 
+      # ryugraph's `god-nodes`/`communities`/`related` commands need its ALGO
+      # extension (PageRank/Louvain), which isn't bundled — ryugraph normally
+      # downloads it on first use from extension.ryugraph.io. That host is
+      # unreliable (confirmed 2026-07-11: unreachable from this exact runner,
+      # TCP connect just hangs — not a DNS issue). Without a fallback, tests
+      # that trigger the download hang for 10+ minutes before finally timing
+      # out (see structural-memory.test.ts's L3 tests on 2026-07-10 run
+      # 29105565151). Building the extension from the source ryugraph already
+      # ships (node_modules/ryugraph/ryu-source) and dropping it straight into
+      # the cache path ryugraph checks first means `INSTALL ALGO` never has to
+      # touch the network at all — verified locally with the download host
+      # blackholed via /etc/hosts (full 81/81 tests, ~7s, vs. 617s+ hanging
+      # before this step existed).
+      #
+      # `EXTENSION_LIST=algo` + the Makefile's `extension-release` target
+      # (-DBUILD_RYU=FALSE) builds only this extension, not the whole engine.
+      # Cache path/version/platform-string format taken from ryujs.node's own
+      # embedded path template and cross-checked against predictable-labs/
+      # ryugraph#48's real-world report (25.9.0 is the extension catalog
+      # version — distinct from, and older than, the ryugraph@25.9.1 npm
+      # package version).
+      - name: Build ryugraph ALGO extension from source (bypass unreliable download host)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake
+          cd node_modules/ryugraph/ryu-source
+          make extension-release EXTENSION_LIST=algo NUM_THREADS="$(nproc)"
+          mkdir -p "$HOME/.ryu/extension/25.9.0/linux_amd64/algo"
+          cp extension/algo/build/libalgo.ryu_extension "$HOME/.ryu/extension/25.9.0/linux_amd64/algo/"
+
       # Build + verify before publishing (native: kuzu + tree-sitter compile here).
       - run: npm run build
       - run: npm run typecheck
