@@ -28,11 +28,16 @@ runs:
     - name: Test across glibc baselines
       shell: bash
       run: |
-        set -e
+        # No top-level `set -e`: a failure in one image must not abort the
+        # loop before the remaining images are tested (bit us in practice —
+        # see XSPEC-328, this exact bug shipped in the first version and
+        # silently skipped the "known good" glibc-2.41 control image after
+        # the glibc-2.36 image failed).
         IFS=',' read -ra IMAGES <<< "${{ inputs.images }}"
+        FAILED_IMAGES=()
         for img in "${IMAGES[@]}"; do
           echo "::group::glibc compat — $img"
-          docker run --rm "$img" bash -c '
+          if docker run --rm "$img" bash -c '
             set -e
             mkdir /app && cd /app
             npm init -y >/dev/null
@@ -41,6 +46,16 @@ runs:
             npm rebuild || true
             echo "os: $(uname -m), glibc: $(ldd --version | head -1)"
             '"${{ inputs.smoke-command }}"'
-          '
+          '; then
+            echo "PASS: $img"
+          else
+            echo "FAIL: $img"
+            FAILED_IMAGES+=("$img")
+          fi
           echo "::endgroup::"
         done
+
+        if [ ${#FAILED_IMAGES[@]} -gt 0 ]; then
+          echo "::error::glibc compat check failed on: ${FAILED_IMAGES[*]}"
+          exit 1
+        fi
