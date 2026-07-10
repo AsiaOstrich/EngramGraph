@@ -45,12 +45,12 @@ its embedded graph database, which ships prebuilt native binaries per platform. 
 
 | Platform | Status | Notes |
 |---|---|---|
-| macOS ARM64 (Apple Silicon) | ✅ Works | |
-| macOS x64 (Intel) | ❓ Untested | No known issue, but not yet verified on real hardware |
-| Linux x64, glibc ≥ 2.38 (Ubuntu 24.04+, Debian 13+) | ✅ Works | |
-| Linux x64, glibc < 2.38 (Ubuntu 22.04 LTS, Debian 12) | ❌ Broken | Upstream `ryugraph` binary requires a newer glibc than these still-common LTS distros ship |
-| Linux ARM64 (any glibc) | ❌ Broken | Upstream ships the x86-64 binary under the arm64 filename — tracked in [predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48) |
-| Windows x64 | ❓ Untested | Prebuilt binary format looks correct (valid PE32+ DLL) but not yet execution-tested |
+| macOS ARM64 (Apple Silicon) | ✅ Works | Verified via [Cross-Platform Compatibility Check](.github/workflows/release-compat-check.yml) (`macos-latest`) |
+| macOS x64 (Intel) | ❓ Untested | CI job pending — GitHub's Intel Mac (`macos-13`) hosted runners currently have long queue times |
+| Linux x64, glibc ≥ 2.38 (Ubuntu 24.04+, Debian 13+) | ✅ Works | Verified via CI glibc-compat matrix (`node:24-trixie`, glibc 2.41) |
+| Linux x64, glibc < 2.38 (Ubuntu 22.04 LTS, Debian 12) | ❌ Broken | Upstream `ryugraph` binary requires a newer glibc than these still-common LTS distros ship. Verified via CI glibc-compat matrix (`node:24`, glibc 2.36) |
+| Linux ARM64 (any glibc) | ❌ Broken | Upstream ships the x86-64 binary under the arm64 filename — tracked in [predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48). Verified via CI (`ubuntu-24.04-arm`) |
+| Windows x64 | ✅ Works | Verified via CI (`windows-latest`) |
 
 This affects **Docker Desktop on Apple Silicon Macs** (defaults to `linux/arm64`) and
 **AWS Graviton / other ARM64 Linux hosts** — if `egr` fails there, it's very likely
