@@ -36,6 +36,19 @@ jobs:
 
       - run: npm install --legacy-peer-deps
 
+      # npm >= 11 gates native install scripts behind an approval list by
+      # default — `npm install` alone silently skips them, leaving native
+      # bindings / generated type declarations missing (this broke this
+      # exact workflow on 2026-07-10 once `npm install -g npm@latest` above
+      # started pulling npm 11.x: DTS build failed with "Cannot find module
+      # 'ryugraph'"). Approve only this package's known direct native
+      # dependencies by name (not `--all`, to avoid silently trusting any
+      # future dependency's install script in this OIDC-publish-privileged
+      # job) and rebuild to force them to actually run; `|| true` keeps
+      # this a no-op on older npm that lacks the subcommand entirely.
+      - run: npm approve-scripts ryugraph tree-sitter tree-sitter-javascript tree-sitter-typescript || true
+      - run: npm rebuild || true
+
       # Build + verify before publishing (native: kuzu + tree-sitter compile here).
       - run: npm run build
       - run: npm run typecheck
