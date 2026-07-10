@@ -46,7 +46,7 @@ its embedded graph database, which ships prebuilt native binaries per platform. 
 | Platform | Status | Notes |
 |---|---|---|
 | macOS ARM64 (Apple Silicon) | ✅ Works | Verified via [Cross-Platform Compatibility Check](.github/workflows/release-compat-check.yml) (`macos-latest`) |
-| macOS x64 (Intel) | ❓ Untested | CI job pending — GitHub's Intel Mac (`macos-13`) hosted runners currently have long queue times |
+| macOS x64 (Intel) | ⚠️ Not CI-verified (known limitation, see below) | No known issue — `ryujs-darwin-x64.node` is a distinct, legitimately-built binary (unlike the Linux ARM64 case) — but not exercised by an automated release gate |
 | Linux x64, glibc ≥ 2.38 (Ubuntu 24.04+, Debian 13+) | ✅ Works | Verified via CI glibc-compat matrix (`node:24-trixie`, glibc 2.41) |
 | Linux x64, glibc < 2.38 (Ubuntu 22.04 LTS, Debian 12) | ❌ Broken | Upstream `ryugraph` binary requires a newer glibc than these still-common LTS distros ship. Verified via CI glibc-compat matrix (`node:24`, glibc 2.36) |
 | Linux ARM64 (any glibc) | ❌ Broken | Upstream ships the x86-64 binary under the arm64 filename — tracked in [predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48). Verified via CI (`ubuntu-24.04-arm`) |
@@ -62,6 +62,29 @@ Also note: npm ≥ 11 gates native install scripts (including `ryugraph`'s) behi
 approval prompt by default. If `npm install` prints `npm warn allow-scripts`, run
 `npm approve-scripts --all` and reinstall — otherwise the native binary is never
 copied into place.
+
+**Why macOS Intel isn't in the automated release gate.** This isn't an oversight —
+it's a deliberate call. Two independent facts point the same direction:
+
+- **GitHub's own Intel Mac (`macos-13`) hosted runners currently have severe queue
+  capacity constraints.** A real test run on 2026-07-10 sat in `queued` for ~50 minutes
+  without ever starting. GitHub Actions' `timeout-minutes` cannot bound this — it only
+  starts counting once a job actually begins executing, not while queued — so there is
+  no reliable way to cap how long a release could be stuck waiting on this runner.
+- **Apple's own support lifecycle is winding down.** macOS 26 "Tahoe" is the last major
+  release with Intel Mac support; macOS 27 "Golden Gate" (expected September 2026) drops
+  Intel entirely, with only security-only updates continuing on macOS 26 until roughly
+  2029. Intel Mac is a sunsetting platform on both Apple's and GitHub's side.
+
+Given that, blocking every release on a runner that may never become available — for a
+platform winding down anyway — didn't make sense. Instead, `macos-x64-intel-manual` in
+[`release-compat-check.yml`](.github/workflows/release-compat-check.yml) runs Intel Mac
+verification as a **best-effort, non-blocking** job: triggerable manually via
+`workflow_dispatch` whenever someone wants to check it, `continue-on-error: true` so it
+never fails a release, and excluded from the `release: published` trigger so a real
+release is never left waiting on it. If you specifically need Intel Mac support
+confirmed, trigger that job manually and check its result — but the release process
+itself doesn't depend on it.
 
 ### Troubleshooting: misleading native-binary errors
 

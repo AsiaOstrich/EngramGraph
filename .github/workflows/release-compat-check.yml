@@ -58,6 +58,16 @@ jobs:
           echo "::error::$SPEC never became available on the npm registry after 10 attempts (~2.5min)."
           exit 1
 
+  # NOTE: intentionally does NOT include macos-13 (Intel Mac). GitHub's
+  # hosted Intel Mac runners currently have severe queue-capacity issues —
+  # a real run on 2026-07-10 sat in "queued" for ~50 minutes with no start —
+  # and `timeout-minutes` cannot bound queue wait (it only starts counting
+  # once a job begins executing), so there is no way to cap how long this
+  # would block a release. Apple's own support lifecycle backs this up:
+  # macOS 26 Tahoe is the last release with Intel support, macOS 27 (Sept
+  # 2026) drops it entirely, and only security-only updates continue until
+  # ~2029 — Intel Mac is a sunsetting platform on both Apple's and GitHub's
+  # side. See the best-effort `macos-x64-intel-manual` job below instead.
   platform-matrix:
     name: ${{ matrix.label }}
     needs: resolve-version
@@ -73,8 +83,6 @@ jobs:
             label: windows-x64
           - os: macos-latest
             label: macos-arm64
-          - os: macos-13
-            label: macos-x64-intel
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +101,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/glibc-compat-check
+        with:
+          package-spec: ${{ needs.resolve-version.outputs.package-spec }}
+          smoke-command: 'npx egr --version'
+
+  # Best-effort only — never blocks a release. Only runs when explicitly
+  # requested via workflow_dispatch (not on `release: published`), so a
+  # release is never left waiting on an Intel Mac runner that may never
+  # become available. Run manually if you specifically want to check
+  # Intel Mac compatibility.
+  macos-x64-intel-manual:
+    name: macos-x64-intel (manual, best-effort)
+    if: github.event_name == 'workflow_dispatch'
+    needs: resolve-version
+    runs-on: macos-13
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: ./.github/actions/fresh-install-smoke-test
         with:
           package-spec: ${{ needs.resolve-version.outputs.package-spec }}
           smoke-command: 'npx egr --version'
