@@ -4,6 +4,27 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-07-12
+
+### Fixed
+
+- `callers()`/CALLS resolution missed a function passed **by reference** as
+  a direct call argument (e.g. Fastify's `app.register(pluginFn, opts)`) —
+  only literal `fn()` call-expression callees were captured. Found by
+  comparing egr against an external tool (colbymchenry/codegraph) on a real
+  codebase: `callers` returned nothing for a route-registration function
+  invoked this way, across dozens of same-shaped files. The extractor now
+  also records a CALLS edge when a known function's bare identifier appears
+  as a direct (non-nested) argument in a call's argument list; an
+  identifier buried inside an object/array literal argument (e.g.
+  `foo({ handler: bar })`) is deliberately still not captured — materially
+  weaker signal, out of scope for this fix. No schema change (reuses the
+  existing `CALLS` edge; no new property, no migration). See dev-platform
+  `cross-project/decisions/DEC-081-codegraph-evaluation.md` v1.1.0,
+  `DEC-095-three-way-code-graph-tool-comparison.md`, and
+  `cross-project/improvement-backlog.md` L11 for the comparison that found
+  this and the design tradeoffs considered.
+
 ## [0.4.0] — 2026-07-10
 
 ### Added

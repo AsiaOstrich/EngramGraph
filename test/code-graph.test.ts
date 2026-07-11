@@ -88,6 +88,67 @@ describe("CodeGraph extractor (Phase 2)", () => {
     expect(calls[0]?.from).toBe("x.js#a");
     expect(calls[0]?.to).toBe("x.js#b");
   });
+
+  // Regression for a real gap found comparing egr against an external tool
+  // (colbymchenry/codegraph) on vibeops/src: `callers()` was blind to a
+  // function passed *by reference* to a higher-order call (Fastify's
+  // `app.register(pluginFn, opts)`), because only `fn()` call-expression
+  // callees were captured — never bare identifiers appearing as arguments.
+  // See dev-platform DEC-081 v1.1.0 / DEC-095 / improvement-backlog.md L11.
+  it("captures a CALLS edge when a function is passed by reference as a call argument", () => {
+    const src = `
+      function alertRulesRoutes(app) { return app; }
+      async function createApp() {
+        await app.register(alertRulesRoutes, { prefix: "/api/alerts" });
+      }
+    `;
+    const { edges } = extractCodeGraph(src, { filePath: "server.ts" });
+    const callsFromCreateApp = edges
+      .filter((e) => e.label === "CALLS" && e.from === "server.ts#createApp")
+      .map((e) => e.to);
+    expect(callsFromCreateApp).toContain("server.ts#alertRulesRoutes");
+  });
+
+  it("does not capture an identifier nested inside an object/array literal argument", () => {
+    // `bar` here is only reachable through the `handler` property — a
+    // materially weaker signal than a direct argument (see module doc
+    // comment on scope). Deliberately not resolved, to keep false-positive
+    // risk bounded to the concrete case that motivated this feature.
+    const src = `
+      function bar() { return 1; }
+      function register(opts) { return opts; }
+      function setup() {
+        register({ handler: bar });
+      }
+    `;
+    const { edges } = extractCodeGraph(src, { filePath: "y.ts" });
+    const callsFromSetup = edges
+      .filter((e) => e.label === "CALLS" && e.from === "y.ts#setup")
+      .map((e) => e.to);
+    expect(callsFromSetup).not.toContain("y.ts#bar");
+  });
+
+  it("does not spuriously resolve a plain (non-function) argument identifier", () => {
+    // `opts` is just a local variable, not a known function — must not
+    // resolve to anything, same as an ordinary unresolved call would.
+    // `pass` is a bare-identifier argument to `use()` and resolves (the
+    // feature under test); `use()` itself is also a real direct call.
+    const src = `
+      function use(fn, config) { return fn; }
+      function setup(opts) {
+        use(doWork, opts);
+      }
+      function doWork() { return 1; }
+    `;
+    const { edges } = extractCodeGraph(src, { filePath: "z.ts" });
+    const callsFromSetup = edges
+      .filter((e) => e.label === "CALLS" && e.from === "z.ts#setup")
+      .map((e) => e.to)
+      .sort();
+    // `use` resolves via the direct call_expression; `doWork` resolves via
+    // the new argument-reference detection; `opts` never appears as a target.
+    expect(callsFromSetup).toEqual(["z.ts#doWork", "z.ts#use"]);
+  });
 });
 
 // One shared Kuzu connection for the whole describe. tree-sitter + Kuzu are
@@ -180,6 +241,29 @@ describe("CodeGraph indexer + AC-2 query", () => {
     expect(chain.callers.length).toBe(2);
   });
 
+  // Full-pipeline oracle for the argument-passed-reference fix: index a
+  // Fastify-shaped plugin registration across two files, then confirm
+  // `callers()` — the actual CLI/API surface, not just extractor internals —
+  // finds the caller. This is the exact query shape that returned empty
+  // before the fix (dev-platform DEC-081/DEC-095, `alertRulesRoutes`).
+  it("callers() resolves a function passed by reference to app.register", async () => {
+    await indexProject(conn, [
+      {
+        path: "plugin/alerts.ts",
+        source: "export function alertRulesRoutes(app) { return app; }",
+      },
+      {
+        path: "plugin/server.ts",
+        source:
+          "import { alertRulesRoutes } from './alerts.js';\n" +
+          "export async function createApp(app) { await app.register(alertRulesRoutes, { prefix: '/api/alerts' }); }",
+      },
+    ]);
+
+    const result = await callers(conn, "alertRulesRoutes", 1);
+    expect(result.map((n) => n.name)).toContain("createApp");
+  });
+
   it("P2: serves POST /graph/call-chain", async () => {
     await indexProject(conn, [
       { path: "rc/a.ts", source: "import {rcB} from './b';\nexport function rcA() { return rcB(); }" },
@@ -238,5 +322,24 @@ describe("CodeGraph cross-file resolution (P1)", () => {
       { path: "h.ts", source: "export function caller() { return missingFn(); }" },
     ]);
     expect(result.unresolved).toBeGreaterThanOrEqual(1);
+  });
+
+  // Same shape as the real vibeops regression: the plugin function is
+  // defined in one file and passed by reference (not called) from another.
+  it("resolves a cross-file function passed by reference as a call argument", () => {
+    const { fragment, calls } = extractProject([
+      { path: "routes/oidc.ts", source: "export async function oidcRoutes(app, opts) { return app; }" },
+      {
+        path: "server.ts",
+        source:
+          "import { oidcRoutes } from './routes/oidc.js';\n" +
+          "export async function createApp(app) { await app.register(oidcRoutes, { prefix: '/api/auth/oidc' }); }",
+      },
+    ]);
+    expect(calls).toBeGreaterThanOrEqual(1);
+    const callEdge = fragment.edges.find(
+      (e) => e.label === "CALLS" && e.from === "server.ts#createApp",
+    );
+    expect(callEdge?.to).toBe("routes/oidc.ts#oidcRoutes");
   });
 });
