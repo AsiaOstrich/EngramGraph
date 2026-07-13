@@ -138,10 +138,14 @@ describe("related — seeded structural ranking (DEC-028 L4a)", () => {
       await conn.execute(`MATCH (x:Function {id:'${n}'}),(y:Function {id:'b-hub'}) CREATE (x)-[:CALLS {call_count:1}]->(y)`);
     }
 
-    // A separate, disjoint pair for cross-node-type traversal.
+    // A separate, disjoint module→spec component for cross-node-type traversal.
+    // IMPLEMENTS is Module→Spec (XSPEC-331), so a Function reaches its Spec
+    // through the defining Module: Function ← DEFINES ← Module → IMPLEMENTS → Spec.
+    await conn.execute(`CREATE (:Module {id: 'c.ts', path: 'c.ts'})`);
     await conn.execute(`CREATE (:Function {id: 'f1', name: 'f1', file: 'c.ts', start_line: 1, confidence: 1.0})`);
     await conn.execute(`CREATE (:Spec {id: 's1', title: 'XSPEC-1', status: 'Draft', confidence: 1.0})`);
-    await conn.execute(`MATCH (f:Function {id:'f1'}),(s:Spec {id:'s1'}) CREATE (f)-[:IMPLEMENTS]->(s)`);
+    await conn.execute(`MATCH (m:Module {id:'c.ts'}),(f:Function {id:'f1'}) CREATE (m)-[:DEFINES]->(f)`);
+    await conn.execute(`MATCH (m:Module {id:'c.ts'}),(s:Spec {id:'s1'}) CREATE (m)-[:IMPLEMENTS]->(s)`);
   });
 
   afterAll(async () => {
@@ -170,12 +174,16 @@ describe("related — seeded structural ranking (DEC-028 L4a)", () => {
     expect(ranked).toHaveLength(1);
   });
 
-  it("crosses node types (Function -> Spec via IMPLEMENTS)", async () => {
+  it("crosses node types (Function → Module → Spec via DEFINES + IMPLEMENTS)", async () => {
+    // IMPLEMENTS is Module→Spec, so a Function reaches its Spec through the
+    // defining Module; related() surfaces both across the two edge types.
     const ranked = await related(conn, "f1", 2, 10);
 
-    expect(ranked.map((n) => n.id)).toEqual(["s1"]);
-    expect(ranked[0]?.label).toBe("Spec");
-    expect(ranked[0]?.name).toBe("XSPEC-1");
+    const spec = ranked.find((n) => n.label === "Spec");
+    expect(spec?.id).toBe("s1");
+    expect(spec?.name).toBe("XSPEC-1");
+    // the defining module is part of the crossed-type neighbourhood too
+    expect(ranked.some((n) => n.id === "c.ts")).toBe(true);
   });
 
   it("returns empty array for a seed id that does not exist", async () => {
