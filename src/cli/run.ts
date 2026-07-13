@@ -30,7 +30,7 @@ const CODE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]
 
 export interface IndexResultSummary {
   code: { files: number; functions: number; classes: number; calls: number; implements: number; ambiguous: number; unresolved: number };
-  knowledge?: { specs: number; decisions: number; impacts: number; supersedes: number };
+  knowledge?: { specs: number; decisions: number; impacts: number; supersedes: number; relates: number };
 }
 
 /** `egr index <dir> [--docs] [--clean]` — index code (always) + knowledge docs (--docs). */

@@ -76,6 +76,7 @@ export type RelLabel =
   | "IMPLEMENTS"
   | "IMPACTS"
   | "SUPERSEDES"
+  | "RELATES"
   | "REFERENCES";
 
 /**

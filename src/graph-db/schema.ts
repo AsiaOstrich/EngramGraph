@@ -4,7 +4,7 @@ import type { GraphConnection } from "./connection.js";
  * Kuzu schema for EngramGraph.
  *
  * NODE tables: Function, Class, Module, Spec, Decision (+ generic Doc).
- * REL  tables: CALLS, IMPORTS, DEFINES, IMPLEMENTS, IMPACTS, SUPERSEDES
+ * REL  tables: CALLS, IMPORTS, DEFINES, IMPLEMENTS, IMPACTS, SUPERSEDES, RELATES
  *              (+ generic REFERENCES for the default markdown knowledge source).
  *
  * IMPLEMENTS is Module→Spec (not Function→Spec): the `// implements XSPEC-NNN`
@@ -31,6 +31,10 @@ export const REL_TABLE_DDL: readonly string[] = [
   `CREATE REL TABLE IMPLEMENTS(FROM Module TO Spec)`,
   `CREATE REL TABLE IMPACTS(FROM Decision TO Spec)`,
   `CREATE REL TABLE SUPERSEDES(FROM Decision TO Decision)`,
+  // Spec→Spec upstream/downstream (front-matter related/depends_on + [[ref]]),
+  // so the doc↔doc graph joins the code graph on the same Spec nodes IMPLEMENTS
+  // points at — one node per artifact, no parallel Doc nodes (XSPEC-331 R2).
+  `CREATE REL TABLE RELATES(FROM Spec TO Spec)`,
   `CREATE REL TABLE REFERENCES(FROM Doc TO Doc)`,
 ];
 
@@ -51,6 +55,7 @@ export const REL_TABLES = [
   "IMPLEMENTS",
   "IMPACTS",
   "SUPERSEDES",
+  "RELATES",
   "REFERENCES",
 ] as const;
 

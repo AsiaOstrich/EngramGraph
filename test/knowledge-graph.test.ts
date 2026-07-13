@@ -141,6 +141,22 @@ describe("KnowledgeGraph ingest + AC-3 impact analysis", () => {
     expect(result.decisions.map((d) => d.id)).toContain("DEC-557");
   });
 
+  // R2 (XSPEC-331): Spec→Spec doc↔doc up/downstream edges from front-matter
+  // `related`/`depends_on` (incl. the XSPEC- prefix), on the same Spec nodes.
+  it("builds RELATES(Spec→Spec) edges from related/depends_on (XSPEC prefix)", async () => {
+    const res = await indexKnowledgeDocs(conn, [
+      { content: "---\nid: XSPEC-331\ndepends_on: [XSPEC-237]\nrelated: [XSPEC-321]\n---\n# 331\n" },
+      { content: "---\nid: XSPEC-237\n---\n# 237\n" },
+      { content: "---\nid: XSPEC-321\n---\n# 321\n" },
+    ]);
+    expect(res.relates).toBeGreaterThanOrEqual(2);
+
+    const rows = await conn.query(
+      "MATCH (a:Spec {id: 'XSPEC-331'})-[:RELATES]->(b:Spec) RETURN b.id AS id ORDER BY id",
+    );
+    expect(rows.map((r) => String(r.id))).toEqual(["XSPEC-237", "XSPEC-321"]);
+  });
+
   it("serves AC-3 over POST /graph/impact-analysis", async () => {
     await indexKnowledgeDocs(conn, CORPUS);
     const app = createServer({ connection: conn });

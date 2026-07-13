@@ -159,7 +159,7 @@ async function main(): Promise<void> {
       const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean });
       out(r, values.json, (d) => {
         const s = d as Awaited<ReturnType<typeof cmdIndex>>;
-        const k = s.knowledge ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes` : "";
+        const k = s.knowledge ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relates} relates` : "";
         return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}`;
       });
       break;

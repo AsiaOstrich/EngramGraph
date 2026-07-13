@@ -1,6 +1,6 @@
 {
   "name": "engramgraph",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Open-source code + knowledge graph memory engine (SAGE + CodeGraph). AsiaOstrich is only a reference consumer.",
   "license": "MIT",
   "author": "AsiaOstrich",

@@ -4,6 +4,26 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-07-13
+
+### Added
+
+- **doc↔doc upstream/downstream edges** (dev-platform XSPEC-331 R2). A spec that
+  references another spec — via front-matter `related` / `depends_on` or an
+  inline `[[XSPEC-NNN]]` — now produces a `RELATES(Spec→Spec)` edge (previously
+  Spec→Spec links were dropped). These land on the **same** Spec nodes that
+  `IMPLEMENTS` points at, so the doc graph and the code graph are one connected
+  graph: `Function ← Module → IMPLEMENTS → Spec → RELATES → Spec`. `related`
+  now traverses spec-to-spec links, and `index --docs` reports a `relates` count.
+- `depends_on` is now a recognised relationship front-matter field, and
+  relationship-field ids matching the `XSPEC-` prefix are captured (they were
+  silently skipped by the old `\bSPEC` boundary).
+
+### Changed
+
+- Schema adds a `RELATES(FROM Spec TO Spec)` rel table. Existing `.engram`
+  databases must be rebuilt (`rm .engram/graph.db*` + re-index) to gain it.
+
 ## [0.6.0] — 2026-07-13
 
 ### Added

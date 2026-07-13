@@ -1,12 +1,13 @@
 /**
  * spec/decision knowledge parser — a *reference* knowledge adapter.
  *
- * Each document becomes a Spec (SPEC-NNN) or Decision (DEC-NNN / ADR-NNN)
- * node, and every `[[ref]]` link becomes a typed cross-domain edge:
+ * Each document becomes a Spec (XSPEC-NNN / SPEC-NNN) or Decision (DEC-NNN /
+ * ADR-NNN) node, and every `[[ref]]` link / relationship front-matter field
+ * becomes a typed edge:
  *   - Decision → Spec link  ⇒ IMPACTS (Decision → Spec)
  *   - Spec → Decision link  ⇒ IMPACTS (Decision → Spec)  (decision impacts spec)
  *   - Decision → Decision   ⇒ SUPERSEDES (source → referenced)
- *   - Spec → Spec           ⇒ (no schema edge) skipped
+ *   - Spec → Spec           ⇒ RELATES (source → referenced; doc↔doc up/downstream)
  *
  * Referenced ids absent from the batch get a stub node so the edge still lands;
  * a later parse of the real document MERGE-updates it in place.
@@ -86,14 +87,15 @@ export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null 
   for (const field of RELATIONSHIP_FIELDS) {
     const value = fields[field];
     if (!value) continue;
-    for (const m of value.matchAll(/\b(?:SPEC|DEC|ADR)-\d+/gi)) addRef(m[0]);
+    // XSPEC- must be matched too (dev-platform specs); mirrors linker's ID_RE.
+    for (const m of value.matchAll(/\b(?:XSPEC|SPEC|DEC|ADR)-\d+/gi)) addRef(m[0]);
   }
 
   return { id, kind, title, refs, node: makeNode(kind, id, title, fields) };
 }
 
 /** Front-matter relationship fields (knowledge-graph-memory standard §"Quick Reference"). */
-const RELATIONSHIP_FIELDS = ["related", "impacts", "impacted_by", "supersedes", "implements"] as const;
+const RELATIONSHIP_FIELDS = ["related", "depends_on", "impacts", "impacted_by", "supersedes", "implements"] as const;
 
 /**
  * reference knowledge source: spec/decision markdown → graph fragment.
@@ -132,8 +134,10 @@ export class SpecDecisionKnowledgeSource {
           edges.push(impacts(ref.id, p.id));
         } else if (p.kind === "Decision" && ref.kind === "Decision") {
           edges.push(supersedes(p.id, ref.id));
+        } else {
+          // Spec → Spec: doc↔doc upstream/downstream (related / depends_on).
+          edges.push(relates(p.id, ref.id));
         }
-        // Spec → Spec has no schema edge; skip.
       }
     }
 
@@ -149,11 +153,16 @@ function supersedes(fromId: string, toId: string): GraphEdge {
   return { label: "SUPERSEDES", fromLabel: "Decision", from: fromId, toLabel: "Decision", to: toId };
 }
 
+function relates(fromId: string, toId: string): GraphEdge {
+  return { label: "RELATES", fromLabel: "Spec", from: fromId, toLabel: "Spec", to: toId };
+}
+
 export interface KnowledgeIndexResult {
   specs: number;
   decisions: number;
   impacts: number;
   supersedes: number;
+  relates: number;
 }
 
 /** Ingest spec/decision docs and write them to the graph. */
@@ -168,5 +177,6 @@ export async function indexKnowledgeDocs(
     decisions: fragment.nodes.filter((n) => n.label === "Decision").length,
     impacts: fragment.edges.filter((e) => e.label === "IMPACTS").length,
     supersedes: fragment.edges.filter((e) => e.label === "SUPERSEDES").length,
+    relates: fragment.edges.filter((e) => e.label === "RELATES").length,
   };
 }
