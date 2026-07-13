@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { GraphConnection } from "../src/graph-db/connection.js";
 import { initSchema } from "../src/graph-db/schema.js";
-import { classifyRef } from "../src/knowledge-graph/linker.js";
+import { classifyRef, extractImplementsSpecs } from "../src/knowledge-graph/linker.js";
 import { parseKnowledgeDoc, indexKnowledgeDocs } from "../src/knowledge-graph/parser.js";
 import { impactAnalysis } from "../src/knowledge-graph/query.js";
 import { createServer } from "../src/api/server.js";
@@ -45,6 +45,21 @@ describe("KnowledgeGraph parser/linker (Phase 3)", () => {
     expect(classifyRef("[[DEC-062]]")).toEqual({ kind: "Decision", id: "DEC-062" });
     expect(classifyRef("ADR-001 something")).toEqual({ kind: "Decision", id: "ADR-001" });
     expect(classifyRef("no id here")).toBeNull();
+  });
+
+  it("classifies XSPEC → Spec, preserving the X (distinct id namespace)", () => {
+    // XSPEC-190 (dev-platform) and SPEC-190 (a sub-project) are different ids.
+    expect(classifyRef("XSPEC-190")).toEqual({ kind: "Spec", id: "XSPEC-190" });
+    expect(classifyRef("[[XSPEC-331（doc↔code）]]")).toEqual({ kind: "Spec", id: "XSPEC-331" });
+    // still avoids matching SPEC mid-word
+    expect(classifyRef("MYSPEC-5")).toBeNull();
+  });
+
+  it("extractImplementsSpecs: only fires on the `implements` keyword, Spec-kind only, deduped", () => {
+    expect(extractImplementsSpecs("// implements XSPEC-190 AC-3")).toEqual(["XSPEC-190"]);
+    expect(extractImplementsSpecs("// implements XSPEC-190\n// implements XSPEC-190")).toEqual(["XSPEC-190"]);
+    expect(extractImplementsSpecs("* implements SPEC-75 and DEC-060")).toEqual(["SPEC-75"]); // DEC excluded
+    expect(extractImplementsSpecs("// see SPEC-123 for rationale")).toEqual([]); // no keyword
   });
 
   it("parses a spec doc with refs", () => {

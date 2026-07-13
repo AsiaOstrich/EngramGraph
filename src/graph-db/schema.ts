@@ -6,6 +6,11 @@ import type { GraphConnection } from "./connection.js";
  * NODE tables: Function, Class, Module, Spec, Decision (+ generic Doc).
  * REL  tables: CALLS, IMPORTS, DEFINES, IMPLEMENTS, IMPACTS, SUPERSEDES
  *              (+ generic REFERENCES for the default markdown knowledge source).
+ *
+ * IMPLEMENTS is Module→Spec (not Function→Spec): the `// implements XSPEC-NNN`
+ * convention annotates whole files (233/275 usages sit at file top, incl.
+ * function-less type/config files), so the file/Module is the faithful grain.
+ * Function-level queries route through the existing DEFINES (Module→Function).
  */
 
 /** NODE TABLE DDL statements, in dependency order. */
@@ -23,7 +28,7 @@ export const REL_TABLE_DDL: readonly string[] = [
   `CREATE REL TABLE CALLS(FROM Function TO Function, call_count INT64)`,
   `CREATE REL TABLE IMPORTS(FROM Module TO Module)`,
   `CREATE REL TABLE DEFINES(FROM Module TO Function)`,
-  `CREATE REL TABLE IMPLEMENTS(FROM Function TO Spec)`,
+  `CREATE REL TABLE IMPLEMENTS(FROM Module TO Spec)`,
   `CREATE REL TABLE IMPACTS(FROM Decision TO Spec)`,
   `CREATE REL TABLE SUPERSEDES(FROM Decision TO Decision)`,
   `CREATE REL TABLE REFERENCES(FROM Doc TO Doc)`,

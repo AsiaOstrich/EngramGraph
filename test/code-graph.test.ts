@@ -89,6 +89,45 @@ describe("CodeGraph extractor (Phase 2)", () => {
     expect(calls[0]?.to).toBe("x.js#b");
   });
 
+  // R1 (XSPEC-331): a `// implements XSPEC-NNN` comment links the file to a
+  // spec via a Module→Spec IMPLEMENTS edge, plus a stub Spec target node.
+  it("emits IMPLEMENTS(Module→Spec) + stub Spec node from an `// implements` comment", () => {
+    const src = `// implements XSPEC-190 AC-3\nexport function run() { return 1; }`;
+    const { nodes, edges } = extractCodeGraph(src, { filePath: "src/run.ts" });
+
+    const impl = edges.filter((e) => e.label === "IMPLEMENTS");
+    expect(impl).toHaveLength(1);
+    expect(impl[0]).toMatchObject({
+      fromLabel: "Module",
+      from: "src/run.ts",
+      toLabel: "Spec",
+      to: "XSPEC-190", // X preserved (distinct namespace); AC-3 ignored
+    });
+
+    // stub Spec node created so the edge target exists, with no properties so a
+    // later `index --docs` pass never has its title/status/confidence clobbered.
+    const spec = nodes.find((n) => n.label === "Spec" && n.id === "XSPEC-190");
+    expect(spec).toBeDefined();
+    expect(spec?.properties).toEqual({});
+  });
+
+  it("links a function-less file (OQ-3: module-level convention) and dedupes ids", () => {
+    // Pure type file — no Function nodes — is exactly why IMPLEMENTS is
+    // Module→Spec, not Function→Spec. Two mentions of the same id → one edge.
+    const src = `// implements XSPEC-190\n// implements XSPEC-190 (see also SPEC-75)\nexport type T = string;`;
+    const { nodes, edges } = extractCodeGraph(src, { filePath: "src/types.ts" });
+
+    expect(nodes.filter((n) => n.label === "Function")).toHaveLength(0);
+    const targets = edges.filter((e) => e.label === "IMPLEMENTS").map((e) => e.to).sort();
+    expect(targets).toEqual(["SPEC-75", "XSPEC-190"]);
+  });
+
+  it("does not emit IMPLEMENTS for a spec id mentioned without the `implements` keyword", () => {
+    const src = `// see SPEC-123 for the rationale\nexport function run() { return 1; }`;
+    const { edges } = extractCodeGraph(src, { filePath: "src/x.ts" });
+    expect(edges.filter((e) => e.label === "IMPLEMENTS")).toHaveLength(0);
+  });
+
   // Regression for a real gap found comparing egr against an external tool
   // (colbymchenry/codegraph) on vibeops/src: `callers()` was blind to a
   // function passed *by reference* to a higher-order call (Fastify's
@@ -202,6 +241,28 @@ describe("CodeGraph indexer + AC-2 query", () => {
       `MATCH (f:Function)-[r:CALLS]->(:Function) WHERE f.file = 'src/b.ts' RETURN count(r) AS c`,
     );
     expect(Number(callCount[0]?.c)).toBe(2);
+  });
+
+  // R1 (XSPEC-331) end-to-end: a `// implements XSPEC-NNN` comment persists as
+  // a Module→Spec IMPLEMENTS edge, and both query directions the user asked for
+  // work — spec→code (through DEFINES) and code→spec.
+  it("R1: persists IMPLEMENTS(Module→Spec) and answers doc↔code both ways", async () => {
+    const result = await indexProject(conn, [
+      { path: "impl/run.ts", source: "// implements XSPEC-190\nexport function runJob() { return 1; }" },
+    ]);
+    expect(result.implements).toBe(1);
+
+    // spec → code: which functions implement XSPEC-190? (via Module→Function)
+    const specToCode = await conn.query(
+      "MATCH (s:Spec {id: 'XSPEC-190'})<-[:IMPLEMENTS]-(m:Module)-[:DEFINES]->(f:Function) RETURN f.name AS name",
+    );
+    expect(specToCode.map((r) => r.name)).toContain("runJob");
+
+    // code → spec: which spec governs runJob? (via its Module)
+    const codeToSpec = await conn.query(
+      "MATCH (f:Function {name: 'runJob'})<-[:DEFINES]-(m:Module)-[:IMPLEMENTS]->(s:Spec) WHERE f.file = 'impl/run.ts' RETURN s.id AS id",
+    );
+    expect(codeToSpec.map((r) => r.id)).toEqual(["XSPEC-190"]);
   });
 
   // P1: indexProject resolves a cross-file call, so "callers of X" works even

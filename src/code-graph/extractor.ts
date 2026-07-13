@@ -33,6 +33,7 @@ import Parser from "tree-sitter";
 import JavaScript from "tree-sitter-javascript";
 import TypeScript from "tree-sitter-typescript";
 
+import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
 import type { ExtractOptions, ProjectFile, SupportedLanguage } from "./types.js";
 
@@ -110,10 +111,12 @@ export interface RawCall {
 
 /** Per-file extraction before call resolution. */
 export interface Extraction {
-  /** Module + Function + Class nodes. */
+  /** Module + Function + Class nodes (+ stub Spec nodes for IMPLEMENTS targets). */
   nodes: GraphNode[];
   /** DEFINES edges (Module → Function). */
   defines: GraphEdge[];
+  /** IMPLEMENTS edges (Module → Spec) from `// implements XSPEC-NNN` comments. */
+  implementsEdges: GraphEdge[];
   /** Unresolved call records. */
   rawCalls: RawCall[];
   /** This file's bare function name → id. */
@@ -140,6 +143,8 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   const defines: GraphEdge[] = [];
   const names = new Map<string, string>();
   const rawCalls: RawCall[] = [];
+  /** Spec ids this file declares it implements (module-level, de-duplicated). */
+  const moduleSpecs = new Set<string>();
 
   /**
    * Build a function's id, qualified by its enclosing scope chain (classes +
@@ -168,6 +173,13 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   function visit(node: Parser.SyntaxNode, enclosingFnId: string | null, scopeStack: string[]): void {
     let currentFn = enclosingFnId;
     let pushedScope = false; // a node is either a class OR a function — at most one push
+
+    // `// implements XSPEC-NNN` / `/* implements SPEC-NNN */` — a file-level
+    // declaration that this module implements a spec. Attached to the Module
+    // (not the enclosing function): the convention annotates whole files.
+    if (node.type === "comment") {
+      for (const specId of extractImplementsSpecs(node.text)) moduleSpecs.add(specId);
+    }
 
     if (CLASS_TYPES.has(node.type)) {
       const className = node.childForFieldName("name")?.text;
@@ -234,7 +246,22 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
 
   visit(tree.rootNode, null, []);
 
-  return { nodes, defines, rawCalls, names };
+  // Emit a stub Spec node (empty properties — never clobbers title/status/
+  // confidence a later `index --docs` pass MERGEs onto the same id) so the
+  // IMPLEMENTS edge's target always exists, then the Module→Spec edge itself.
+  const implementsEdges: GraphEdge[] = [];
+  for (const specId of moduleSpecs) {
+    nodes.push({ label: "Spec", id: specId, properties: {} });
+    implementsEdges.push({
+      label: "IMPLEMENTS",
+      fromLabel: "Module",
+      from: moduleId,
+      toLabel: "Spec",
+      to: specId,
+    });
+  }
+
+  return { nodes, defines, implementsEdges, rawCalls, names };
 }
 
 /**
@@ -267,11 +294,11 @@ function buildCallEdges(resolved: Array<{ from: string; to: string }>): GraphEdg
  * @throws if the source cannot be parsed into a syntax tree.
  */
 export function extractCodeGraph(source: string, opts: ExtractOptions): GraphFragment {
-  const { nodes, defines, rawCalls, names } = collectExtraction(source, opts);
+  const { nodes, defines, implementsEdges, rawCalls, names } = collectExtraction(source, opts);
   const resolved = rawCalls
     .map((c) => ({ from: c.from, to: names.get(c.callee) ?? "" }))
     .filter((c) => c.to);
-  return { nodes, edges: [...defines, ...buildCallEdges(resolved)] };
+  return { nodes, edges: [...defines, ...buildCallEdges(resolved), ...implementsEdges] };
 }
 
 /** Stats for a cross-file extraction. */
@@ -281,6 +308,8 @@ export interface ProjectExtraction {
   functions: number;
   classes: number;
   calls: number;
+  /** IMPLEMENTS edges (Module → Spec) from `// implements` comments. */
+  implements: number;
   /** Calls whose callee name matched >1 function across the repo (skipped). */
   ambiguous: number;
   /** Calls whose callee name matched no known function (skipped). */
@@ -303,6 +332,7 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
 
   const nodes: GraphNode[] = [];
   const defines: GraphEdge[] = [];
+  const implementsEdges: GraphEdge[] = [];
   const localByFile = new Map<string, Map<string, string>>();
   const globalIndex = new Map<string, Set<string>>();
 
@@ -311,6 +341,7 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
     const file = files[i]!.path;
     nodes.push(...ex.nodes);
     defines.push(...ex.defines);
+    implementsEdges.push(...ex.implementsEdges);
     localByFile.set(file, ex.names);
     for (const [name, id] of ex.names) {
       let ids = globalIndex.get(name);
@@ -346,11 +377,12 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
 
   const calls = buildCallEdges(resolved);
   return {
-    fragment: { nodes, edges: [...defines, ...calls] },
+    fragment: { nodes, edges: [...defines, ...calls, ...implementsEdges] },
     files: files.length,
     functions: nodes.filter((n) => n.label === "Function").length,
     classes: nodes.filter((n) => n.label === "Class").length,
     calls: calls.length,
+    implements: implementsEdges.length,
     ambiguous,
     unresolved,
   };

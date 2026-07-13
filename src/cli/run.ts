@@ -20,7 +20,7 @@ import { walkFiles } from "./walk.js";
 const CODE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"] as const;
 
 export interface IndexResultSummary {
-  code: { files: number; functions: number; classes: number; calls: number; ambiguous: number; unresolved: number };
+  code: { files: number; functions: number; classes: number; calls: number; implements: number; ambiguous: number; unresolved: number };
   knowledge?: { specs: number; decisions: number; impacts: number; supersedes: number };
 }
 

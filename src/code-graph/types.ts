@@ -50,6 +50,8 @@ export interface ProjectIndexResult {
   classes: number;
   /** Resolved CALLS edges (includes cross-file). */
   calls: number;
+  /** IMPLEMENTS edges (Module → Spec) from `// implements` comments. */
+  implements: number;
   /** Calls whose callee name matched >1 function across the repo (skipped). */
   ambiguous: number;
   /** Calls whose callee name matched no known function (skipped). */
