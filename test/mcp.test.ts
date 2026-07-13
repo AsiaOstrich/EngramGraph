@@ -46,7 +46,32 @@ describe("EngramGraph MCP server", () => {
   it("advertises the expected tools", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["call_chain", "impact_analysis", "index_code", "index_docs", "ingest_feedback"]);
+    expect(names).toEqual([
+      "call_chain",
+      "impact_analysis",
+      "implemented_specs",
+      "implementers",
+      "index_code",
+      "index_docs",
+      "ingest_feedback",
+      "related",
+    ]);
+  });
+
+  it("implementers + implemented_specs answer doc↔code both ways (XSPEC-331 R4)", async () => {
+    await callJson(client, "index_code", {
+      files: [{ path: "svc.ts", source: "// implements XSPEC-7\nexport function run(){ return 1; }" }],
+    });
+
+    const impl = (await callJson(client, "implementers", { specId: "XSPEC-7" })) as {
+      modules: Array<{ module: string; functions: string[] }>;
+    };
+    expect(impl.modules.map((m) => m.module)).toContain("svc.ts");
+
+    const specs = (await callJson(client, "implemented_specs", { moduleId: "svc.ts" })) as {
+      specs: Array<{ id: string }>;
+    };
+    expect(specs.specs.map((s) => s.id)).toEqual(["XSPEC-7"]);
   });
 
   it("index_code + call_chain resolves a cross-file caller", async () => {

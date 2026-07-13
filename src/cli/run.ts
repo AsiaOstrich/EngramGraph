@@ -11,7 +11,16 @@ import { join } from "node:path";
 import type { GraphConnection } from "../graph-db/connection.js";
 import { clearGraph } from "../graph-db/schema.js";
 import { gitBranchEngramDir, listBranches, sanitizeBranch } from "../graph-db/git-branch.js";
-import { indexProject, callers, callees, type CallNode } from "../code-graph/index.js";
+import {
+  indexProject,
+  callers,
+  callees,
+  implementers,
+  implementedSpecs,
+  type CallNode,
+  type ImplementersResult,
+  type ImplementedSpecsResult,
+} from "../code-graph/index.js";
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType, topByConfidence, type ConfidenceLabel } from "../sage/index.js";
 import { godNodes, communities, related, type GodNode, type CommunityMember, type RelatedNode } from "../structural-memory/index.js";
@@ -48,6 +57,19 @@ export function cmdCallers(conn: GraphConnection, symbol: string, depth = 1): Pr
 /** `egr callees <symbol> [--depth N]`. */
 export function cmdCallees(conn: GraphConnection, symbol: string, depth = 1): Promise<CallNode[]> {
   return callees(conn, symbol, depth);
+}
+
+/** `egr implementers <spec-id>` — files (+ functions) that implement a spec. */
+export function cmdImplementers(conn: GraphConnection, specId: string): Promise<ImplementersResult> {
+  return implementers(conn, specId);
+}
+
+/** `egr implemented-by <module-path>` — specs a file declares it implements. */
+export function cmdImplementedSpecs(
+  conn: GraphConnection,
+  moduleId: string,
+): Promise<ImplementedSpecsResult> {
+  return implementedSpecs(conn, moduleId);
 }
 
 /** `egr impact <spec-id> [--max-hops N]`. */

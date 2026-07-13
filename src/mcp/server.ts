@@ -6,16 +6,18 @@
  * plug-and-play code + knowledge graph. A thin adapter over the existing,
  * tested query functions — zero LLM, deterministic.
  *
- * Tools: index_code, index_docs, call_chain, impact_analysis, ingest_feedback.
+ * Tools: index_code, index_docs, call_chain, impact_analysis, ingest_feedback,
+ * implementers, implemented_specs, related.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import type { GraphConnection } from "../graph-db/connection.js";
-import { indexProject, callChain } from "../code-graph/index.js";
+import { indexProject, callChain, implementers, implementedSpecs } from "../code-graph/index.js";
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType } from "../sage/index.js";
+import { related } from "../structural-memory/index.js";
 
 const ok = (data: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -134,6 +136,65 @@ export function createMcpServer(conn: GraphConnection): McpServer {
           nodeLabel ?? "Function",
         );
         return update ? ok(update) : fail(`node not found: ${nodeLabel ?? "Function"} ${nodeId}`);
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    "implementers",
+    {
+      title: "Implementers (spec → code)",
+      description:
+        "Files that declare `// implements <specId>` and the functions they define — 'which code implements this spec?'. Reads IMPLEMENTS(Module→Spec) + DEFINES.",
+      inputSchema: {
+        specId: z.string(),
+      },
+    },
+    async ({ specId }) => {
+      try {
+        return ok(await implementers(conn, specId));
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    "implemented_specs",
+    {
+      title: "Implemented specs (code → spec)",
+      description:
+        "Specs a file declares it implements — 'which spec governs this code?'. moduleId is the file's indexed path. Reads IMPLEMENTS(Module→Spec).",
+      inputSchema: {
+        moduleId: z.string(),
+      },
+    },
+    async ({ moduleId }) => {
+      try {
+        return ok(await implementedSpecs(conn, moduleId));
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    "related",
+    {
+      title: "Related nodes",
+      description:
+        "Nodes structurally important around a seed id (seeded PageRank over all edge types) — crosses Function/Spec/Module/Decision. 'what's connected to X?'.",
+      inputSchema: {
+        seedId: z.string(),
+        depth: z.number().int().optional(),
+        limit: z.number().int().optional(),
+      },
+    },
+    async ({ seedId, depth, limit }) => {
+      try {
+        return ok(await related(conn, seedId, depth ?? 2, limit ?? 10));
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }

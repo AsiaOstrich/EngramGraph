@@ -4,6 +4,22 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-07-13
+
+### Added
+
+- **doc↔code query surface** (dev-platform XSPEC-331 R4), as CLI commands and
+  MCP tools:
+  - `implementers <spec-id>` — files (and the functions they define) that
+    declare `// implements <spec-id>` (spec→code).
+  - `implemented-by <module-path>` — specs a file declares it implements
+    (code→spec).
+  - MCP tools `implementers`, `implemented_specs`, and `related` (the seeded
+    structural-ranking query, previously CLI-only) are now exposed so an
+    MCP client can answer "which code implements this spec?" / "which spec
+    governs this file?" / "what's connected to X?" in-conversation. The MCP
+    server now advertises 8 tools (was 5).
+
 ## [0.5.0] — 2026-07-13
 
 ### Added

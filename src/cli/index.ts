@@ -14,7 +14,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, type GcResult } from "./run.js";
+import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, type GcResult } from "./run.js";
 import type { ConfidenceLabel } from "../sage/index.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
@@ -27,6 +27,8 @@ Commands:
                                   graph first (prunes deleted nodes)
   callers <symbol> [--depth N]    Functions that (transitively) call <symbol>
   callees <symbol> [--depth N]    Functions that <symbol> (transitively) calls
+  implementers <spec-id>          Files (+ functions) that implement a spec (spec→code)
+  implemented-by <module-path>    Specs a file declares it implements (code→spec)
   impact <spec-id> [--max-hops N] Decisions in a spec's impact chain
   feedback <type> <node-id> [--label L]
                                   Evolve confidence (type: test_fail|test_pass|human_fix)
@@ -167,6 +169,28 @@ async function main(): Promise<void> {
       if (!a1) throw new Error(`${cmd} requires a <symbol>`);
       const rows = cmd === "callers" ? await cmdCallers(conn, a1, num(values.depth, 1)) : await cmdCallees(conn, a1, num(values.depth, 1));
       out(rows, values.json, (d) => `${cmd}(${a1}):\n${fmtNodes(d as Array<{ name: string; file: string }>)}`);
+      break;
+    }
+    case "implementers": {
+      if (!a1) throw new Error("implementers requires a <spec-id>");
+      const r = await cmdImplementers(conn, a1);
+      out(r, values.json, (d) => {
+        const res = d as Awaited<ReturnType<typeof cmdImplementers>>;
+        const head = `implementers(${res.spec})${res.title ? ` — ${res.title}` : ""}:`;
+        const body = res.modules.length
+          ? res.modules.map((m) => `  ${m.module}${m.functions.length ? ` (${m.functions.join(", ")})` : ""}`).join("\n")
+          : "  (none)";
+        return `${head}\n${body}`;
+      });
+      break;
+    }
+    case "implemented-by": {
+      if (!a1) throw new Error("implemented-by requires a <module-path>");
+      const r = await cmdImplementedSpecs(conn, a1);
+      out(r, values.json, (d) => {
+        const res = d as Awaited<ReturnType<typeof cmdImplementedSpecs>>;
+        return `implemented-by(${res.module}):\n${res.specs.length ? res.specs.map((s) => `  ${s.id}${s.title ? ` — ${s.title}` : ""}`).join("\n") : "  (none)"}`;
+      });
       break;
     }
     case "impact": {

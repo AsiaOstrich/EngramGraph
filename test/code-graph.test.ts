@@ -7,7 +7,7 @@ import { GraphConnection } from "../src/graph-db/connection.js";
 import { initSchema } from "../src/graph-db/schema.js";
 import { extractCodeGraph, extractProject } from "../src/code-graph/extractor.js";
 import { indexFile, indexProject } from "../src/code-graph/indexer.js";
-import { callers, callees, callChain } from "../src/code-graph/query.js";
+import { callers, callees, callChain, implementers, implementedSpecs } from "../src/code-graph/query.js";
 import { createServer } from "../src/api/server.js";
 
 const TS_SAMPLE = `
@@ -263,6 +263,30 @@ describe("CodeGraph indexer + AC-2 query", () => {
       "MATCH (f:Function {name: 'runJob'})<-[:DEFINES]-(m:Module)-[:IMPLEMENTS]->(s:Spec) WHERE f.file = 'impl/run.ts' RETURN s.id AS id",
     );
     expect(codeToSpec.map((r) => r.id)).toEqual(["XSPEC-190"]);
+  });
+
+  // R4 (XSPEC-331): the implementers / implemented-by queries the MCP tools and
+  // CLI wrap — spec→code (with each file's functions) and code→spec.
+  it("R4: implementers(spec) and implementedSpecs(module) query both directions", async () => {
+    await indexProject(conn, [
+      { path: "r4/svc.ts", source: "// implements XSPEC-42\nexport function handle() { return 1; }\nexport function help() { return 2; }" },
+      { path: "r4/types.ts", source: "// implements XSPEC-42\nexport type T = string;" }, // function-less
+    ]);
+
+    // spec → code: both files, svc.ts carrying its functions, types.ts with none.
+    const impl = await implementers(conn, "XSPEC-42");
+    expect(impl.spec).toBe("XSPEC-42");
+    const byModule = Object.fromEntries(impl.modules.map((m) => [m.module, m.functions]));
+    expect(byModule["r4/svc.ts"]).toEqual(["handle", "help"]);
+    expect(byModule["r4/types.ts"]).toEqual([]);
+
+    // code → spec: the function-less file still resolves its spec.
+    const specs = await implementedSpecs(conn, "r4/types.ts");
+    expect(specs.specs.map((s) => s.id)).toEqual(["XSPEC-42"]);
+
+    // an unimplemented spec / unknown module yield empty, not an error.
+    expect((await implementers(conn, "XSPEC-999")).modules).toEqual([]);
+    expect((await implementedSpecs(conn, "nope.ts")).specs).toEqual([]);
   });
 
   // P1: indexProject resolves a cross-file call, so "callers of X" works even
