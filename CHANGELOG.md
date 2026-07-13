@@ -4,6 +4,34 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-07-13
+
+### Added
+
+- **Code↔spec linkage from `// implements` comments** (dev-platform XSPEC-331
+  R1). The extractor now reads `// implements XSPEC-190` / `/* implements
+  SPEC-75 */` comments and writes an `IMPLEMENTS` edge so the graph answers
+  both "which files implement this spec?" (spec→code, via `Module→DEFINES→
+  Function`) and "which spec governs this code?" (code→spec). A stub `Spec`
+  target node is created with empty properties so a later `index --docs` pass
+  never has its title/status/confidence clobbered. The `index` summary now
+  reports an `implements` count.
+
+### Changed
+
+- **`IMPLEMENTS` is now `Module→Spec`** (was `Function→Spec`, which had zero
+  writers). The `// implements XSPEC-NNN` convention annotates whole files —
+  in a real codebase 233/275 usages sit at file top, including function-less
+  type/config files — so the file/Module is the faithful grain; function-level
+  queries route through the existing `DEFINES` edge. Existing databases created
+  with the old rel-table definition must be rebuilt (drop `.engram/graph.db*`
+  and re-index) to pick up the new endpoint types.
+- **Artifact-id regex now matches the `XSPEC-` prefix** (dev-platform's
+  cross-project specs), in addition to `SPEC-`/`DEC-`/`ADR-`. The `X` is
+  preserved: `XSPEC-190` and `SPEC-190` are distinct id namespaces. This also
+  means `index --docs` now indexes dev-platform XSPEC documents as `Spec`
+  nodes, which the previous `\bSPEC` boundary silently skipped.
+
 ## [0.4.1] — 2026-07-12
 
 ### Fixed
