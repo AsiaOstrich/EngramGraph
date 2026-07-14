@@ -485,4 +485,41 @@ declare module "@vokturz/tree-sitter-dart" {
  * `tree-sitter` core is deliberately upgraded to the 0.25.x line — a much
  * larger, separate decision affecting all 10 existing languages
  * simultaneously, well out of scope for a single-language addition.
+ *
+ * ---- ABAP ----------------------------------------------------------------
+ *
+ * The most active candidate, `kennyhml/tree-sitter-abap` (10 GitHub stars,
+ * pushed the same day as this investigation, MIT, and — like Isopod's
+ * Pascal grammar above — the RIGHT `peerDependencies: { "tree-sitter":
+ * "^0.22.4" }`, an EXACT match for this repo's pinned core, with
+ * `node-addon-api` properly declared as a dependency this time, unlike the
+ * Pascal case), looked like the best-fitting candidate of this whole batch
+ * on paper. It is NOT VIABLE today for a structural, empirically-confirmed
+ * reason: installing it via `github:kennyhml/tree-sitter-abap#<head-sha>`
+ * fails at the link step — `no such file or directory:
+ * 'Release/obj.target/tree_sitter_abap_binding/src/parser.o'`. Inspecting
+ * the repo's `src/` directory on GitHub confirms why: it contains only
+ * `grammar.json`/`node-types.json`/`scanner.c`/`tree_sitter/` — the
+ * generated `parser.c` (a large machine-generated C file most tree-sitter
+ * grammar repos commit specifically so consumers don't need the
+ * `tree-sitter-cli` toolchain) is simply not committed, and no npm release
+ * exists to have done that generation step once at publish time. A plain
+ * install can never produce a working binary this way, full stop — not a
+ * flaky build, a structural packaging gap.
+ *
+ * Two lower-tier candidates were excluded on metadata alone, NOT
+ * empirically tested (documented as such, not glossed over as "also
+ * tested"): `mkoval1/tree-sitter-abap` (the candidate originally named in
+ * this batch's task — 3 GitHub stars, stale since mid-2024, no LICENSE file
+ * at all — license absence alone disqualifies it regardless of technical
+ * merit) and `albertmink/tree-sitter-abap` (its own GitHub description
+ * reads "[draft] very much a draft" — excluded on the maintainer's own
+ * word).
+ *
+ * Revisit trigger: `kennyhml/tree-sitter-abap` commits its generated
+ * `src/parser.c` (or cuts an npm release, which would perform that
+ * generation step once) — likely fast given how actively that upstream is
+ * being pushed; at that point its peerDependency already lines up exactly
+ * with this repo's pinned core, so no further ABI investigation should even
+ * be needed.
  */
