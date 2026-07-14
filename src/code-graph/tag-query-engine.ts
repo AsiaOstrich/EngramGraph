@@ -125,7 +125,7 @@ export function runTagQuery(
     if (defKind && defNode && name) {
       definitions.push({ kind: defKind, name, node: defNode });
     } else if (callNode && name) {
-      callSites.push({ name, node: callNode });
+      if (!isPlainAssignmentTarget(callNode)) callSites.push({ name, node: callNode });
     }
   }
 
@@ -138,6 +138,57 @@ export function runTagQuery(
   callSites.sort((a, b) => a.node.startIndex - b.node.startIndex);
 
   return { definitions, callSites };
+}
+
+/**
+ * True when `node` is itself the LHS of a plain (`=`, never `+=`/`||=`/etc.)
+ * assignment — either directly (`assignment left: (node)`) or as one element
+ * of a multi-assignment (`assignment left: (left_assignment_list ... (node)
+ * ...)`).
+ *
+ * Fix for XSPEC-333 R2c batch 3's Ruby adversarial-review finding: Ruby has
+ * no distinct "attribute access" node (see queries/ruby.ts's module doc
+ * comment) — `obj.name` is a `call` node whether it appears as a genuine
+ * zero-arg method invocation OR as the left-hand side of `obj.name = x`
+ * (Ruby dispatches this to a DIFFERENT method, `name=`, never `name` — the
+ * `call` node for `obj.name` on an assignment's LHS is never actually
+ * invoked at runtime at all). Without this filter, a plain `(call
+ * method: (identifier) @name) @reference.call` pattern — Ruby's own,
+ * correctly-designed, receiver-agnostic call pattern — fabricates a CALLS
+ * edge to a coincidentally-same-named getter every time a real setter is
+ * used, confirmed empirically (`obj.name = x` in a method alongside a
+ * `def name` getter produced a real, wrong `CALLS` edge to that getter
+ * before this fix). Deliberately scoped to plain `assignment` only —
+ * compound assignment (`assignment operator: obj.count += 1`, this
+ * grammar's distinct `operator_assignment` node type, NOT `assignment`) is
+ * NOT excluded, because it genuinely reads the current value through the
+ * getter before writing it back through the setter, verified against a real
+ * parse that `operator_assignment`'s `left:` field is the same `call` shape
+ * — a real invocation this time, correctly left captured.
+ *
+ * Implemented here (language-agnostic, keyed only on the standard `.parent`/
+ * `.childForFieldName` SyntaxNode API) rather than in queries/ruby.ts,
+ * because tree-sitter's query DSL has no "this node is NOT under an
+ * ancestor of shape X" construct — matching only ever composes top-down
+ * (parent pattern containing child patterns), never bottom-up. Verified
+ * harmless for every other language on this engine: none of their grammars
+ * produce a `call`-shaped node for a plain (non-invoking) attribute/property
+ * read in the first place (each has its own distinct member-access node
+ * type our `@reference.call` patterns never target), so this filter is a
+ * no-op for them regardless of what their own `assignment`-equivalent node
+ * happens to be named.
+ */
+function isPlainAssignmentTarget(node: Parser.SyntaxNode): boolean {
+  const parent = node.parent;
+  if (!parent) return false;
+  if (parent.type === "assignment") {
+    return parent.childForFieldName("left") === node;
+  }
+  if (parent.type === "left_assignment_list") {
+    const grandparent = parent.parent;
+    return !!grandparent && grandparent.type === "assignment" && grandparent.childForFieldName("left") === parent;
+  }
+  return false;
 }
 
 /** A function definition after scope-qualification. */
@@ -270,7 +321,24 @@ export function findEnclosingFunction(
  * uses, so it would already be covered for free) is a one-line addition
  * here instead of another silent per-language gap discovered the hard way.
  */
-const COMMENT_NODE_TYPES = new Set(["comment", "line_comment", "block_comment"]);
+// XSPEC-333 R2c batch 3 (Ruby/PHP/Dart): Ruby and PHP both name their comment
+// node plain "comment" (confirmed against each node-types.json), no change
+// needed there. @vokturz/tree-sitter-dart has its own three-way split,
+// verified against a real parse: "//" and "/* */" both produce the ordinary
+// "comment" node (unlike Java/Rust's line/block split), but a "///" doc
+// comment -- an extremely common convention in real Dart (dartdoc), and a
+// very plausible place for a real project to write "/// implements
+// XSPEC-NNN" -- is its OWN distinct node type, "documentation_comment", not
+// unified with plain "comment" at all. Without this fourth entry, a "///
+// implements XSPEC-NNN" comment in a .dart file would silently produce zero
+// IMPLEMENTS edges -- the same silent-gap shape Java's discovery predicted
+// this Set would need to absorb one day.
+const COMMENT_NODE_TYPES = new Set([
+  "comment",
+  "line_comment",
+  "block_comment",
+  "documentation_comment",
+]);
 
 export function collectComments(root: Parser.SyntaxNode): string[] {
   const texts: string[] = [];

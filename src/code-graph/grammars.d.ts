@@ -93,6 +93,102 @@
  * level). `queries/kotlin.ts`'s patterns were verified from scratch against
  * *this* package's actual `node-types.json` and real parses, not ported from
  * the fwcd-based draft.
+ *
+ * `tree-sitter-ruby@0.23.1` and `tree-sitter-php@0.23.12` (XSPEC-333 R2c
+ * batch 3 -- Ruby/PHP/Dart, the last mainstream-language batch) follow the
+ * exact same `npm view <pkg>@<version> peerDependencies` per-version check as
+ * every batch above: both are the newest release on the `tree-sitter:
+ * ^0.21.1` line (PHP's next release, 0.24.0+, jumps to `^0.22.4` --
+ * `tree-sitter@0.22.4` core technically satisfies that range too, but this
+ * file's established practice is to prefer the already-proven `^0.21.1` line
+ * over trusting a newer peerDependency range at face value -- see the C#
+ * 0.23.1-vs-0.23.5 story above for why that trust would be misplaced). Both
+ * ship real prebuilt binaries for all six platforms (darwin/linux/win32 x
+ * x64/arm64) -- confirmed by inspecting each tarball directly (`npm pack`),
+ * not assumed -- and were actually `require()`'d and used to parse a real
+ * snippet with this repo's pinned `tree-sitter@0.22.4` core before being
+ * trusted (see `test/ruby.test.ts` / `test/php.test.ts`). `tree-sitter-php`
+ * exports TWO grammar dialects from one package (`php`, tolerant of
+ * surrounding HTML/`<?php` tags, and `php_only`, pure-PHP-body only); this
+ * engine uses `php` (see the ambient declaration below and
+ * `extractor.ts`'s `languageFor`), matching how real `.php` files are
+ * actually written.
+ *
+ * `@vokturz/tree-sitter-dart@1.0.0` (XSPEC-333 R2c batch 3) is a MATERIALLY
+ * WORSE dependency than every other grammar in this file -- a genuine
+ * negative finding, not glossed over. Unlike Kotlin's fwcd-vs-
+ * tree-sitter-grammars situation (where a strictly-better, fully-prebuilt,
+ * ABI-compatible alternative existed and was swapped in), **no such
+ * alternative exists for Dart on npm today**. Four candidates were installed
+ * and empirically tested against this repo's pinned `tree-sitter@0.22.4`
+ * core (not assumed from peerDependency ranges alone, which proved
+ * unreliable signal here):
+ *   - `tree-sitter-dart@1.0.0` (the plain, unscoped name) ships NO prebuilt
+ *     binaries at all (`"install": "node-gyp rebuild"`, always compiles from
+ *     source) -- worse than fwcd's Kotlin package, which at least attempted
+ *     `node-gyp-build` first.
+ *   - `@sengac/tree-sitter-dart@1.1.6` ships full 6-platform prebuilds, but
+ *     is ABI-INCOMPATIBLE with `tree-sitter@0.22.4` -- confirmed empirically
+ *     (`Parser.setLanguage` throws `TypeError: Cannot read properties of
+ *     undefined (reading 'length')` in `nodeTypeNamesById`, the exact same
+ *     failure signature as the C# 0.23.5 story above). Its peerDependency
+ *     names a derivative package (`@sengac/tree-sitter`, not the standard
+ *     `tree-sitter` package) -- the tell that it was built for a
+ *     newer/different language ABI this repo's core cannot read.
+ *   - `@driftlog/tree-sitter-dart@1.0.4` ships no prebuilds either, and even
+ *     after compiling from source locally (its `install` script falls
+ *     through to `node-gyp rebuild`), the resulting binary is ALSO
+ *     ABI-incompatible with `tree-sitter@0.22.4` -- confirmed empirically,
+ *     same `nodeTypeNamesById` TypeError. This shows the incompatibility is
+ *     baked into the grammar's generated parser source (the tree-sitter-cli
+ *     version used to run `tree-sitter generate`), not merely a prebuilt-
+ *     binary packaging choice -- compiling locally does not route around it.
+ *   - `@vokturz/tree-sitter-dart@1.0.0` (CHOSEN) ships prebuilds for only
+ *     ONE of six platforms (`linux-x64`) but IS ABI-compatible -- confirmed
+ *     empirically, a real parse succeeds. On darwin-arm64 (this repo's dev
+ *     machine) and on any platform besides linux-x64, `npm install` falls
+ *     through to compiling from source via `node-gyp` (confirmed: this
+ *     actually happened during verification -- `build/Release/*.node` was
+ *     produced locally, not fetched). This requires a working C/C++
+ *     toolchain + Python wherever `npm install` runs -- the exact
+ *     Kotlin-fwcd risk this file's Kotlin section describes as "requiring a
+ *     working C/C++ toolchain... unlike every other grammar this repo
+ *     depends on" -- except here it is accepted anyway because it is the
+ *     ONLY working option found, not a preference. This repo's CI already
+ *     tolerates a from-source native build elsewhere (`ryugraph`'s ALGO
+ *     extension, see `publish.yml`), so it is not unprecedented, but it IS a
+ *     strictly worse reliability posture than Ruby/PHP/every other language
+ *     on this engine, and worth revisiting if a better-maintained,
+ *     fully-prebuilt Dart grammar package appears on npm later.
+ *
+ * One further honest data point on `@vokturz/tree-sitter-dart`, checked via
+ * `npm view` after the four-candidate comparison above, not glossed over:
+ * its own published description reads "A Tree-sitter Grammar for Dark,
+ * forked from @UserNobody14/tree-sitter-dart. Only for CodeGPT internals"
+ * (sic -- "Dark", a typo for "Dart") -- a single npm release
+ * (2025-05-28, never updated since), no `repository`/`homepage` metadata,
+ * one maintainer, explicitly scoped by its own author to another project's
+ * internal use, not general external consumption. The upstream project it
+ * forked from, `UserNobody14/tree-sitter-dart` on GitHub, IS actively
+ * maintained (107 stars, pushed within the last two weeks as of this
+ * writing) -- but that upstream has never itself published a matching npm
+ * release; the only unscoped `tree-sitter-dart` on npm is a different,
+ * long-stale 2023 snapshot (maintainer `amaanq`, no prebuilds at all,
+ * `"install": "node-gyp rebuild"` -- confirmed via `npm view
+ * tree-sitter-dart time`, one release, 2023-02-24), and the upstream
+ * repository's own current `package.json` (peerDependency `tree-sitter:
+ * ^0.25.0`) shows it has since moved to the SAME newer, incompatible ABI
+ * line as `@sengac/tree-sitter-dart` above. In short: every native-binding
+ * npm path to a Dart grammar today is either abandoned, ABI-incompatible
+ * with this repo's pinned core, or (this one) a third party's internal
+ * scratch fork that merely happens to still work -- not a maintained
+ * package this repo can rely on staying compatible across its own future
+ * updates. (Newer WASM-based Dart grammars do exist on npm and ARE
+ * actively maintained, e.g. `@lumis-sh/wasm-dart` -- but consuming those
+ * would mean running under `web-tree-sitter` instead of the native
+ * `tree-sitter` binding this whole file and engine is built on, a
+ * materially bigger architectural change than swapping one language's
+ * grammar package, and out of scope for this batch.)
  */
 
 declare module "tree-sitter-typescript" {
@@ -147,4 +243,27 @@ declare module "tree-sitter-cpp" {
   import type Parser from "tree-sitter";
   const cpp: Parser.Language;
   export = cpp;
+}
+
+declare module "tree-sitter-ruby" {
+  import type Parser from "tree-sitter";
+  const ruby: Parser.Language;
+  export = ruby;
+}
+
+// tree-sitter-php ships TWO grammar dialects from one package: "php" (the
+// dialect used for real .php files -- tolerates surrounding HTML / `<?php`
+// tags) and "php_only" (pure-PHP-body parsing, no HTML). This engine always
+// uses `.php` (see extractor.ts's `languageFor`), matching how virtually
+// every real .php file is actually written (starting with a `<?php` tag).
+declare module "tree-sitter-php" {
+  import type Parser from "tree-sitter";
+  const grammars: { php: Parser.Language; php_only: Parser.Language };
+  export = grammars;
+}
+
+declare module "@vokturz/tree-sitter-dart" {
+  import type Parser from "tree-sitter";
+  const dart: Parser.Language;
+  export = dart;
 }

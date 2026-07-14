@@ -17,7 +17,10 @@ export type SupportedLanguage =
   | "java"
   | "kotlin"
   | "rust"
-  | "cpp";
+  | "cpp"
+  | "ruby"
+  | "php"
+  | "dart";
 
 export interface ExtractOptions {
   /**
@@ -31,8 +34,9 @@ export interface ExtractOptions {
    * `filePath` extension (.ts/.mts/.cts → typescript, .tsx → tsx,
    * .js/.jsx/.mjs/.cjs → javascript, .cs → csharp, .py → python, .go → go,
    * .java → java, .kt/.kts → kotlin, .rs → rust, .cpp/.cc/.cxx/.hpp/.h/.hh →
-   * cpp — see extractor.ts's `detectLanguage` doc comment for why C headers
-   * are mapped to the C++ grammar, not a separate "c" language).
+   * cpp, .rb → ruby, .php → php, .dart → dart — see extractor.ts's
+   * `detectLanguage` doc comment for why C headers are mapped to the C++
+   * grammar, not a separate "c" language).
    */
   language?: SupportedLanguage;
 }

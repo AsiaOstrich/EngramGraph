@@ -30,6 +30,7 @@ const CODE_EXTS = [
   ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".cs",
   ".py", ".go", ".java", ".kt", ".kts", ".rs",
   ".cpp", ".cc", ".cxx", ".hpp", ".h", ".hh",
+  ".rb", ".php", ".dart",
 ] as const;
 
 export interface IndexResultSummary {

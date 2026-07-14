@@ -8,6 +8,9 @@ import { JAVA_TAGS_QUERY } from "./java.js";
 import { KOTLIN_TAGS_QUERY } from "./kotlin.js";
 import { RUST_TAGS_QUERY } from "./rust.js";
 import { CPP_TAGS_QUERY } from "./cpp.js";
+import { RUBY_TAGS_QUERY } from "./ruby.js";
+import { PHP_TAGS_QUERY } from "./php.js";
+import { DART_TAGS_QUERY } from "./dart.js";
 
 /**
  * Per-language tag query source (tree-sitter Query S-expression syntax).
@@ -34,5 +37,11 @@ export function tagsQuerySourceFor(language: SupportedLanguage): string {
       return RUST_TAGS_QUERY;
     case "cpp":
       return CPP_TAGS_QUERY;
+    case "ruby":
+      return RUBY_TAGS_QUERY;
+    case "php":
+      return PHP_TAGS_QUERY;
+    case "dart":
+      return DART_TAGS_QUERY;
   }
 }

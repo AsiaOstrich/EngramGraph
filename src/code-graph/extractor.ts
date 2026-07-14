@@ -39,6 +39,9 @@ import Java from "tree-sitter-java";
 import Kotlin from "@tree-sitter-grammars/tree-sitter-kotlin";
 import Rust from "tree-sitter-rust";
 import Cpp from "tree-sitter-cpp";
+import Ruby from "tree-sitter-ruby";
+import PhpModule from "tree-sitter-php";
+import Dart from "@vokturz/tree-sitter-dart";
 
 import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
@@ -75,6 +78,10 @@ const PROVIDER = "tree-sitter";
  * Kotlin/Rust/C++. `.hpp`/`.hh` (unambiguously C++-only extensions) share the
  * same mapping for consistency, not because they carry any of `.h`'s
  * ambiguity.
+ *
+ * `.rb` -> ruby, `.php` -> php, `.dart` -> dart (XSPEC-333 R2c batch 3, the
+ * last mainstream-language batch). No extension-ambiguity questions like the
+ * `.h` case above for any of the three: each extension is unambiguous.
  */
 function detectLanguage(filePath: string): SupportedLanguage {
   const lower = filePath.toLowerCase();
@@ -98,6 +105,9 @@ function detectLanguage(filePath: string): SupportedLanguage {
   ) {
     return "cpp";
   }
+  if (lower.endsWith(".rb")) return "ruby";
+  if (lower.endsWith(".php")) return "php";
+  if (lower.endsWith(".dart")) return "dart";
   return "javascript";
 }
 
@@ -123,6 +133,12 @@ function languageFor(language: SupportedLanguage): Parser.Language {
       return Rust;
     case "cpp":
       return Cpp;
+    case "ruby":
+      return Ruby;
+    case "php":
+      return PhpModule.php;
+    case "dart":
+      return Dart;
   }
 }
 
