@@ -349,4 +349,67 @@ declare module "@vokturz/tree-sitter-dart" {
  * scoped fork (e.g. `@asiaostrich/tree-sitter-cobol`) and take on its
  * maintenance, which is a real commitment decision for a future batch, not
  * something to slip in here.
+ *
+ * ---- Delphi / Pascal --------------------------------------------------
+ *
+ * The best upstream by a wide margin is `Isopod/tree-sitter-pascal` (77
+ * GitHub stars, pushed as recently as the day before this investigation,
+ * used by the neovim-treesitter ecosystem, MIT, and — unlike every other
+ * candidate in this whole batch — its `package.json` declares exactly the
+ * RIGHT ABI line, `peerDependencies: { "tree-sitter": "^0.22.0" }`,
+ * satisfied by this repo's pinned 0.22.4). It is nonetheless NOT VIABLE
+ * today: it has never been published to npm under any name (0 GitHub
+ * releases too — no prebuilt binaries distributed anywhere despite a
+ * `prebuildify` devDependency in its own package.json), and installing it
+ * directly via `github:Isopod/tree-sitter-pascal#<tag-sha>` empirically
+ * fails to even configure: `binding.gyp` requires `node-addon-api` at gyp
+ * time, but the package's own `dependencies` do not list it — `Cannot find
+ * module 'node-addon-api'`. Adding `node-addon-api` as an explicit
+ * top-level dependency of THIS repo (to test whether hoisting would rescue
+ * it) did not help — a `github:` dependency's install script builds inside
+ * an isolated npm cache/tmp directory that cannot see the consuming
+ * project's hoisted `node_modules` at configure time. This is a genuine
+ * upstream packaging defect (a one-line `package.json` fix), not a quality
+ * judgment call.
+ *
+ * The only npm-registry package under this name, `tree-sitter-pascal@0.0.1`,
+ * is a stale (published 2023-02-08), seemingly unauthorized snapshot — its
+ * own `package.json` lists `author: "Benjamin Gray"` (Isopod) but the
+ * npm-registered maintainer is an unrelated account, `xuanhoa88`, who never
+ * published a second version even though Isopod's upstream has since
+ * iterated to 0.10.2. Installed and empirically confirmed DEAD in a
+ * stronger sense than an ABI mismatch: it fails to even COMPILE against
+ * Node 22 (`nan@2.14.0`'s `nan_typedarray_contents.h` calls
+ * `v8::ArrayBuffer::GetContents()`, removed from modern V8 — a hard
+ * compiler error, not a warning).
+ *
+ * A third candidate, `natan-sysview/tree-sitter-delphi-suite` (a monorepo;
+ * the relevant subpackage is `packages/tree-sitter-delphi`, "derived from
+ * Alexander Liberov" per its own `author` field — an unattributed lineage),
+ * was cloned and built directly (its `src/parser.c` IS committed, unlike
+ * the ABAP case below) and DOES empirically work: `require()` returns the
+ * expected `{name, language, nodeTypeInfo}` wrapper shape, `setLanguage()`
+ * does not throw, and it parses a real `unit`/`class`/qualified
+ * `TGreeter.Greet` method definition cleanly (`hasError: false`, sensible
+ * `declClass`/`defProc`/`genericDot` node types). It was NOT adopted anyway:
+ * 0 GitHub stars, 0 open issues (no independent adoption signal at all,
+ * quieter even than the COBOL derivative above), an internally
+ * inconsistent `package.json` (`dependencies` pins `tree-sitter: ^0.25.0`
+ * directly while `peerDependencies` claims `^0.22.0` — the two disagree
+ * within the same file, a low-trust packaging smell), never published to
+ * npm, and — uniquely among every candidate in this whole investigation —
+ * structured as an un-npm-installable monorepo subdirectory with no
+ * standard `npm install <name>` path at all (only reachable by cloning and
+ * manually building the subpackage, as done here for testing). The same
+ * net-benefit-gate reasoning as COBOL's `analect-dev` case applies, more
+ * strongly: this is genuinely new, optional scope, and this candidate would
+ * be a bigger and more novel supply-chain departure (git subdirectory
+ * vendoring, not even a plain git dependency) than anything else this repo
+ * has ever taken on.
+ *
+ * Revisit trigger: `Isopod/tree-sitter-pascal` fixes its missing
+ * `node-addon-api` dependency and either publishes to npm or cuts a GitHub
+ * release with real prebuilds (a small, mechanical fix given how active
+ * that upstream is) — at that point it would be a clean, standard
+ * npm-registry install like every other language this engine supports.
  */
