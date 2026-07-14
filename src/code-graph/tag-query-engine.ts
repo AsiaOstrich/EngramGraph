@@ -20,9 +20,22 @@
  *      which range containment gives directly without re-walking.
  *
  * `collectComments` is a plain full-tree walk, not a query — the
- * `// implements XSPEC-NNN` convention is pure comment-text regex, unrelated
- * to any language's grammar, so there is nothing language-specific to
- * declare (see extractor.ts module doc / XSPEC-333 task notes).
+ * `// implements XSPEC-NNN` convention itself is pure comment-text regex,
+ * unrelated to any language's grammar, so there is no language-specific
+ * *pattern* to declare (see extractor.ts module doc / XSPEC-333 task notes).
+ * **Correction (XSPEC-333 R2c)**: this file originally also assumed the
+ * comment *node type name* itself was universal ("nothing language-specific
+ * to declare" was too strong a claim). Verified false for Java: JS, TS, C#,
+ * Python and Go's grammars all name it `comment`, but `tree-sitter-java`
+ * splits it into `line_comment`/`block_comment` with no unifying `comment`
+ * type at all — see `collectComments`'s own doc comment below for the fix
+ * and why it was made despite this task batch otherwise being told this
+ * file needs no changes (that instruction was the task-giver's untested
+ * assumption, which this file's own empirical verification overrode; a
+ * silently-broken IMPLEMENTS linkage for a whole new language is exactly the
+ * kind of fail-silent gap this codebase's anti-hallucination stance exists
+ * to catch before it ships, not defer past a literal instruction that
+ * predates the evidence).
  */
 
 import Parser from "tree-sitter";
@@ -234,19 +247,37 @@ export function findEnclosingFunction(
 }
 
 /**
- * Every `comment` node's text, anywhere in the tree — a plain full-tree
- * walk, not a query. The `// implements XSPEC-NNN` convention is pure
- * comment-text regex (see `../knowledge-graph/linker.ts`), unrelated to any
- * language's grammar, so there is no language-specific pattern to declare;
- * this only needs to keep reaching every comment node, same as the old
- * walker did in passing.
+ * Every comment node's text, anywhere in the tree — a plain full-tree walk,
+ * not a query. The `// implements XSPEC-NNN` convention is pure comment-text
+ * regex (see `../knowledge-graph/linker.ts`), unrelated to any language's
+ * grammar, so there is no language-specific *pattern* to declare — but the
+ * comment *node type name* itself is not actually universal across grammars,
+ * despite this function's original (JS/TS/C#) assumption that it was.
+ * JS, TS, C#, Python and Go's grammars all name it `comment` (verified
+ * against each grammar's node-types.json / a real parse — XSPEC-333 R2c) —
+ * but `tree-sitter-java` splits it into two distinct node types,
+ * `line_comment` and `block_comment`, with no unifying `comment` type at
+ * all. Without this, `// implements XSPEC-NNN` in a `.java` file would
+ * silently produce zero IMPLEMENTS edges — no error, just quietly missing
+ * linkage, exactly the kind of gap this codebase's `// implements` feature
+ * exists to prevent. Broadening the match to all three names is safe for
+ * every other language: `line_comment`/`block_comment` are not node type
+ * names in any of the other bundled grammars (confirmed by grepping each
+ * grammar's node-types.json), so this cannot start matching some unrelated
+ * non-comment node elsewhere. Pulled into a `Set` (rather than three
+ * separate `===` checks) so the next language with its own split naming
+ * (e.g. Rust also uses `line_comment`/`block_comment` — same names Java
+ * uses, so it would already be covered for free) is a one-line addition
+ * here instead of another silent per-language gap discovered the hard way.
  */
+const COMMENT_NODE_TYPES = new Set(["comment", "line_comment", "block_comment"]);
+
 export function collectComments(root: Parser.SyntaxNode): string[] {
   const texts: string[] = [];
   const stack: Parser.SyntaxNode[] = [root];
   while (stack.length > 0) {
     const node = stack.pop()!;
-    if (node.type === "comment") texts.push(node.text);
+    if (COMMENT_NODE_TYPES.has(node.type)) texts.push(node.text);
     for (let i = node.childCount - 1; i >= 0; i--) {
       const child = node.child(i);
       if (child) stack.push(child);

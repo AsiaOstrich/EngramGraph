@@ -7,7 +7,14 @@
  */
 
 /** Languages the extractor can parse with the bundled tree-sitter grammars. */
-export type SupportedLanguage = "typescript" | "tsx" | "javascript" | "csharp";
+export type SupportedLanguage =
+  | "typescript"
+  | "tsx"
+  | "javascript"
+  | "csharp"
+  | "python"
+  | "go"
+  | "java";
 
 export interface ExtractOptions {
   /**
@@ -19,7 +26,8 @@ export interface ExtractOptions {
   /**
    * Override language detection. When omitted it is inferred from the
    * `filePath` extension (.ts/.mts/.cts → typescript, .tsx → tsx,
-   * .js/.jsx/.mjs/.cjs → javascript, .cs → csharp).
+   * .js/.jsx/.mjs/.cjs → javascript, .cs → csharp, .py → python, .go → go,
+   * .java → java).
    */
   language?: SupportedLanguage;
 }

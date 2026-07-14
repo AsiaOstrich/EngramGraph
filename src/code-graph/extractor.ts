@@ -33,6 +33,9 @@ import Parser from "tree-sitter";
 import JavaScript from "tree-sitter-javascript";
 import TypeScript from "tree-sitter-typescript";
 import CSharp from "tree-sitter-c-sharp";
+import Python from "tree-sitter-python";
+import Go from "tree-sitter-go";
+import Java from "tree-sitter-java";
 
 import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
@@ -55,6 +58,9 @@ function detectLanguage(filePath: string): SupportedLanguage {
     return "typescript";
   }
   if (lower.endsWith(".cs")) return "csharp";
+  if (lower.endsWith(".py")) return "python";
+  if (lower.endsWith(".go")) return "go";
+  if (lower.endsWith(".java")) return "java";
   return "javascript";
 }
 
@@ -68,6 +74,12 @@ function languageFor(language: SupportedLanguage): Parser.Language {
       return JavaScript;
     case "csharp":
       return CSharp;
+    case "python":
+      return Python;
+    case "go":
+      return Go;
+    case "java":
+      return Java;
   }
 }
 
@@ -156,6 +168,23 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   // signature-aware id scheme change to this shared, language-agnostic
   // function, affecting every language on the engine, not just C#'s query
   // file).
+  //
+  // Go (XSPEC-333 R2c) has a related but *worse* collision: this engine's
+  // scope-qualification is built entirely from byte-range containment (a
+  // definition D is "inside" class C iff C's range contains D's), but a Go
+  // method's receiver type is not lexically nested inside that type's
+  // declaration at all — `func (c *Calculator) Compute()` sits as a
+  // top-level sibling of `type Calculator struct {...}` elsewhere in the
+  // file (verified against a real parse), so there is no containing node to
+  // qualify against in the first place. queries/go.ts therefore does not
+  // capture Go type/struct declarations as `@definition.class` at all (it
+  // would give scope-qualification nothing to work with), and every Go
+  // method's id is qualified by method name alone — so two *different*
+  // receiver types' methods sharing a name (extremely common in Go: many
+  // types each implement their own `String()`/`Close()`/`Error()`) collapse
+  // onto the same id, more often in practice than C#'s same-scope overload
+  // case. Documented in queries/go.ts's module doc as an Open Question, not
+  // fixed here for the same shared-function reason as the C# case above.
   //
   // NOTE (XSPEC-333 R1, future work — not implemented here): this id format
   // (`file#qualified.name`) is a tree-sitter-provider convention. A future
