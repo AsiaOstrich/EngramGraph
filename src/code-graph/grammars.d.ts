@@ -267,3 +267,86 @@ declare module "@vokturz/tree-sitter-dart" {
   const dart: Parser.Language;
   export = dart;
 }
+
+/**
+ * XSPEC-333 R2d — enterprise/legacy language feasibility investigation
+ * (COBOL, Delphi/Pascal, VB.NET, ABAP, PL/SQL), 2026-07. Unlike every batch
+ * above, this one's task was explicitly "verify feasibility first, only
+ * implement what's viable" — not "known-feasible, go build it". Every
+ * candidate below was actually `npm install`'d (registry package or, where
+ * no registry release existed, a specific commit SHA via `github:owner/
+ * repo#<sha>`) against this repo's pinned `tree-sitter@0.22.4` core and
+ * `require()`'d + `Parser.setLanguage()`'d + used to parse a real-ish
+ * snippet of that language — not judged from package.json/README claims
+ * alone, per this file's own established standard. **Verdict: all five are
+ * NOT VIABLE today** — a valid, intentional outcome per this batch's own
+ * task framing, not a shortfall. No `SupportedLanguage` entries, query
+ * files, or `dependencies` changes were added for any of them. Each
+ * subsection below records exactly what was tried and why, plus a concrete
+ * revisit trigger, so a future batch doesn't have to repeat this research
+ * from scratch.
+ *
+ * ---- COBOL ----------------------------------------------------------------
+ *
+ * The only npm-registry package for this name, `tree-sitter-cobol@0.0.1`
+ * (source: `yutaro-sakamoto/tree-sitter-cobol`, 38 GitHub stars — the
+ * healthiest upstream by star count of anything in this batch, but 20 open
+ * issues and no npm release newer than this one ~1-year-old snapshot, no
+ * `peerDependencies` declared at all), was installed and empirically
+ * confirmed ABI-INCOMPATIBLE: `require()` returns a native object whose only
+ * own keys are `name`/`nodeTypeInfo` (no `language` accessor at all — a
+ * different, older internal binding shape than any grammar this engine
+ * already depends on), and `Parser.setLanguage()` throws `Invalid language
+ * object` — the same failure *category* as the C# 0.23.5+/Dart-ABI-break
+ * stories above, though the concrete error text differs.
+ *
+ * A fork, `analect-dev/tree-sitter-cobol` ("patched for N-API / tree-sitter@
+ * 0.21.x compatibility"), was found and DOES work empirically — installed via
+ * `github:analect-dev/tree-sitter-cobol#9a35f83...` (a specific commit), it
+ * parses a real IDENTIFICATION/PROCEDURE DIVISION + PERFORM + paragraph
+ * COBOL snippet cleanly (`hasError: false`, sensible `program_definition`/
+ * `paragraph_header`/`perform_statement_call_proc` node types). It was
+ * deliberately NOT adopted anyway — not because it doesn't work, but because
+ * of what adopting it would mean structurally: this repo (`engramgraph`) is
+ * itself published to npm, and every one of its 10 already-supported
+ * languages is consumed as an ordinary versioned npm-registry dependency
+ * (audit/advisory-tracked, checksummed, prebuilt-binary-distributed). A raw
+ * `github:` dependency would be the *first* exception to that, and for a
+ * PUBLISHED library that matters more than it would for an app: every
+ * downstream `npm install engramgraph` would start depending on (a) a
+ * specific GitHub account/repo staying reachable forever (a SHA pin protects
+ * content integrity, not repo survival — the account could delete the repo
+ * and break every future install), (b) compiling from source on every
+ * install (no prebuilds published anywhere for this fork), and (c) falling
+ * outside `npm audit`/Renovate/advisory tooling entirely. `analect-dev`'s
+ * fork has 0 GitHub stars and one unknown maintainer — zero independent
+ * adoption signal to weigh against that reliability downgrade. Critically,
+ * this is NOT the same situation as `@vokturz/tree-sitter-dart` above (also
+ * a low-trust single-maintainer package): Dart was an *already-committed*
+ * mainstream language with genuinely no better registry option, so accepting
+ * its risk was "forced, no alternative"; COBOL here is *speculative new
+ * scope* this batch could simply decline — this repo's own borrow-net-
+ * benefit-gate principle (don't take on risk for inclusion's own sake)
+ * points the other way once the choice isn't forced.
+ *
+ * A third candidate aimed at real enterprise COBOL specifically,
+ * `Spantree/tree-sitter-cobol-enterprise` ("IBM Enterprise COBOL with EXEC
+ * CICS/SQL support", 7 stars, a real consultancy org) — arguably the most
+ * *relevant* candidate for this batch's "enterprise" framing — was also
+ * installed via commit SHA and empirically fails to even BUILD: `make: ***
+ * No rule to make target 'Release/obj.target/tree_sitter_cobol_binding/src/
+ * parser.o'` — the repo does not commit its generated `src/parser.c` (only
+ * `scanner.c`/`grammar.json`/`node-types.json` are present), so a plain
+ * install can never produce a working binary without first running the
+ * `tree-sitter-cli` `generate` step this repo has no reason to invoke for a
+ * dependency. (It would also have been independently disqualified even if it
+ * built: GitHub reports its license as "Other/NOASSERTION" despite its own
+ * `package.json` claiming MIT — an unresolved license ambiguity.)
+ *
+ * Revisit trigger: `yutaro-sakamoto/tree-sitter-cobol` (the real upstream)
+ * cuts an N-API-compatible npm release — `analect-dev`'s fork shows the fix
+ * is small — or AsiaOstrich deliberately decides to publish its own audited,
+ * scoped fork (e.g. `@asiaostrich/tree-sitter-cobol`) and take on its
+ * maintenance, which is a real commitment decision for a future batch, not
+ * something to slip in here.
+ */
