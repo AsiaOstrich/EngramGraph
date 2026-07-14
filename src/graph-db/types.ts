@@ -19,12 +19,20 @@ export interface FunctionNode {
   start_line: number;
   /** SAGE confidence score in [0, 1]; defaults to 1.0 on creation. */
   confidence: number;
+  /**
+   * Which extraction pipeline produced this node (e.g. "tree-sitter"; future
+   * providers add "scip", "lsif", ...). Drives the writer's overwrite policy
+   * (XSPEC-333 R1) — see writer.ts.
+   */
+  provider: string;
 }
 
 export interface ClassNode {
   id: string;
   name: string;
   file: string;
+  /** Which extraction pipeline produced this node. See {@link FunctionNode.provider}. */
+  provider: string;
 }
 
 export interface ModuleNode {

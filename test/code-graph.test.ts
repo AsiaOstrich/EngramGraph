@@ -62,6 +62,19 @@ describe("CodeGraph extractor (Phase 2)", () => {
     expect(callsFromExecute).toEqual(["src/a.ts#helper", "src/a.ts#log"]);
   });
 
+  // XSPEC-333 R1: every Function/Class node this extractor produces must be
+  // stamped with its provider so the writer's overwrite policy (writer.ts)
+  // can tell a tree-sitter re-index apart from a future different-provider
+  // write.
+  it("stamps every Function node with provider: tree-sitter", () => {
+    const { nodes } = extractCodeGraph(TS_SAMPLE, { filePath: "src/a.ts" });
+    const functions = nodes.filter((n) => n.label === "Function");
+    expect(functions.length).toBeGreaterThan(0);
+    for (const fn of functions) {
+      expect(fn.properties.provider).toBe("tree-sitter");
+    }
+  });
+
   it("captures class methods as Function nodes and a Class node", () => {
     const { nodes } = extractCodeGraph(CLASS_SAMPLE, { filePath: "src/svc.ts" });
 
@@ -70,6 +83,15 @@ describe("CodeGraph extractor (Phase 2)", () => {
 
     const fnNames = nodes.filter((n) => n.label === "Function").map((n) => n.properties.name).sort();
     expect(fnNames).toEqual(["execute", "helper", "run"]);
+  });
+
+  it("stamps every Class node with provider: tree-sitter", () => {
+    const { nodes } = extractCodeGraph(CLASS_SAMPLE, { filePath: "src/svc.ts" });
+    const classes = nodes.filter((n) => n.label === "Class");
+    expect(classes.length).toBeGreaterThan(0);
+    for (const cls of classes) {
+      expect(cls.properties.provider).toBe("tree-sitter");
+    }
   });
 
   it("scope-qualifies ids so same-name functions in different scopes don't collide", () => {

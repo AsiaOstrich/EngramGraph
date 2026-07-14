@@ -45,6 +45,14 @@ const FUNCTION_DECL_TYPES = new Set([
 const FUNCTION_VALUE_TYPES = new Set(["arrow_function", "function", "function_expression"]);
 const CLASS_TYPES = new Set(["class_declaration", "class"]);
 
+/**
+ * Provenance stamp for every node this extractor produces (XSPEC-333 R1).
+ * Lets the writer's merge policy tell a re-index of this same pipeline
+ * (always allowed to overwrite) apart from a future different-provider write
+ * (only allowed to overwrite when its confidence is strictly higher).
+ */
+const PROVIDER = "tree-sitter";
+
 function detectLanguage(filePath: string): SupportedLanguage {
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".tsx")) return "tsx";
@@ -167,6 +175,11 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     }
     if (!name) return null;
     const qualified = scopeStack.length > 0 ? `${scopeStack.join(".")}.${name}` : name;
+    // NOTE (XSPEC-333 R1, future work — not implemented here): this id format
+    // (`file#qualified.name`) is a tree-sitter-provider convention. A future
+    // non-tree-sitter provider (e.g. SCIP) will have its own native id scheme
+    // that won't line up with this one; merging the two into one node per
+    // real-world symbol will need an id-normalization layer at that point.
     return { id: `${filePath}#${qualified}`, name, startLine: node.startPosition.row + 1 };
   }
 
@@ -187,7 +200,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
         nodes.push({
           label: "Class",
           id: `${filePath}#class:${className}`,
-          properties: { name: className, file: filePath },
+          properties: { name: className, file: filePath, provider: PROVIDER },
         });
         scopeStack.push(className);
         pushedScope = true;
@@ -199,7 +212,13 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
       nodes.push({
         label: "Function",
         id: fn.id,
-        properties: { name: fn.name, file: filePath, start_line: fn.startLine, confidence: 1 },
+        properties: {
+          name: fn.name,
+          file: filePath,
+          start_line: fn.startLine,
+          confidence: 1,
+          provider: PROVIDER,
+        },
       });
       defines.push({
         label: "DEFINES",
