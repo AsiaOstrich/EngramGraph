@@ -412,4 +412,77 @@ declare module "@vokturz/tree-sitter-dart" {
  * release with real prebuilds (a small, mechanical fix given how active
  * that upstream is) — at that point it would be a clean, standard
  * npm-registry install like every other language this engine supports.
+ *
+ * ---- VB.NET -----------------------------------------------------------
+ *
+ * The only real candidate, `tree-sitter-vb-dotnet` (org-maintained by
+ * CodeAnt AI, a real code-review-SaaS company; maintainer field on npm
+ * matches the `author` field exactly, i.e. not a third-party republish; 23
+ * GitHub stars; 10 npm versions actively iterated), looked like the
+ * strongest candidate in this entire batch on FIRST PASS: installed cleanly
+ * from a prebuilt binary (no compile-from-source needed), `require()` +
+ * `Parser.setLanguage()` did not throw, and it parsed a real-ish VB.NET
+ * snippet (`Namespace`/`Class`/`Function`/`Sub`/`Dim`/member-access/
+ * invocation) into a clean, sensible AST (`hasError: false`,
+ * `class_block`/`method_declaration`/`invocation`/`member_access` node
+ * types) — despite its declared `peerDependencies: { "tree-sitter":
+ * "^0.25.0" }` nominally being the SAME newer/incompatible ABI line that
+ * broke C# 0.23.5+ and multiple PL/SQL/Dart candidates elsewhere in this
+ * file. The first-pass conclusion was that the peerDependency label was
+ * simply an overcautious/copy-pasted default and the compiled binary was
+ * genuinely ABI-compatible — consistent with this file's general finding
+ * that peerDependency ranges are not always reliable signal.
+ *
+ * **That first-pass conclusion was WRONG, caught by reading the package's
+ * own `bindings/node/index.js` rather than stopping at "it didn't throw on
+ * one snippet"**. The file reveals the package does NOT genuinely target
+ * this repo's tree-sitter ABI line at all — its native binary really is
+ * built for the newer 0.25.x line (the peerDependency claim was accurate),
+ * and the package ships a bespoke compatibility shim to paper over the gap:
+ * it reaches into **this repo's own `tree-sitter` package's private
+ * runtime binding** (`require(tree-sitter/prebuilds/${platform}-${arch}/
+ * tree-sitter.node)`), calls undocumented internal functions
+ * (`getNodeTypeNamesById`/`getNodeFieldNamesById`) directly on the raw
+ * language object to reconstruct the metadata a 0.22-line `Parser` expects
+ * natively, and then — as an unconditional side effect of merely
+ * `require()`-ing the package, not of calling any VB.NET-specific API —
+ * **monkey-patches `Parser.prototype.getLanguage` globally, process-wide,
+ * via a `Proxy`**, wrapping the *shared* `tree-sitter` module every other
+ * language on this engine also imports. This was verified empirically, not
+ * inferred from reading the source alone: a fresh Node process was used to
+ * parse Python BEFORE `require("tree-sitter-vb-dotnet")`, then require it,
+ * then parse Python again with a fresh `Parser` — Python's own parse
+ * result was unaffected in this narrow test, but
+ * `Parser.prototype.getLanguage.toString()` was confirmed to contain
+ * `"Proxy"` immediately after the `require()`, proving the shared
+ * `Parser` class had in fact been mutated process-wide by a package whose
+ * only job should be exporting a VB.NET grammar object.
+ *
+ * This engine keeps one long-lived `Parser` instance per language alive for
+ * a whole repository indexing run (`extractor.ts`'s `parserCache`), in the
+ * SAME process as every other language's parser — exactly the situation
+ * where a global, undocumented prototype patch is most likely to interact
+ * unpredictably with something else in the future (a `tree-sitter` patch
+ * release changing its own internal `prebuilds/` layout, another
+ * dependency also patching `Parser.prototype`, Node module-cache ordering
+ * changing which patch "wins"). No other of the 10 already-accepted
+ * grammars does anything resembling this — every one of them is a plain,
+ * inert `Parser.Language`-shaped value. Adopting `tree-sitter-vb-dotnet`
+ * would mean this repo's very first language-grammar dependency to mutate
+ * a shared core module's prototype as an import-time side effect — judged
+ * NOT VIABLE on that basis, independent of the earlier (and, on its own,
+ * insufficient) "it parsed one snippet fine" evidence.
+ *
+ * No other npm-registry VB.NET grammar package was found in this
+ * investigation (searched under `tree-sitter-vbnet`, `tree-sitter-vb`,
+ * `tree-sitter-visualbasic` — all either 404 on the registry or, on
+ * GitHub, single-digit-star/unpublished personal projects with no
+ * technical advantage over CodeAnt AI's package).
+ *
+ * Revisit trigger: CodeAnt AI ships a release built against (with real
+ * prebuilds compatible with) the `^0.22.x` ABI line that does not need the
+ * `Parser.prototype` monkey-patch shim at all, OR this repo's own pinned
+ * `tree-sitter` core is deliberately upgraded to the 0.25.x line — a much
+ * larger, separate decision affecting all 10 existing languages
+ * simultaneously, well out of scope for a single-language addition.
  */
