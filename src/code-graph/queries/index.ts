@@ -1,6 +1,7 @@
 import type { SupportedLanguage } from "../types.js";
 import { JAVASCRIPT_TAGS_QUERY } from "./javascript.js";
 import { TYPESCRIPT_TAGS_QUERY } from "./typescript.js";
+import { CSHARP_TAGS_QUERY } from "./csharp.js";
 
 /**
  * Per-language tag query source (tree-sitter Query S-expression syntax).
@@ -13,5 +14,7 @@ export function tagsQuerySourceFor(language: SupportedLanguage): string {
     case "typescript":
     case "tsx":
       return TYPESCRIPT_TAGS_QUERY;
+    case "csharp":
+      return CSHARP_TAGS_QUERY;
   }
 }

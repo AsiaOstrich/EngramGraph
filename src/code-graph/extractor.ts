@@ -32,6 +32,7 @@
 import Parser from "tree-sitter";
 import JavaScript from "tree-sitter-javascript";
 import TypeScript from "tree-sitter-typescript";
+import CSharp from "tree-sitter-c-sharp";
 
 import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
@@ -53,6 +54,7 @@ function detectLanguage(filePath: string): SupportedLanguage {
   if (lower.endsWith(".ts") || lower.endsWith(".mts") || lower.endsWith(".cts")) {
     return "typescript";
   }
+  if (lower.endsWith(".cs")) return "csharp";
   return "javascript";
 }
 
@@ -64,6 +66,8 @@ function languageFor(language: SupportedLanguage): Parser.Language {
       return TypeScript.tsx;
     case "javascript":
       return JavaScript;
+    case "csharp":
+      return CSharp;
   }
 }
 

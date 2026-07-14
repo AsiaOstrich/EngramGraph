@@ -26,7 +26,7 @@ import { applyFeedback, feedbackForEventType, topByConfidence, type ConfidenceLa
 import { godNodes, communities, related, type GodNode, type CommunityMember, type RelatedNode } from "../structural-memory/index.js";
 import { walkFiles } from "./walk.js";
 
-const CODE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"] as const;
+const CODE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".cs"] as const;
 
 export interface IndexResultSummary {
   code: { files: number; functions: number; classes: number; calls: number; implements: number; ambiguous: number; unresolved: number };
