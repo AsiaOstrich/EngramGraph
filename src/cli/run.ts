@@ -28,7 +28,8 @@ import { walkFiles } from "./walk.js";
 
 const CODE_EXTS = [
   ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".cs",
-  ".py", ".go", ".java",
+  ".py", ".go", ".java", ".kt", ".kts", ".rs",
+  ".cpp", ".cc", ".cxx", ".hpp", ".h", ".hh",
 ] as const;
 
 export interface IndexResultSummary {

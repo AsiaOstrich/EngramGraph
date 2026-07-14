@@ -22,8 +22,8 @@ const HELP = `egr — code + knowledge graph memory CLI
 Usage: egr <command> [args] [options]
 
 Commands:
-  index <dir> [--docs] [--clean]  Index source (.ts/.js/.cs/.py/.go/.java) into
-                                  the code graph;
+  index <dir> [--docs] [--clean]  Index source (.ts/.js/.cs/.py/.go/.java/
+                                  .kt/.rs/.cpp) into the code graph;
                                   --docs also indexes .md; --clean drops the
                                   graph first (prunes deleted nodes)
   callers <symbol> [--depth N]    Functions that (transitively) call <symbol>

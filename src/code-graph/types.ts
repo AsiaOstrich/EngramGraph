@@ -14,7 +14,10 @@ export type SupportedLanguage =
   | "csharp"
   | "python"
   | "go"
-  | "java";
+  | "java"
+  | "kotlin"
+  | "rust"
+  | "cpp";
 
 export interface ExtractOptions {
   /**
@@ -27,7 +30,9 @@ export interface ExtractOptions {
    * Override language detection. When omitted it is inferred from the
    * `filePath` extension (.ts/.mts/.cts → typescript, .tsx → tsx,
    * .js/.jsx/.mjs/.cjs → javascript, .cs → csharp, .py → python, .go → go,
-   * .java → java).
+   * .java → java, .kt/.kts → kotlin, .rs → rust, .cpp/.cc/.cxx/.hpp/.h/.hh →
+   * cpp — see extractor.ts's `detectLanguage` doc comment for why C headers
+   * are mapped to the C++ grammar, not a separate "c" language).
    */
   language?: SupportedLanguage;
 }

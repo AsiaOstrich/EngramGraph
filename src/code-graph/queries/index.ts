@@ -5,6 +5,9 @@ import { CSHARP_TAGS_QUERY } from "./csharp.js";
 import { PYTHON_TAGS_QUERY } from "./python.js";
 import { GO_TAGS_QUERY } from "./go.js";
 import { JAVA_TAGS_QUERY } from "./java.js";
+import { KOTLIN_TAGS_QUERY } from "./kotlin.js";
+import { RUST_TAGS_QUERY } from "./rust.js";
+import { CPP_TAGS_QUERY } from "./cpp.js";
 
 /**
  * Per-language tag query source (tree-sitter Query S-expression syntax).
@@ -25,5 +28,11 @@ export function tagsQuerySourceFor(language: SupportedLanguage): string {
       return GO_TAGS_QUERY;
     case "java":
       return JAVA_TAGS_QUERY;
+    case "kotlin":
+      return KOTLIN_TAGS_QUERY;
+    case "rust":
+      return RUST_TAGS_QUERY;
+    case "cpp":
+      return CPP_TAGS_QUERY;
   }
 }

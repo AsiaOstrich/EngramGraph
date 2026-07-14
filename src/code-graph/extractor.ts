@@ -36,6 +36,9 @@ import CSharp from "tree-sitter-c-sharp";
 import Python from "tree-sitter-python";
 import Go from "tree-sitter-go";
 import Java from "tree-sitter-java";
+import Kotlin from "@tree-sitter-grammars/tree-sitter-kotlin";
+import Rust from "tree-sitter-rust";
+import Cpp from "tree-sitter-cpp";
 
 import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
@@ -51,6 +54,28 @@ import { collectComments, findEnclosingFunction, qualifyFunctions, runTagQuery }
  */
 const PROVIDER = "tree-sitter";
 
+/**
+ * `.kt`/`.kts` → kotlin, `.rs` → rust, `.cpp`/`.cc`/`.cxx`/`.hpp`/`.h`/`.hh` →
+ * cpp (XSPEC-333 R2c batch 2).
+ *
+ * C headers (`.h`) are mapped to the **C++** grammar, not a separate "c"
+ * language this engine doesn't have — a deliberate, considered default, not
+ * an oversight. A `.h` file cannot be reliably told apart from its language
+ * by extension alone (plain C, C++, or a C header meant to be `extern "C"`-
+ * wrapped from C++ all share it); `tree-sitter-cpp`'s grammar is a superset
+ * of C for the overwhelming majority of real-world header syntax (struct/
+ * function/typedef declarations, preprocessor directives), so parsing a pure-
+ * C header with it typically still produces a usable, mostly-correct parse.
+ * The narrow cases where this is NOT a perfect fit — legacy K&R-style
+ * function definitions, C11 `_Generic`, or other C-only syntax the C++
+ * grammar doesn't recognize — are a documented Open Question (see
+ * queries/cpp.ts's module doc comment), not fixed here: this engine has no
+ * `tree-sitter-c` grammar installed, and adding a whole separate language
+ * purely to special-case `.h` is out of scope for this batch, whose task was
+ * Kotlin/Rust/C++. `.hpp`/`.hh` (unambiguously C++-only extensions) share the
+ * same mapping for consistency, not because they carry any of `.h`'s
+ * ambiguity.
+ */
 function detectLanguage(filePath: string): SupportedLanguage {
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".tsx")) return "tsx";
@@ -61,6 +86,18 @@ function detectLanguage(filePath: string): SupportedLanguage {
   if (lower.endsWith(".py")) return "python";
   if (lower.endsWith(".go")) return "go";
   if (lower.endsWith(".java")) return "java";
+  if (lower.endsWith(".kt") || lower.endsWith(".kts")) return "kotlin";
+  if (lower.endsWith(".rs")) return "rust";
+  if (
+    lower.endsWith(".cpp") ||
+    lower.endsWith(".cc") ||
+    lower.endsWith(".cxx") ||
+    lower.endsWith(".hpp") ||
+    lower.endsWith(".h") ||
+    lower.endsWith(".hh")
+  ) {
+    return "cpp";
+  }
   return "javascript";
 }
 
@@ -80,6 +117,12 @@ function languageFor(language: SupportedLanguage): Parser.Language {
       return Go;
     case "java":
       return Java;
+    case "kotlin":
+      return Kotlin;
+    case "rust":
+      return Rust;
+    case "cpp":
+      return Cpp;
   }
 }
 
