@@ -13,10 +13,12 @@
  * -- definitions --------------------------------------------------------------
  *
  * `class_declaration`, `struct_declaration`, `interface_declaration` and
- * `record_declaration` share byte-for-byte the same relevant shape in
- * node-types.json (`name: (identifier)`, `body: (declaration_list)`) — unlike
- * JS/TS there is no per-kind field difference to reason about, so unlike the
- * task's minimum ask (class_declaration only) all four are captured as
+ * `record_declaration` all share the same relevant shape in node-types.json
+ * (`name: (identifier)`, optional `body: (declaration_list)` — required for
+ * the first three, optional for `record_declaration` since a body-less
+ * record like `record Point(int X, int Y);` is legal) — unlike JS/TS there
+ * is no per-kind field difference to reason about, so unlike the task's
+ * minimum ask (class_declaration only) all four are captured as
  * `@definition.class` here at effectively zero marginal cost. A record's
  * *primary constructor* parameter list (`record Point(int X, int Y);`) is a
  * bare child of record_declaration, not a constructor_declaration — it has no
@@ -71,7 +73,39 @@
  * identifier argument (`app.Register(ConfigureAlerts, options)` — C#
  * implicitly converts a bare method name to a delegate in that position).
  * Same shape as JS: only a direct (non-nested) bare identifier under
- * `argument_list` counts.
+ * `argument_list` counts — but two C# constructs that don't exist in JS
+ * make a naive port of the JS pattern (`argument_list (argument
+ * (identifier))`, no further constraint) produce false CALLS edges, both
+ * confirmed against a real parse before being excluded here:
+ *
+ *  1. A *named argument* (`Foo(handler: 1)`) puts the parameter label
+ *     itself in `argument`'s optional `name:` field as a plain
+ *     `identifier` — indistinguishable from a real positional bare-name
+ *     argument unless the pattern explicitly requires the `name:` field to
+ *     be *absent* (`!name`). Without it, calling a method with a parameter
+ *     literally named after some other real function in scope (e.g.
+ *     `Foo(handler: 1)` where a `handler()` method also exists) fabricates
+ *     a CALLS edge to `handler` — confirmed against a real parse. This also
+ *     means a named argument whose *value* is itself a bare-identifier
+ *     method-group reference (`app.Register(handler: ConfigureAlerts)`) is
+ *     NOT captured either — the whole `argument` node has a `name:` field,
+ *     so `!name` excludes it wholesale, the same narrowing tradeoff (miss a
+ *     rarer positive rather than admit a wrong one) as JS's own "only a
+ *     *direct* argument, not one nested in an object/array literal" cut.
+ *  2. `nameof(X)` is ordinary syntax to this grammar — an
+ *     `invocation_expression` whose callee is the identifier `nameof` and
+ *     whose sole argument is a bare identifier `X` — but semantically it
+ *     is a *symbol reference*, not a call or a value-pass, and is common
+ *     idiomatic C# (argument validation, logging, `nameof(SomeMethod)`).
+ *     Confirmed against a real parse that the naive pattern fabricates a
+ *     CALLS edge to `X` whenever `X` happens to name a real function.
+ *     Excluded via a `#not-eq?` predicate on the invocation's callee name
+ *     (this binding's `Query.matches`/`.captures` does evaluate
+ *     `#eq?`/`#not-eq?`/`#match?` predicates itself — confirmed by reading
+ *     node_modules/tree-sitter/index.js — so this is not dead weight in
+ *     the query string). `nameof` can only ever be a bare-identifier call
+ *     (there is no `obj.nameof(x)` in C#), so the member-access variant of
+ *     this pattern needs no equivalent guard.
  */
 export const CSHARP_TAGS_QUERY = `
 ; -- class / struct / interface / record definitions ------------------------
@@ -113,8 +147,19 @@ export const CSHARP_TAGS_QUERY = `
 
 ; a method group passed *by reference* as a direct (non-nested) call
 ; argument, e.g. \`app.Register(ConfigureAlerts, options)\` — the C# analogue
-; of JS's Fastify \`app.register(pluginFn, opts)\` pattern. Only a bare
-; identifier directly under an \`argument\` counts, same narrow scope as JS.
+; of JS's Fastify \`app.register(pluginFn, opts)\` pattern. "!name" excludes
+; a named-argument label (\`Foo(handler: 1)\`, itself a plain identifier in
+; this grammar); "#not-eq?" excludes \`nameof(X)\` (a symbol reference, not a
+; call/value-pass) — both fabricate a CALLS edge without these guards, see
+; module doc comment. Two variants: bare-identifier callee (needs the
+; nameof guard) and member-access callee (nameof can never be
+; member-accessed, so no guard needed there).
 (invocation_expression
-  arguments: (argument_list (argument (identifier) @reference.call.arg)))
+  function: (identifier) @_callee
+  arguments: (argument_list (argument !name (identifier) @reference.call.arg))
+  (#not-eq? @_callee "nameof"))
+
+(invocation_expression
+  function: (member_access_expression)
+  arguments: (argument_list (argument !name (identifier) @reference.call.arg)))
 `;

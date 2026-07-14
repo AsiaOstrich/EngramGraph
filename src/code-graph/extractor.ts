@@ -144,7 +144,18 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   // same-named functions in *different* scopes of one file no longer
   // collide — while staying stable across edits that shift line numbers
   // (incremental re-index updates in place). Two functions with the same
-  // name in the *same* scope can't exist in valid code.
+  // name in the *same* scope can't exist in valid JS/TS code — but this is
+  // NOT true of every language on this engine: C# (XSPEC-333 R2b) allows
+  // method overloading (same name, different parameter lists, same scope),
+  // which this id scheme does not disambiguate by signature. Two overloads
+  // collapse onto one qualified id (`file#Class.Method` for both), so
+  // extractCodeGraph emits duplicate Function nodes sharing that id (and
+  // duplicate DEFINES edges to it) rather than one node per overload — a
+  // known, documented limitation (see test/csharp.test.ts's overload test),
+  // not silently swallowed, and out of scope for R2b to fix (would need a
+  // signature-aware id scheme change to this shared, language-agnostic
+  // function, affecting every language on the engine, not just C#'s query
+  // file).
   //
   // NOTE (XSPEC-333 R1, future work — not implemented here): this id format
   // (`file#qualified.name`) is a tree-sitter-provider convention. A future

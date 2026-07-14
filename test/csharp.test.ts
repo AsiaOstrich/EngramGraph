@@ -165,7 +165,7 @@ describe("CodeGraph extractor — C# (XSPEC-333 R2b)", () => {
     ]);
   });
 
-  it("does not capture a generic member-access call target (obj.Method<T>()) — documented Open Question", () => {
+  it("does not capture a bare generic call target (Helper<int>()) — documented Open Question", () => {
     const src = `
       public class C {
         public void Run() { Helper<int>(1); }
@@ -177,6 +177,79 @@ describe("CodeGraph extractor — C# (XSPEC-333 R2b)", () => {
     // identifier or member_access_expression, so this call site is not
     // captured at all (neither by name).
     expect(callSites.map((c) => c.name)).not.toContain("Helper");
+  });
+
+  it("does not capture a generic member-access call target (obj.Method<T>()) — documented Open Question", () => {
+    const src = `
+      public class C {
+        public void Run() { list.Select<int>(x => x); }
+      }
+    `;
+    const { callSites } = runTagQuery(CSharp, "csharp", tagsQuerySourceFor("csharp"), parseCSharp(src).rootNode);
+    // list.Select<int>(...) — member_access_expression's "name" field is a
+    // generic_name here, not a plain identifier, so the @reference.call
+    // pattern (which requires name: (identifier)) does not match.
+    expect(callSites.map((c) => c.name)).not.toContain("Select");
+  });
+
+  // Regression: a naive port of JS's by-reference-argument pattern
+  // (`argument_list (argument (identifier))`, no further constraint) also
+  // matches a *named argument's* parameter label, which is a plain
+  // identifier in this grammar too — fabricating a CALLS edge to whatever
+  // function happens to share a name with the parameter (found via an
+  // adversarial review of the first draft of this query, not by inspection).
+  it("does not treat a named-argument parameter label as a call reference", () => {
+    const src = `
+      public class C {
+        public void M() { Foo(handler: 1); }
+        private void handler() {}
+        private void Foo(int x) {}
+      }
+    `;
+    const { edges } = extractCodeGraph(src, { filePath: "named-arg.cs" });
+    const callsFromM = edges
+      .filter((e) => e.label === "CALLS" && e.from === "named-arg.cs#C.M")
+      .map((e) => e.to);
+    expect(callsFromM).toEqual(["named-arg.cs#C.Foo"]); // NOT ...#C.handler
+  });
+
+  // Regression: `nameof(X)` is a real invocation_expression to this grammar
+  // (callee identifier "nameof", argument a bare identifier `X`) but is
+  // semantically a symbol reference, not a call or a value-pass — idiomatic
+  // in argument validation / logging. A naive port of JS's pattern
+  // fabricates a CALLS edge to X whenever X names a real function.
+  it("does not treat nameof(X)'s argument as a call reference to X", () => {
+    const src = `
+      public class C {
+        public void M() { Log(nameof(Helper)); }
+        private void Helper() {}
+        private void Log(string s) {}
+      }
+    `;
+    const { edges } = extractCodeGraph(src, { filePath: "nameof.cs" });
+    const callsFromM = edges
+      .filter((e) => e.label === "CALLS" && e.from === "nameof.cs#C.M")
+      .map((e) => e.to);
+    expect(callsFromM).toEqual(["nameof.cs#C.Log"]); // NOT ...#C.Helper
+  });
+
+  // Documented limitation (see extractor.ts's comment on qualifyFunctions'
+  // call site): unlike JS/TS, C# allows method overloading — same name,
+  // different parameter lists, same scope. This id scheme scope-qualifies
+  // by name only, not by signature, so two overloads collapse onto the same
+  // qualified id rather than erroring or silently dropping one.
+  it("collapses method overloads onto one qualified id (documented limitation, not a crash)", () => {
+    const src = `
+      public class C {
+        void M(int x) { }
+        void M(string x) { }
+      }
+    `;
+    const { nodes, edges } = extractCodeGraph(src, { filePath: "overload.cs" });
+    const functionNodes = nodes.filter((n) => n.label === "Function");
+    expect(functionNodes).toHaveLength(2); // one per overload, not deduped
+    expect(functionNodes.every((n) => n.id === "overload.cs#C.M")).toBe(true); // same id
+    expect(edges.filter((e) => e.label === "DEFINES")).toHaveLength(2); // both DEFINES edges emitted
   });
 });
 
