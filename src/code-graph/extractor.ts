@@ -36,14 +36,8 @@ import TypeScript from "tree-sitter-typescript";
 import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
 import type { ExtractOptions, ProjectFile, SupportedLanguage } from "./types.js";
-
-/** tree-sitter node types that introduce a (potentially named) function. */
-const FUNCTION_DECL_TYPES = new Set([
-  "function_declaration",
-  "generator_function_declaration",
-]);
-const FUNCTION_VALUE_TYPES = new Set(["arrow_function", "function", "function_expression"]);
-const CLASS_TYPES = new Set(["class_declaration", "class"]);
+import { tagsQuerySourceFor } from "./queries/index.js";
+import { collectComments, findEnclosingFunction, qualifyFunctions, runTagQuery } from "./tag-query-engine.js";
 
 /**
  * Provenance stamp for every node this extractor produces (XSPEC-333 R1).
@@ -90,25 +84,6 @@ function parserFor(language: SupportedLanguage): Parser {
   return parser;
 }
 
-/** Resolve the bare callee name of a `call_expression`, or null if dynamic. */
-function calleeName(callNode: Parser.SyntaxNode): string | null {
-  const fn = callNode.childForFieldName("function");
-  if (!fn) return null;
-  if (fn.type === "identifier") return fn.text;
-  // member_expression (e.g. `this.execute`, `console.log`) → property name
-  if (fn.type === "member_expression") {
-    return fn.childForFieldName("property")?.text ?? null;
-  }
-  return null;
-}
-
-/** A function discovered during the walk, before edges are resolved. */
-interface DiscoveredFn {
-  id: string;
-  name: string;
-  startLine: number;
-}
-
 /** An unresolved call: `from` (caller id) invoked something named `callee`. */
 export interface RawCall {
   from: string;
@@ -132,9 +107,12 @@ export interface Extraction {
 }
 
 /**
- * Walk a single file's AST and collect nodes, DEFINES edges and *unresolved*
- * call records. Call resolution is deferred so it can be done intra-file
- * ({@link extractCodeGraph}) or cross-file ({@link extractProject}).
+ * Extract a single file's nodes, DEFINES edges and *unresolved* call records
+ * via a language's tag query ({@link runTagQuery}) plus range-containment
+ * post-processing ({@link qualifyFunctions}, {@link findEnclosingFunction})
+ * instead of a hand-written recursive walk (XSPEC-333 R2a). Call resolution
+ * itself is deferred so it can be done intra-file ({@link extractCodeGraph})
+ * or cross-file ({@link extractProject}).
  *
  * @throws if the source cannot be parsed into a syntax tree.
  */
@@ -151,119 +129,76 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   const defines: GraphEdge[] = [];
   const names = new Map<string, string>();
   const rawCalls: RawCall[] = [];
-  /** Spec ids this file declares it implements (module-level, de-duplicated). */
+
+  const { definitions, callSites } = runTagQuery(
+    languageFor(language),
+    language,
+    tagsQuerySourceFor(language),
+    tree.rootNode,
+  );
+  // Scope-qualification (not line numbers) keeps function ids unique — two
+  // same-named functions in *different* scopes of one file no longer
+  // collide — while staying stable across edits that shift line numbers
+  // (incremental re-index updates in place). Two functions with the same
+  // name in the *same* scope can't exist in valid code.
+  //
+  // NOTE (XSPEC-333 R1, future work — not implemented here): this id format
+  // (`file#qualified.name`) is a tree-sitter-provider convention. A future
+  // non-tree-sitter provider (e.g. SCIP) will have its own native id scheme
+  // that won't line up with this one; merging the two into one node per
+  // real-world symbol will need an id-normalization layer at that point.
+  const { functions, classes } = qualifyFunctions(filePath, definitions);
+
+  for (const cls of classes) {
+    nodes.push({
+      label: "Class",
+      id: `${filePath}#class:${cls.name}`,
+      properties: { name: cls.name, file: filePath, provider: PROVIDER },
+    });
+  }
+
+  for (const fn of functions) {
+    nodes.push({
+      label: "Function",
+      id: fn.id,
+      properties: {
+        name: fn.name,
+        file: filePath,
+        start_line: fn.startLine,
+        confidence: 1,
+        provider: PROVIDER,
+      },
+    });
+    defines.push({
+      label: "DEFINES",
+      fromLabel: "Module",
+      from: moduleId,
+      toLabel: "Function",
+      to: fn.id,
+    });
+    // bare-name map for CALLS resolution (same-name in different scopes →
+    // last definition wins; a documented intra-file resolution limitation).
+    // `functions` is document-ordered (see runTagQuery), so this loop
+    // reproduces the old walker's pre-order-DFS "last write wins" exactly.
+    names.set(fn.name, fn.id);
+  }
+
+  for (const call of callSites) {
+    // The old walker only recorded a call when it had a `currentFn` (i.e.
+    // was already inside some function) — a call at module top level, or
+    // inside a class body but outside any method, was silently dropped.
+    // Finding no enclosing function reproduces that gate exactly.
+    const enclosing = findEnclosingFunction(functions, call.node);
+    if (enclosing) rawCalls.push({ from: enclosing.id, callee: call.name, file: filePath });
+  }
+
+  // `// implements XSPEC-NNN` / `/* implements SPEC-NNN */` — a file-level
+  // declaration that this module implements a spec. Attached to the Module
+  // (not the enclosing function): the convention annotates whole files.
   const moduleSpecs = new Set<string>();
-
-  /**
-   * Build a function's id, qualified by its enclosing scope chain (classes +
-   * functions). Scope-qualification (not line numbers) keeps ids unique — two
-   * same-named functions in *different* scopes of one file no longer collide —
-   * while staying stable across edits that shift line numbers (incremental
-   * re-index updates in place). Two functions with the same name in the *same*
-   * scope can't exist in valid code.
-   */
-  function functionIdentity(
-    node: Parser.SyntaxNode,
-    scopeStack: string[],
-  ): DiscoveredFn | null {
-    let name: string | undefined;
-    if (FUNCTION_DECL_TYPES.has(node.type) || node.type === "method_definition") {
-      name = node.childForFieldName("name")?.text;
-    } else if (FUNCTION_VALUE_TYPES.has(node.type) && node.parent?.type === "variable_declarator") {
-      // arrow / function expression bound to a variable: `const log = (m) => ...`
-      name = node.parent.childForFieldName("name")?.text;
-    }
-    if (!name) return null;
-    const qualified = scopeStack.length > 0 ? `${scopeStack.join(".")}.${name}` : name;
-    // NOTE (XSPEC-333 R1, future work — not implemented here): this id format
-    // (`file#qualified.name`) is a tree-sitter-provider convention. A future
-    // non-tree-sitter provider (e.g. SCIP) will have its own native id scheme
-    // that won't line up with this one; merging the two into one node per
-    // real-world symbol will need an id-normalization layer at that point.
-    return { id: `${filePath}#${qualified}`, name, startLine: node.startPosition.row + 1 };
+  for (const text of collectComments(tree.rootNode)) {
+    for (const specId of extractImplementsSpecs(text)) moduleSpecs.add(specId);
   }
-
-  function visit(node: Parser.SyntaxNode, enclosingFnId: string | null, scopeStack: string[]): void {
-    let currentFn = enclosingFnId;
-    let pushedScope = false; // a node is either a class OR a function — at most one push
-
-    // `// implements XSPEC-NNN` / `/* implements SPEC-NNN */` — a file-level
-    // declaration that this module implements a spec. Attached to the Module
-    // (not the enclosing function): the convention annotates whole files.
-    if (node.type === "comment") {
-      for (const specId of extractImplementsSpecs(node.text)) moduleSpecs.add(specId);
-    }
-
-    if (CLASS_TYPES.has(node.type)) {
-      const className = node.childForFieldName("name")?.text;
-      if (className) {
-        nodes.push({
-          label: "Class",
-          id: `${filePath}#class:${className}`,
-          properties: { name: className, file: filePath, provider: PROVIDER },
-        });
-        scopeStack.push(className);
-        pushedScope = true;
-      }
-    }
-
-    const fn = functionIdentity(node, scopeStack);
-    if (fn) {
-      nodes.push({
-        label: "Function",
-        id: fn.id,
-        properties: {
-          name: fn.name,
-          file: filePath,
-          start_line: fn.startLine,
-          confidence: 1,
-          provider: PROVIDER,
-        },
-      });
-      defines.push({
-        label: "DEFINES",
-        fromLabel: "Module",
-        from: moduleId,
-        toLabel: "Function",
-        to: fn.id,
-      });
-      // bare-name map for CALLS resolution (same-name in different scopes →
-      // last definition wins; a documented intra-file resolution limitation).
-      names.set(fn.name, fn.id);
-      currentFn = fn.id;
-      scopeStack.push(fn.name); // qualify nested functions by this function
-      pushedScope = true;
-    }
-
-    if (node.type === "call_expression" && currentFn) {
-      const callee = calleeName(node);
-      if (callee) rawCalls.push({ from: currentFn, callee, file: filePath });
-
-      // A function passed by reference as a direct argument (e.g.
-      // `app.register(pluginFn, opts)`) is a real usage edge that the
-      // callee-of-this-call-expression check above misses entirely — see
-      // module doc comment. Only bare identifiers directly in the argument
-      // list count; identifiers nested in object/array literals are skipped.
-      const args = node.childForFieldName("arguments");
-      if (args) {
-        for (let i = 0; i < args.namedChildCount; i++) {
-          const arg = args.namedChild(i);
-          if (arg?.type === "identifier") {
-            rawCalls.push({ from: currentFn, callee: arg.text, file: filePath });
-          }
-        }
-      }
-    }
-
-    for (let i = 0; i < node.childCount; i++) {
-      const child = node.child(i);
-      if (child) visit(child, currentFn, scopeStack);
-    }
-
-    if (pushedScope) scopeStack.pop();
-  }
-
-  visit(tree.rootNode, null, []);
 
   // Emit a stub Spec node (empty properties — never clobbers title/status/
   // confidence a later `index --docs` pass MERGEs onto the same id) so the
