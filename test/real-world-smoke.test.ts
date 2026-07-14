@@ -562,6 +562,279 @@ describe("real-world smoke test — Rust (BurntSushi/ripgrep globset GlobSet exc
   });
 });
 
+// Source: github.com/sinatra/sinatra, lib/sinatra/base.rb (Request class),
+// MIT License. Verbatim excerpt (lines ~31-77 at time of fetch, 2026-07).
+const SINATRA_REQUEST_EXCERPT = `
+class Request < Rack::Request
+  HEADER_PARAM = /\\s*[\\w.]+=(?:[\\w.]+|"(?:[^"\\\\]|\\\\.)*")?\\s*/.freeze
+  HEADER_VALUE_WITH_PARAMS = %r{(?:(?:\\w+|\\*)/(?:\\w+(?:\\.|-|\\+)?|\\*)*)\\s*(?:;#{HEADER_PARAM})*}.freeze
+
+  # Returns an array of acceptable media types for the response
+  def accept
+    @env['sinatra.accept'] ||= if @env.include?('HTTP_ACCEPT') && (@env['HTTP_ACCEPT'].to_s != '')
+                                 @env['HTTP_ACCEPT']
+                                   .to_s
+                                   .scan(HEADER_VALUE_WITH_PARAMS)
+                                   .map! { |e| AcceptEntry.new(e) }
+                                   .sort
+                               else
+                                 [AcceptEntry.new('*/*')]
+                               end
+  end
+
+  def accept?(type)
+    preferred_type(type).to_s.include?(type)
+  end
+
+  def preferred_type(*types)
+    return accept.first if types.empty?
+
+    types.flatten!
+    return types.first if accept.empty?
+
+    accept.detect do |accept_header|
+      type = types.detect { |t| MimeTypeEntry.new(t).accepts?(accept_header) }
+      return type if type
+    end
+  end
+
+  alias secure? ssl?
+
+  def forwarded?
+    !forwarded_authority.nil?
+  end
+
+  def safe?
+    get? || head? || options? || trace?
+  end
+
+  def idempotent?
+    safe? || put? || delete? || link? || unlink?
+  end
+
+  def link?
+    request_method == 'LINK'
+  end
+
+  def unlink?
+    request_method == 'UNLINK'
+  end
+end
+`;
+
+// Source: github.com/guzzle/guzzle, src/Client.php (Client class methods),
+// MIT License. Verbatim excerpt (lines ~101-172 at time of fetch, 2026-07) —
+// wrapped in "class Client { ... }" for a self-contained module (the real
+// file's class declaration/opening brace sit outside this excerpt's line
+// range); doc-comment blocks trimmed for size, method bodies unmodified.
+const GUZZLE_CLIENT_EXCERPT = `<?php
+class Client {
+    public function sendAsync(RequestInterface $request, array $options = []): PromiseInterface
+    {
+        // Merge the base URI into the request URI if needed.
+        $options = $this->prepareDefaults($options);
+
+        return $this->transfer(
+            $request->withUri($this->buildUri($request->getUri(), $options), $request->hasHeader('Host')),
+            $options
+        );
+    }
+
+    public function send(RequestInterface $request, array $options = []): ResponseInterface
+    {
+        $options[RequestOptions::SYNCHRONOUS] = true;
+        return $this->sendAsync($request, $options)->wait();
+    }
+
+    public function sendRequest(RequestInterface $request): ResponseInterface
+    {
+        $options[RequestOptions::SYNCHRONOUS] = true;
+        $options[RequestOptions::ALLOW_REDIRECTS] = false;
+        $options[RequestOptions::HTTP_ERRORS] = false;
+
+        return $this->sendAsync($request, $options)->wait();
+    }
+
+    public function requestAsync(string $method, $uri = '', array $options = []): PromiseInterface
+    {
+        $options = $this->prepareDefaults($options);
+        // Remove request modifying parameter because it can be done up-front.
+        $headers = $options['headers'] ?? [];
+        $body = $options['body'] ?? null;
+        $version = $options['version'] ?? '1.1';
+        // Merge the URI into the base URI.
+        $uri = $this->buildUri(Psr7\\Utils::uriFor($uri), $options);
+        if (\\is_array($body)) {
+            throw $this->invalidBody();
+        }
+        $request = new Psr7\\Request($method, $uri, $headers, $body, $version);
+        // Remove the option so that they are not doubly-applied.
+        unset($options['headers'], $options['body'], $options['version']);
+
+        return $this->transfer($request, $options);
+    }
+
+    public function request(string $method, $uri = '', array $options = []): ResponseInterface
+    {
+        $options[RequestOptions::SYNCHRONOUS] = true;
+        return $this->requestAsync($method, $uri, $options)->wait();
+    }
+}
+`;
+
+// Source: github.com/flutter/flutter,
+// packages/flutter/lib/src/foundation/change_notifier.dart (ChangeNotifier
+// class, _removeAt + removeListener methods), BSD-3-Clause (Flutter's
+// modified BSD license). Verbatim excerpt (lines ~293-362 at time of fetch,
+// 2026-07) — wrapped in "class ChangeNotifier { ... }" for a self-contained
+// module (the real file excerpts mid-class-body).
+const FLUTTER_CHANGE_NOTIFIER_EXCERPT = `
+class ChangeNotifier {
+  void _removeAt(int index) {
+    // The list holding the listeners is not growable for performances reasons.
+    // We still want to shrink this list if a lot of listeners have been added
+    // and then removed outside a notifyListeners iteration.
+    // We do this only when the real number of listeners is half the length
+    // of our list.
+    _count -= 1;
+    if (_count * 2 <= _listeners.length) {
+      final newListeners = List<VoidCallback?>.filled(_count, null);
+
+      // Listeners before the index are at the same place.
+      for (var i = 0; i < index; i++) {
+        newListeners[i] = _listeners[i];
+      }
+
+      // Listeners after the index move towards the start of the list.
+      for (var i = index; i < _count; i++) {
+        newListeners[i] = _listeners[i + 1];
+      }
+
+      _listeners = newListeners;
+    } else {
+      // When there are more listeners than half the length of the list, we only
+      // shift our listeners, so that we avoid to reallocate memory for the
+      // whole list.
+      for (var i = index; i < _count; i++) {
+        _listeners[i] = _listeners[i + 1];
+      }
+      _listeners[_count] = null;
+    }
+  }
+
+  /// Remove a previously registered closure from the list of closures that are
+  /// notified when the object changes.
+  ///
+  /// If the given listener is not registered, the call is ignored.
+  ///
+  /// This method returns immediately if [dispose] has been called.
+  @override
+  void removeListener(VoidCallback listener) {
+    // This method is allowed to be called on disposed instances for usability
+    // reasons. Due to how our frame scheduling logic between render objects and
+    // overlays, it is common that the owner of this instance would be disposed a
+    // frame earlier than the listeners. Allowing calls to this method after it
+    // is disposed makes it easier for listeners to properly clean up.
+    for (var i = 0; i < _count; i++) {
+      final VoidCallback? listenerAtIndex = _listeners[i];
+      if (listenerAtIndex == listener) {
+        if (_notificationCallStackDepth > 0) {
+          // We don't resize the list during notifyListeners iterations
+          // but we set to null, the listeners we want to remove. We will
+          // effectively resize the list at the end of all notifyListeners
+          // iterations.
+          _listeners[i] = null;
+          _reentrantlyRemovedListeners++;
+        } else {
+          // When we are outside the notifyListeners iterations we can
+          // effectively shrink the list.
+          _removeAt(i);
+        }
+        break;
+      }
+    }
+  }
+}
+`;
+
+describe("real-world smoke test — Ruby (sinatra/sinatra Request excerpt, MIT)", () => {
+  it("parses without crashing and resolves real intra-class calls, including bare '?'-suffixed predicate methods", () => {
+    const { nodes, edges } = extractCodeGraph(SINATRA_REQUEST_EXCERPT, { filePath: "request.rb" });
+    const classNames = nodes.filter((n) => n.label === "Class").map((n) => n.properties.name);
+    const calls = edges.filter((e) => e.label === "CALLS");
+
+    expect(classNames).toEqual(["Request"]);
+    expect(nodes.filter((n) => n.label === "Function").length).toBeGreaterThanOrEqual(8);
+
+    const pairs = calls.map((e) => `${e.from.split("#")[1]}->${e.to.split("#")[1]}`);
+    // "accept?" calls "preferred_type(type)" — an ordinary parenthesized call.
+    expect(pairs).toContain("Request.accept?->Request.preferred_type");
+    // "idempotent?" bare-invokes "safe?"/"link?"/"unlink?" (no parens, no
+    // receiver) — captured because '?'-suffixed names are unambiguously
+    // calls in this grammar (see queries/ruby.ts's module doc comment);
+    // "put?"/"delete?" are NOT defined in this excerpt (inherited from
+    // Rack::Request) so they are correctly absent, not fabricated.
+    expect(pairs).toContain("Request.idempotent?->Request.safe?");
+    expect(pairs).toContain("Request.idempotent?->Request.link?");
+    expect(pairs).toContain("Request.idempotent?->Request.unlink?");
+    expect(pairs.some((p) => p.includes("put?") || p.includes("delete?"))).toBe(false);
+    // "preferred_type"'s bare "accept" (no parens, no '?'/'!' suffix, used
+    // only as a dot-chain receiver — "accept.first"/"accept.empty?"/
+    // "accept.detect") is NOT itself captured as a call to "accept" — the
+    // receiver of a "." call is a plain identifier in this grammar, not a
+    // nested call, and "accept" here has no "?"/"!" suffix to force the
+    // unambiguous-call reading either.
+    expect(pairs.some((p) => p.endsWith("->Request.accept"))).toBe(false);
+  });
+});
+
+describe("real-world smoke test — PHP (guzzle/guzzle Client excerpt, MIT)", () => {
+  it("parses without crashing and resolves a real intra-class '->' call chain", () => {
+    const { nodes, edges } = extractCodeGraph(GUZZLE_CLIENT_EXCERPT, { filePath: "client.php" });
+    const classNames = nodes.filter((n) => n.label === "Class").map((n) => n.properties.name);
+    const functionIds = nodes.filter((n) => n.label === "Function").map((n) => n.id).sort();
+    const calls = edges.filter((e) => e.label === "CALLS");
+
+    expect(classNames).toEqual(["Client"]);
+    expect(functionIds).toEqual([
+      "client.php#Client.request",
+      "client.php#Client.requestAsync",
+      "client.php#Client.send",
+      "client.php#Client.sendAsync",
+      "client.php#Client.sendRequest",
+    ]);
+
+    const pairs = calls.map((e) => `${e.from.split("#")[1]}->${e.to.split("#")[1]}`);
+    expect(pairs).toContain("Client.send->Client.sendAsync");
+    expect(pairs).toContain("Client.sendRequest->Client.sendAsync");
+    expect(pairs).toContain("Client.request->Client.requestAsync");
+    // "prepareDefaults"/"buildUri"/"transfer"/"invalidBody" are defined
+    // elsewhere in the real file, outside this excerpt's line range —
+    // correctly left unresolved (not fabricated), not asserted here.
+    expect(pairs.some((p) => p.includes("prepareDefaults"))).toBe(false);
+  });
+});
+
+describe("real-world smoke test — Dart (flutter/flutter ChangeNotifier excerpt, BSD-3-Clause)", () => {
+  it("parses without crashing and resolves a real intra-class bare call to a private helper method", () => {
+    const { nodes, edges } = extractCodeGraph(FLUTTER_CHANGE_NOTIFIER_EXCERPT, {
+      filePath: "change_notifier.dart",
+    });
+    const classNames = nodes.filter((n) => n.label === "Class").map((n) => n.properties.name);
+    const functionIds = nodes.filter((n) => n.label === "Function").map((n) => n.id).sort();
+    const calls = edges.filter((e) => e.label === "CALLS");
+
+    expect(classNames).toEqual(["ChangeNotifier"]);
+    expect(functionIds).toEqual([
+      "change_notifier.dart#ChangeNotifier._removeAt",
+      "change_notifier.dart#ChangeNotifier.removeListener",
+    ]);
+
+    const pairs = calls.map((e) => `${e.from.split("#")[1]}->${e.to.split("#")[1]}`);
+    expect(pairs).toContain("ChangeNotifier.removeListener->ChangeNotifier._removeAt");
+  });
+});
+
 describe("real-world smoke test — C++ (google/leveldb Status excerpt, BSD-3-Clause)", () => {
   it("parses without crashing and resolves real intra-class calls to a private helper method", () => {
     const { nodes, edges } = extractCodeGraph(LEVELDB_STATUS_EXCERPT, { filePath: "status.cpp" });
