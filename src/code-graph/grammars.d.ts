@@ -522,4 +522,68 @@ declare module "@vokturz/tree-sitter-dart" {
  * being pushed; at that point its peerDependency already lines up exactly
  * with this repo's pinned core, so no further ABI investigation should even
  * be needed.
+ *
+ * ---- PL/SQL ----------------------------------------------------------
+ *
+ * Both candidates named in this batch's original task were empirically
+ * dead, and the search was broadened beyond them (not just declared
+ * "not viable" on the strength of two names) to check whether the wider
+ * ecosystem has something better. `AndreasMaierDe/tree-sitter-plsql` (12
+ * stars, but stale since Feb 2023, `nan`-based, not on npm) compiles
+ * successfully against Node 22 (its newer `nan@^2.17.0` survives where
+ * Pascal's `nan@2.14.0` didn't) but `require()` returns the exact same
+ * broken `{name, nodeTypeInfo}`-only shape as npm's `tree-sitter-cobol`
+ * above — `setLanguage()` throws `Invalid language object`, confirmed
+ * empirically. `iliasaz/tree-sitter-orasql` (renamed upstream to
+ * `tree-sitter-sql-orcl`, 0 stars, `peerDependencies: "^0.25.0"`, `"type":
+ * "module"`) produced no native `.node` binary at all when installed — not
+ * merely an ABI mismatch, no viable install path exists.
+ *
+ * Broadening the search found two more: `njank/tree-sitter-plsql` (created
+ * literally the day before this investigation) is an unmodified, un-fixed
+ * copy of `AndreasMaierDe`'s repo — same `package.json`, same author field,
+ * same `nan` version — logically guaranteed to fail identically, not
+ * re-tested for that reason (documented as inferred, not separately
+ * empirically confirmed). `vinicius-toshiyuki/tree-sitter-plsqloracle` (1
+ * star; its own `package.json` claims `"repository":
+ * "https://github.com/tree-sitter/tree-sitter-plsqloracle"` — the official
+ * `tree-sitter` GitHub organization — but no such repo exists there,
+ * confirmed via the GitHub API; this is either a copy-pasted template
+ * field or aspirational naming, not a real official grammar) has properly
+ * modern packaging (`prebuildify`, `node-addon-api`, a real `src/`) but
+ * declares `peerDependencies: "^0.25.0"` — installed via commit SHA and
+ * empirically confirmed ABI-INCOMPATIBLE: `Cannot read properties of
+ * undefined (reading 'length')`, the exact same failure signature
+ * documented for C# 0.23.5+ and the Dart `@sengac`/`@driftlog` candidates
+ * elsewhere in this file.
+ *
+ * No officially-maintained or organization-backed PL/SQL / Oracle-SQL
+ * tree-sitter grammar exists on npm today, after this broadened search —
+ * a real negative finding for the whole ecosystem, not just "the two named
+ * candidates happened to be broken."
+ *
+ * Revisit trigger: a PL/SQL grammar with real prebuilds is published to npm
+ * on the `^0.21.x`/`^0.22.x` ABI line this repo's other 10 grammars all
+ * share (or this repo's own pinned `tree-sitter` core is upgraded to
+ * 0.25.x — see the VB.NET revisit trigger above, the same larger decision
+ * would unlock this too).
+ *
+ * ---- Summary --------------------------------------------------------
+ *
+ * All five candidates evaluated for this batch (COBOL, Delphi/Pascal,
+ * VB.NET, ABAP, PL/SQL) are NOT VIABLE as of this investigation — no
+ * `SupportedLanguage` entries, query files, or `dependencies`/
+ * `peerDependencies` changes were made for any of them. This is treated as
+ * a legitimate, complete result for the batch's task (which was explicitly
+ * framed as "verify feasibility first, only implement what's viable" — not
+ * "these five are known-good, go wire them up"), not a shortfall to explain
+ * away. Every "not viable" verdict above is empirically grounded (an actual
+ * `npm install` + `require()` + `Parser.setLanguage()` + real-ish parse was
+ * attempted for every candidate except the handful explicitly marked as
+ * excluded on metadata alone — no license, self-described as a draft, or a
+ * logically-guaranteed-identical unmodified copy of an already-tested
+ * package) and each has a concrete revisit trigger recorded above, mostly
+ * small, mechanical upstream fixes (a missing `package.json` dependency
+ * line, a missing committed generated file, an npm publish) given how
+ * actively several of these upstreams are being developed.
  */
