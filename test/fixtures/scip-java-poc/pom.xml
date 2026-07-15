@@ -1,0 +1,31 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.example</groupId>
+  <artifactId>scip-java-poc</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- XSPEC-333 R3 Java PoC: scip-java's forked custom-javac.sh wrapper
+         does javac with JAVAC_JVM_OPTIONS then NEW_JAVAC_OPTS then
+         LAUNCHER_ARGS array expansions, under bash `set -eu`. LAUNCHER_ARGS
+         only gets populated from -J prefixed args forwarded to the forked
+         javac process; with none passed, the array stays declared but
+         empty, and macOS's stock bash (3.2.57, GPLv2 frozen, no newer bash
+         shipped by Apple) throws "unbound variable" expanding an empty
+         array under set -u, a real bash pre-4.4 defect, not a scip-java
+         bug. Forcing maven-compiler-plugin's fork to also emit Xms/Xmx JVM
+         flags (via these two standard properties) gives LAUNCHER_ARGS one
+         or more elements, sidestepping the empty-array case entirely. See
+         EngramGraph docs for this finding (mirrors other already
+         documented bash 3.2 gotchas in this codebase's history). -->
+    <maven.compiler.meminitial>64m</maven.compiler.meminitial>
+    <maven.compiler.maxmem>256m</maven.compiler.maxmem>
+  </properties>
+</project>
