@@ -93,11 +93,13 @@ Requirements and failure modes:
   against.** A SCIP index's occurrence paths are relative to that root; if
   they don't match `<dir>`'s own file paths, `egr` fails with a "none of the
   N document path(s) ... matched any source file under `<dir>`" error rather
-  than silently ingesting nothing. **Not verified on Windows**: SCIP paths
-  are always `/`-separated by spec, while `egr`'s own paths use the OS
-  separator — on Windows this comparison may not line up even with the
-  correct `<dir>`. If `--scip` reports 0 definitions/calls resolved despite
-  matching files, this is a likely cause; a warning is printed in that case.
+  than silently ingesting nothing. SCIP paths are always `/`-separated by
+  spec; `egr`'s own paths (from `walkFiles`) are normalized to `/` as well
+  regardless of host OS, so this comparison lines up on Windows too, not just
+  POSIX. If `--scip` reports 0 definitions/calls resolved despite matching
+  files, this is usually a stale `.scip` file (regenerated against a since-
+  edited source tree) rather than a path mismatch; a warning is printed in
+  that case.
 - A missing or non-SCIP file at `<path>` fails with a clear "file not found"
   or "could not be parsed as a SCIP protobuf index" error.
 - A graph DB whose `CALLS` table predates this feature's schema change

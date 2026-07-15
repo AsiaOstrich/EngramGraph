@@ -93,11 +93,12 @@ egr index . --scip index.scip
 - **`<dir>` 必須是外部索引工具當初執行的同一個專案根目錄。** SCIP 索引裡
   occurrence 的路徑是相對於那個根目錄的；若跟 `<dir>` 自身的檔案路徑對不上，
   `egr` 會丟出「none of the N document path(s) ... matched any source file
-  under `<dir>`」這類明確錯誤，而不是悄悄地什麼都沒 ingest 到。**尚未在
-  Windows 上驗證**：SCIP 路徑依規範一律用 `/` 分隔，而 `egr` 自身的路徑用
-  作業系統的分隔符——在 Windows 上，即使 `<dir>` 給對了，這個比對也可能對不上。
-  若 `--scip` 回報檔案有匹配到、但解析出的 definitions/calls 數是零，這是常見
-  可能成因之一；此情況下會印出警告。
+  under `<dir>`」這類明確錯誤，而不是悄悄地什麼都沒 ingest 到。SCIP 路徑依
+  規範一律用 `/` 分隔；`egr` 自身的路徑（來自 `walkFiles`）現在也一律正規化
+  成 `/`，不受主機作業系統影響，所以這個比對在 Windows 上也能對上，不只
+  POSIX。若 `--scip` 回報檔案有匹配到、但解析出的 definitions/calls 數是零，
+  常見原因通常是 `.scip` 檔已過期（對照的是編輯過的原始碼樹重新產生索引前
+  的舊版本），而非路徑不符；此情況下會印出警告。
 - `<path>` 指到不存在或非 SCIP 的檔案時，會丟出明確的「file not found」或
   「could not be parsed as a SCIP protobuf index」錯誤。
 - 若圖譜資料庫的 `CALLS` 表是在此功能的 schema 變動（`provider`/`confidence`

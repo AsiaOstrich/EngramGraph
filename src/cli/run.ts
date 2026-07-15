@@ -156,26 +156,22 @@ async function assertCallsSchemaHasProvenanceColumns(conn: GraphConnection): Pro
  * and is ALWAYS `/`-separated per the SCIP protobuf schema's own documented
  * convention ("the path must use '/' as the separator, including on
  * Windows" — see `scip_pb.ts`). `egr index <dir>`'s own paths come from
- * `walkFiles`, which uses `node:path`'s `relative()` and is therefore
- * OS-separator-dependent (`\`-separated on Windows). This function's overlap
- * check, and the id scheme `ingestScipIndex` derives from `relativePath`,
- * both do plain string equality against these two path sets — correct on
- * POSIX (both sides are already `/`-separated), but **not verified on
- * Windows**: a `\`-separated `walkFiles` path will not string-match a
- * `/`-separated SCIP document path, so on Windows this overlay may silently
- * match nothing even when `<dir>` IS the right root. A partial/one-sided
- * path-separator normalization was deliberately NOT added here: normalizing
- * only the comparison (not the `relativePath` value actually threaded
- * through to `ingestScipIndex`) would make this function's own zero-overlap
- * safety check pass while `ingestScipIndex`'s OWN internal `fileByPath`
- * lookup (keyed by the very same `relativePath` string) still silently
- * matched nothing — turning a loud failure into a silent one, which is
- * strictly worse. A correct fix needs tree-sitter's OWN id scheme
- * (`extractor.ts`/`tag-query-engine.ts`, which also just uses `walkFiles`'
- * raw OS-separator path with no normalization) to agree on one separator
- * convention too, since `ingestScipIndex`'s ids must byte-match tree-sitter's
- * to merge onto the same nodes rather than create orphaned ones — out of
- * scope for this CLI-wiring change. Tracked as an open question, not fixed.
+ * `walkFiles`, which now normalizes to the same `/`-separated convention at
+ * its own source point (`cli/walk.ts`'s `toPosixPath`, XSPEC-333 R3 follow-up)
+ * regardless of the host OS's separator — this function's overlap check, and
+ * the id scheme `ingestScipIndex` derives from `relativePath`, both do plain
+ * string equality against these two path sets, and both sides are now
+ * guaranteed `/`-separated on every platform, not just POSIX. (Previously
+ * this was a real, unfixed gap: a `\`-separated `walkFiles` path would not
+ * string-match a `/`-separated SCIP document path on Windows, so this
+ * overlay could silently match nothing even when `<dir>` WAS the right root
+ * — see `cli/walk.ts`'s module doc for why the fix normalizes once at the
+ * `walkFiles` source rather than here or in `ingestScipIndex`: those two
+ * consumers, plus tree-sitter's own id scheme in `extractor.ts`/
+ * `tag-query-engine.ts`, all take `walkFiles`' `path` as an opaque string and
+ * never re-derive it from the filesystem, so a single upstream normalization
+ * point is sufficient for every one of them to agree on one separator
+ * convention.)
  *
  * A non-empty but suspiciously small overlap (e.g. 1 of 50 files matching by
  * name coincidence) is also not specially detected here beyond the
@@ -211,8 +207,7 @@ export async function ingestScipOverlay(
     throw new Error(
       `--scip: none of the ${docPaths.size} document path(s) in "${scipPath}" (e.g. "${sample}") matched ` +
         `any source file under "${dir}". SCIP document paths are relative to the project root the external ` +
-        `indexer (scip-dotnet/scip-java/etc.) was run against — pass that same root as <dir>, then retry. ` +
-        `(On Windows: this can also happen even with the right root — see this function's module doc.)`,
+        `indexer (scip-dotnet/scip-java/etc.) was run against — pass that same root as <dir>, then retry.`,
     );
   }
 

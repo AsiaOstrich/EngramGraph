@@ -173,11 +173,19 @@ async function main(): Promise<void> {
         const s = d as Awaited<ReturnType<typeof cmdIndex>>;
         const k = s.knowledge ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relates} relates` : "";
         // A matched-files-but-zero-resolution result is a real, silent-failure-
-        // shaped signal worth surfacing even though it isn't a hard error: it's
-        // consistent with (among other causes) a path-separator mismatch that
-        // matched by filename coincidence but produced no usable data (see
-        // ingestScipOverlay's module doc in cli/run.ts for the Windows case
-        // this can't fully rule out at the CLI layer).
+        // shaped signal worth surfacing even though it isn't a hard error.
+        // The path-separator mismatch that used to be this warning's main
+        // justification is fixed now (`cli/walk.ts`'s `toPosixPath`, XSPEC-333
+        // R3 follow-up — every path-derived id is `/`-separated on every OS,
+        // so a Windows run can no longer silently fail to overlap with a
+        // `/`-separated SCIP document set purely on separator grounds). The
+        // warning still earns its keep for other, still-real causes of the
+        // same zero-resolution shape: e.g. `<dir>` happens to contain files
+        // whose NAMES coincidentally match the SCIP index's document paths
+        // but whose CONTENT differs from what the external indexer actually
+        // saw (a stale/regenerated `.scip` against an edited tree), which
+        // `ingestScipOverlay`'s own path-overlap check cannot detect (it only
+        // checks path-string equality, never file content).
         const scipWarning =
           s.scip && s.scip.filesMatched > 0 && s.scip.definitionsResolved === 0 && s.scip.callsEmitted === 0
             ? `\nscip: WARNING — ${s.scip.filesMatched} file(s) matched but 0 definitions/calls were resolved; ` +
