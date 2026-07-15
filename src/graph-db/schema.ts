@@ -30,25 +30,31 @@ export const NODE_TABLE_DDL: readonly string[] = [
 
 /** REL TABLE DDL statements. Must run after their endpoint NODE tables. */
 export const REL_TABLE_DDL: readonly string[] = [
-  // `provider`/`confidence` (XSPEC-333 R3 PoC): added so a second CALLS
-  // provider (e.g. SCIP) can stamp provenance on an edge the way Function/
-  // Class nodes already could (R1) — writer.ts's mergeEdge overwrite-policy
-  // logic was already generic enough to support this (see its module doc and
-  // test/writer-merge-policy.test.ts's synthetic TEST_CALLS case), it simply
-  // had no real columns to read/write against until now. Purely additive and
-  // nullable: tree-sitter's own `buildCallEdges()` (extractor.ts) still only
-  // ever sets `call_count` on a CALLS edge it writes, so these two columns
-  // stay NULL on every tree-sitter-authored edge — the same "existing rows
-  // have no value until re-indexed post-migration" situation this file's own
-  // comment already documents for Function/Class's `provider` column above.
-  // A concrete, real consequence of that NULL (not merely nullable-in-theory):
-  // `writer.ts`'s `shouldOverwrite` treats a `null`/`undefined` existing
-  // `confidence` as "no signal to compare against" and refuses to let ANY
-  // other provider overwrite that edge's properties — so a second provider
-  // can only ever *fill a gap* (write a CALLS edge tree-sitter never created
-  // in the first place), never attach provenance to one tree-sitter already
-  // resolved. See `test/scip-merge.test.ts` for this verified end-to-end
-  // against a real second provider (SCIP) for the first time.
+  // `provider`/`confidence` (XSPEC-333 R3 PoC, upgraded R3 OQ-4): added so a
+  // second CALLS provider (e.g. SCIP) can stamp provenance on an edge the
+  // way Function/Class nodes already could (R1) — writer.ts's mergeEdge
+  // overwrite-policy logic was already generic enough to support this (see
+  // its module doc and test/writer-merge-policy.test.ts's synthetic
+  // TEST_CALLS case), it simply had no real columns to read/write against
+  // until now. Nullable for schema-migration safety (a pre-existing DB's
+  // rows have no value until re-indexed), but NOT left NULL by design on any
+  // freshly-written tree-sitter edge any more: `buildCallEdges()`
+  // (extractor.ts) originally only ever set `call_count`, and that NULL
+  // silently defeated the whole point of these two columns — `writer.ts`'s
+  // `shouldOverwrite` treats a `null`/`undefined` existing `confidence` as
+  // "no signal to compare against" and refuses to let ANY other provider
+  // overwrite that edge's properties, so a second provider could only ever
+  // *fill a gap* (write a CALLS edge tree-sitter never created), never
+  // upgrade one tree-sitter already resolved — confirmed end-to-end against
+  // a real second provider (SCIP) in an earlier version of
+  // `test/scip-merge.test.ts`. R3 OQ-4 fixed this at the source instead of
+  // in the merge policy: `buildCallEdges()` now stamps every CALLS edge it
+  // writes with `confidence: CALLS_CONFIDENCE` (0.6, see extractor.ts's
+  // module doc for the calibration rationale) and `provider: "tree-sitter"`,
+  // an honest, non-null confidence for its bare-name resolution heuristic —
+  // so a higher-confidence provider (SCIP at 0.9) can now upgrade it through
+  // the SAME, unmodified `shouldOverwrite` policy. See
+  // `test/scip-merge.test.ts` for this verified end-to-end.
   //
   // IMPORTANT for any already-existing on-disk Kuzu DB created before this
   // change: `initSchema` only ever `CREATE`s tables (see below) — Kuzu

@@ -33,18 +33,35 @@ import { loadScipPocFixtureIndex, loadScipPocFixtureSources } from "./fixtures/s
  *      before the SCIP write. This is the check that would catch a subtle
  *      id-normalization bug silently creating parallel/orphaned nodes
  *      instead of merging onto the real ones.
- *   3. **SCIP cannot annotate an edge tree-sitter already resolved**: for a
- *      pair tree-sitter DID create a CALLS edge for (e.g.
+ *   3. **Cross-provider upgrade** (XSPEC-333 R3 OQ-4): for a pair
+ *      tree-sitter DID create a CALLS edge for (e.g.
  *      `OrderService.Process -> OrderService.Validate`, a same-file call),
- *      that edge's `provider`/`confidence` are NULL (tree-sitter's
- *      `buildCallEdges` never sets them) — and NULL is not "lower
- *      confidence", it is "no signal to compare against" in
- *      `writer.ts`'s `shouldOverwrite`, so SCIP's write is a no-op there.
- *      This is a real, structural limitation of R1's policy as written, now
- *      confirmed against a real second provider for the first time (it was
- *      already documented as a *consequence* of the policy's own module
- *      comment before this PoC — see schema.ts — not a bug this PoC found
- *      and is claiming credit for discovering).
+ *      SCIP's higher-confidence write now DOES upgrade it in place —
+ *      `provider` flips from `tree-sitter` to `scip` and `confidence` from
+ *      tree-sitter's `0.6` (`extractor.ts`'s `CALLS_CONFIDENCE`, an honest
+ *      score for its bare-name resolution heuristic) to SCIP's `0.9`.
+ *
+ *      This test used to assert the OPPOSITE — that the write was a no-op,
+ *      because tree-sitter's `buildCallEdges` left `confidence`/`provider`
+ *      NULL on every CALLS edge it wrote, and `writer.ts`'s
+ *      `shouldOverwrite` treats a NULL existing confidence as "no signal to
+ *      compare against", refusing ANY cross-provider overwrite — not "lower
+ *      confidence, still comparable". That was a real, structural gap: a
+ *      second, more precise provider could only ever *fill a gap* tree-
+ *      sitter left empty, never upgrade an edge it had already resolved, no
+ *      matter how much better the new evidence was. It was a genuine
+ *      limitation of the R1 design, not a still-correct behaviour worth
+ *      preserving — so XSPEC-333 R3 OQ-4 fixed it at the *source*
+ *      (tree-sitter now stamps a real, non-null confidence on its own CALLS
+ *      edges) rather than by loosening `shouldOverwrite` itself, which is
+ *      untouched: same-provider still always wins, different-provider still
+ *      only wins with strictly higher confidence, and NULL (e.g. a DB row
+ *      written before this fix, not yet re-indexed) still means "no signal,
+ *      don't overwrite". This test is the one place that now proves the R1
+ *      Scenario ("a later, more precise provider can supersede an earlier,
+ *      coarser one") actually holds for CALLS edges, not just for
+ *      Function/Class nodes (`test/writer-merge-policy.test.ts` already
+ *      covered nodes).
  */
 describe("SCIP merge onto a real tree-sitter-populated Kuzu graph (XSPEC-333 R3)", () => {
   // A single shared GraphConnection (opened once for the whole describe
@@ -130,17 +147,20 @@ describe("SCIP merge onto a real tree-sitter-populated Kuzu graph (XSPEC-333 R3)
     }
   });
 
-  it("SCIP cannot attach provenance to a CALLS edge tree-sitter already resolved (NULL confidence blocks the overwrite)", async () => {
+  it("cross-provider upgrade: SCIP's higher confidence upgrades a CALLS edge tree-sitter already resolved (XSPEC-333 R3 OQ-4)", async () => {
     const sources = loadScipPocFixtureSources();
     const treeSitter = extractProject(sources.map((f) => ({ path: f.relativePath, source: f.source, language: "csharp" })));
     await writeFragment(conn, treeSitter.fragment);
 
-    // Ground truth: tree-sitter DOES resolve this one on its own (same-file call).
+    // Ground truth: tree-sitter DOES resolve this one on its own (same-file
+    // call), now with its own honest, non-null confidence (0.6 —
+    // CALLS_CONFIDENCE in extractor.ts) rather than a NULL that used to
+    // block any cross-provider comparison.
     const before = await callsEdge(
       "Services/OrderService.cs#OrderService.Process",
       "Services/OrderService.cs#OrderService.Validate",
     );
-    expect(before).toEqual({ call_count: 1, confidence: null, provider: null });
+    expect(before).toEqual({ call_count: 1, confidence: 0.6, provider: "tree-sitter" });
 
     const { fragment } = ingestScipIndex(loadScipPocFixtureIndex(), sources);
     await writeFragment(conn, fragment);
@@ -149,8 +169,10 @@ describe("SCIP merge onto a real tree-sitter-populated Kuzu graph (XSPEC-333 R3)
       "Services/OrderService.cs#OrderService.Process",
       "Services/OrderService.cs#OrderService.Validate",
     );
-    // Unchanged: SCIP's write was blocked, not merged.
-    expect(after).toEqual({ call_count: 1, confidence: null, provider: null });
+    // Upgraded: SCIP's strictly higher confidence (0.9 > 0.6) wins, through
+    // the SAME shouldOverwrite policy writer-merge-policy.test.ts exercises —
+    // no special-casing for CALLS edges.
+    expect(after).toEqual({ call_count: 1, confidence: 0.9, provider: "scip" });
   });
 
   it("confidence ceiling: SCIP (confidence 0.9) cannot overwrite a Function node's properties, because tree-sitter already wrote confidence 1 (the max of the documented [0,1] range)", async () => {

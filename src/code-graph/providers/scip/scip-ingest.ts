@@ -63,10 +63,19 @@
  * `graph-db/types.ts`), even though this means it can in practice never
  * strictly exceed tree-sitter's own hardcoded `confidence: 1` on a
  * `Function` node it already created (`extractor.ts` stamps `confidence: 1`
- * unconditionally on every node it writes) — see `test/scip-merge.test.ts`'s
- * "confidence ceiling" test, and the R3 PoC report's Open Questions, for why
- * this is a real, now-empirically-confirmed consequence of R1's policy as
- * written, not a bug in this module.
+ * unconditionally on every node it writes, deliberately: that `1` is a
+ * syntactic-fact claim — "this line really does declare a function/class
+ * with this name" — not a name-resolution guess, so it is not lowered just
+ * to make room for a semantic provider to out-rank it) — see
+ * `test/scip-merge.test.ts`'s "confidence ceiling" test for why this is a
+ * real, empirically-confirmed consequence of R1's policy as written, not a
+ * bug in this module. This ceiling is Function/Class-node-specific: the
+ * *CALLS-edge* case is different and, as of XSPEC-333 R3 OQ-4, no longer
+ * ceiling-limited — tree-sitter's own CALLS edges now carry an honest,
+ * non-null `confidence: 0.6` (`extractor.ts`'s `CALLS_CONFIDENCE`, well
+ * below this module's 0.9), so `ingestScipIndex`'s CALLS writes DO upgrade a
+ * CALLS edge tree-sitter already resolved, not only fill gaps it left empty
+ * — see `test/scip-merge.test.ts`'s updated "cross-provider upgrade" test.
  */
 
 import Parser from "tree-sitter";

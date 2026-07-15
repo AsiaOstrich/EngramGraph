@@ -58,6 +58,62 @@ import { collectComments, findEnclosingFunction, qualifyFunctions, runTagQuery }
 const PROVIDER = "tree-sitter";
 
 /**
+ * Honest confidence for a CALLS edge this extractor resolves (XSPEC-333 R3
+ * OQ-4). `buildCallEdges` used to leave `confidence`/`provider` unset on
+ * every CALLS edge it wrote (the REL table's two columns stayed NULL — see
+ * `schema.ts`'s prior module doc). That was not "no opinion", it was a real
+ * bug in the *merge* policy's effect: `writer.ts`'s `shouldOverwrite` treats
+ * an existing NULL confidence as "no signal to compare against" and refuses
+ * ANY cross-provider overwrite in that case — so a second, more precise
+ * provider (e.g. SCIP) could only ever fill a gap tree-sitter left empty,
+ * never upgrade an edge tree-sitter already resolved, no matter how much
+ * higher its confidence was. Confirmed end-to-end against a real SCIP index
+ * in `test/scip-merge.test.ts` before this constant existed (that test used
+ * to assert the block; it now asserts the upgrade — see that file's updated
+ * module doc for why the old assertion was validating a limitation, not a
+ * still-correct behaviour).
+ *
+ * The fix here is at the source, not the merge policy: `shouldOverwrite`
+ * itself is untouched (still: same-provider always wins; different-provider
+ * wins only with strictly higher confidence; NULL still means "no signal").
+ * Instead, this extractor now tells the truth about its own resolution
+ * step's real reliability instead of leaving it unscored. `collectExtraction`
+ * resolves a call's callee by **bare name only** — same-file map first
+ * (lexical shadowing), else a single project-wide unique name match, with NO
+ * type-awareness, overload disambiguation, or import-graph following (see
+ * this file's own module doc and `extractProject`'s resolution policy
+ * comment). That heuristic already refuses to guess when a name is
+ * ambiguous (>1 project-wide candidate) — so a *resolved* edge is never a
+ * total coin flip — but it can still land on the wrong same-named method in
+ * an unrelated class/impl the resolver has no way to rule out (documented at
+ * length in `docs/CROSS-FILE-COVERAGE.md`'s Open Questions: OOP/trait
+ * polymorphism with repeated method names, e.g. many `Close`/`Read`/
+ * `toString` implementers, is the dominant failure mode across 5 of the 10
+ * measured languages). That doc's 7.0%-74.1% numbers measure a different
+ * thing — the *fraction of candidates the resolver manages to wire up at
+ * all* (recall over its own textual evidence) — not the odds any one
+ * resolved edge points at the right target (precision), so they are not
+ * used here as a literal conversion. What they do establish, and what this
+ * constant is calibrated against: this is a **crude, unqualified, name-only
+ * heuristic**, meaningfully less reliable than a real semantic resolver
+ * (SCIP's `SCIP_CONFIDENCE = 0.9`, backed by an actual compiler's symbol
+ * table), but also not "no better than noise" (ambiguous cases are already
+ * filtered out before a CALLS edge is even written). 0.6 sits deliberately
+ * in that middle band: comfortably below any real semantic provider's
+ * confidence (so SCIP can upgrade it), comfortably above 0/NULL (so it is
+ * never mistaken for "unscored").
+ *
+ * Function/Class node `confidence` (see `qualifyFunctions`'s caller below)
+ * is a *different* claim — "this file, this line, really does declare a
+ * function/class with this name" — a syntactic fact tree-sitter's parser is
+ * unconditionally correct about, not a name-resolution guess. It is
+ * deliberately left at its existing `1` and NOT touched by this constant;
+ * conflating the two would misrepresent a fact tree-sitter has zero
+ * uncertainty about.
+ */
+const CALLS_CONFIDENCE = 0.6;
+
+/**
  * `.kt`/`.kts` → kotlin, `.rs` → rust, `.cpp`/`.cc`/`.cxx`/`.hpp`/`.h`/`.hh` →
  * cpp (XSPEC-333 R2c batch 2).
  *
@@ -340,7 +396,7 @@ function buildCallEdges(resolved: Array<{ from: string; to: string }>): GraphEdg
     from,
     toLabel: "Function",
     to,
-    properties: { call_count: count },
+    properties: { call_count: count, confidence: CALLS_CONFIDENCE, provider: PROVIDER },
   }));
 }
 
