@@ -16,6 +16,7 @@ import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
 import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, type GcResult } from "./run.js";
 import type { ConfidenceLabel } from "../sage/index.js";
+import { toPosixPath } from "../code-graph/path-utils.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
 
@@ -175,17 +176,24 @@ async function main(): Promise<void> {
         // A matched-files-but-zero-resolution result is a real, silent-failure-
         // shaped signal worth surfacing even though it isn't a hard error.
         // The path-separator mismatch that used to be this warning's main
-        // justification is fixed now (`cli/walk.ts`'s `toPosixPath`, XSPEC-333
-        // R3 follow-up — every path-derived id is `/`-separated on every OS,
-        // so a Windows run can no longer silently fail to overlap with a
-        // `/`-separated SCIP document set purely on separator grounds). The
-        // warning still earns its keep for other, still-real causes of the
-        // same zero-resolution shape: e.g. `<dir>` happens to contain files
-        // whose NAMES coincidentally match the SCIP index's document paths
-        // but whose CONTENT differs from what the external indexer actually
-        // saw (a stale/regenerated `.scip` against an edited tree), which
-        // `ingestScipOverlay`'s own path-overlap check cannot detect (it only
-        // checks path-string equality, never file content).
+        // justification is fixed now (`code-graph/path-utils.ts`'s
+        // `toPosixPath`, applied at both `walkFiles` and `collectExtraction`
+        // — XSPEC-333 R3 follow-up — so every path-derived id is
+        // `/`-separated on every OS). This has only been verified with
+        // string-level unit tests against manufactured Windows-style input
+        // (see `test/scip-windows-path-normalization.test.ts`), NOT a real
+        // Windows end-to-end run — this sandbox has no Windows host to
+        // confirm against. The warning is kept regardless: it's still a
+        // useful catch-all for OTHER causes of the same zero-resolution
+        // shape that a path-overlap check can't rule out — e.g. `<dir>`
+        // happens to contain files whose NAMES coincidentally match the SCIP
+        // index's document paths but whose CONTENT differs from what the
+        // external indexer actually saw (one concrete way this can happen:
+        // the `.scip` file is stale — generated before the source tree was
+        // subsequently edited, so the symbols it recorded no longer line up
+        // with what's on disk now) — `ingestScipOverlay`'s own path-overlap
+        // check only compares path strings, never file content, so it cannot
+        // detect this on its own.
         const scipWarning =
           s.scip && s.scip.filesMatched > 0 && s.scip.definitionsResolved === 0 && s.scip.callsEmitted === 0
             ? `\nscip: WARNING — ${s.scip.filesMatched} file(s) matched but 0 definitions/calls were resolved; ` +
@@ -223,7 +231,12 @@ async function main(): Promise<void> {
     }
     case "implemented-by": {
       if (!a1) throw new Error("implemented-by requires a <module-path>");
-      const r = await cmdImplementedSpecs(conn, a1);
+      // Module ids are always '/'-separated (walkFiles/collectExtraction
+      // normalize at indexing time — XSPEC-333 R3 follow-up); normalize a
+      // user-typed <module-path> the same way so `implemented-by src\foo.ts`
+      // still matches on a Windows shell where that's the natural way to
+      // type a path.
+      const r = await cmdImplementedSpecs(conn, toPosixPath(a1));
       out(r, values.json, (d) => {
         const res = d as Awaited<ReturnType<typeof cmdImplementedSpecs>>;
         return `implemented-by(${res.module}):\n${res.specs.length ? res.specs.map((s) => `  ${s.id}${s.title ? ` — ${s.title}` : ""}`).join("\n") : "  (none)"}`;

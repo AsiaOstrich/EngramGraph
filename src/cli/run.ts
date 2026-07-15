@@ -157,21 +157,25 @@ async function assertCallsSchemaHasProvenanceColumns(conn: GraphConnection): Pro
  * convention ("the path must use '/' as the separator, including on
  * Windows" — see `scip_pb.ts`). `egr index <dir>`'s own paths come from
  * `walkFiles`, which now normalizes to the same `/`-separated convention at
- * its own source point (`cli/walk.ts`'s `toPosixPath`, XSPEC-333 R3 follow-up)
- * regardless of the host OS's separator — this function's overlap check, and
- * the id scheme `ingestScipIndex` derives from `relativePath`, both do plain
- * string equality against these two path sets, and both sides are now
- * guaranteed `/`-separated on every platform, not just POSIX. (Previously
- * this was a real, unfixed gap: a `\`-separated `walkFiles` path would not
- * string-match a `/`-separated SCIP document path on Windows, so this
- * overlay could silently match nothing even when `<dir>` WAS the right root
- * — see `cli/walk.ts`'s module doc for why the fix normalizes once at the
- * `walkFiles` source rather than here or in `ingestScipIndex`: those two
- * consumers, plus tree-sitter's own id scheme in `extractor.ts`/
- * `tag-query-engine.ts`, all take `walkFiles`' `path` as an opaque string and
- * never re-derive it from the filesystem, so a single upstream normalization
- * point is sufficient for every one of them to agree on one separator
- * convention.)
+ * its own source point (`code-graph/path-utils.ts`'s `toPosixPath`, XSPEC-333
+ * R3 follow-up) regardless of the host OS's separator — this function's
+ * overlap check, and the id scheme `ingestScipIndex` derives from
+ * `relativePath`, both do plain string equality against these two path sets,
+ * and both sides are now guaranteed `/`-separated on every platform, not
+ * just POSIX. (Previously this was a real, unfixed gap: a `\`-separated
+ * `walkFiles` path would not string-match a `/`-separated SCIP document path
+ * on Windows, so this overlay could silently match nothing even when `<dir>`
+ * WAS the right root. Verified via string-level unit tests against
+ * manufactured Windows-style path strings, not a real Windows host — see
+ * `test/scip-windows-path-normalization.test.ts`; this sandbox has none to
+ * test against. See `code-graph/path-utils.ts`'s module doc for why
+ * normalizing ONLY inside `walkFiles` — this function's original fix —
+ * turned out to be an incomplete "single source of truth" claim, caught by
+ * adversarial review: `mcp/server.ts`'s `index_code`/`index_docs` tools are
+ * a SECOND id-generating entry point that bypasses `walkFiles` entirely, so
+ * `extractor.ts`'s `collectExtraction` — the actual common choke point for
+ * every id, called by both entry points — now ALSO normalizes, independent
+ * of this function's own `walkFiles`-sourced comparison.)
  *
  * A non-empty but suspiciously small overlap (e.g. 1 of 50 files matching by
  * name coincidence) is also not specially detected here beyond the

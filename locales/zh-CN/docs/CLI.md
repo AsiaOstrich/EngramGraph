@@ -94,11 +94,13 @@ egr index . --scip index.scip
   occurrence 的路径是相对于那个根目录的；如果和 `<dir>` 自身的文件路径对不上，
   `egr` 会抛出「none of the N document path(s) ... matched any source file
   under `<dir>`」这类明确错误，而不是悄悄地什么都没 ingest 到。SCIP 路径按
-  规范一律用 `/` 分隔；`egr` 自身的路径（来自 `walkFiles`）现在也一律规范化
-  为 `/`，不受宿主操作系统影响，所以这个比对在 Windows 上也能对上，不只
-  POSIX。若 `--scip` 报告文件有匹配到、但解析出的 definitions/calls 数是零，
-  常见原因通常是 `.scip` 文件已过期（对照的是编辑过的源码树重新生成索引前
-  的旧版本），而非路径不符；此情况下会打印警告。
+  规范一律用 `/` 分隔；`egr` 自身的路径现在也一律规范化为 `/`，不受宿主
+  操作系统影响——设计上这个比对在 Windows 上也能对上、不只 POSIX，但只用
+  模拟 Windows 风格路径字符串的单元测试验证过（这个项目自己的 CI 没有真正
+  的 Windows 主机可测）。若 `--scip` 报告文件有匹配到、但解析出的
+  definitions/calls 数是零，此情况下会打印警告；可能成因之一是 `.scip`
+  文件已过期——是在源码树之后又被编辑过之前生成的，所以路径对得上但内容
+  已经对不上。
 - `<path>` 指向不存在或非 SCIP 的文件时，会抛出明确的「file not found」或
   「could not be parsed as a SCIP protobuf index」错误。
 - 若图数据库的 `CALLS` 表是在此功能的 schema 变动（`provider`/`confidence`

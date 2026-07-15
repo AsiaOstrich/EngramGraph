@@ -47,6 +47,7 @@ import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
 import type { ExtractOptions, ProjectFile, SupportedLanguage } from "./types.js";
 import { tagsQuerySourceFor } from "./queries/index.js";
+import { toPosixPath } from "./path-utils.js";
 import { collectComments, findEnclosingFunction, qualifyFunctions, runTagQuery } from "./tag-query-engine.js";
 
 /**
@@ -316,13 +317,28 @@ export interface Extraction {
  * itself is deferred so it can be done intra-file ({@link extractCodeGraph})
  * or cross-file ({@link extractProject}).
  *
+ * `opts.filePath` is normalized via {@link toPosixPath} (XSPEC-333 R3
+ * follow-up) — this is the actual single choke point every Module/Function/
+ * Class id in this codebase is built from, called by BOTH of this codebase's
+ * id-generating entry points: `cli/walk.ts`'s `walkFiles` (already
+ * normalized at its own source, so this is a harmless no-op re-application
+ * for that caller) AND `mcp/server.ts`'s `index_code`/`index_docs` tools,
+ * which take a caller-supplied `filePath`/`path` directly with no
+ * `walkFiles` involved at all. Without normalizing here too, a Windows MCP
+ * client indexing the same project a `walkFiles`-driven `egr index` CLI run
+ * already indexed would mint a second, `\`-separated set of ids for the same
+ * logical files instead of converging onto the same Module/Function/Class
+ * nodes — the same silent-mismatch failure mode this whole fix exists to
+ * close, just at a different entry point than the one the original `--scip`
+ * bug report surfaced it through.
+ *
  * @throws if the source cannot be parsed into a syntax tree.
  */
 export function collectExtraction(source: string, opts: ExtractOptions): Extraction {
-  const language = opts.language ?? detectLanguage(opts.filePath);
+  const filePath = toPosixPath(opts.filePath);
+  const language = opts.language ?? detectLanguage(filePath);
   const tree = parserFor(language).parse(source);
 
-  const filePath = opts.filePath;
   const moduleId = filePath;
 
   const nodes: GraphNode[] = [
