@@ -103,14 +103,16 @@ egr index . --scip index.scip
   已经对不上。
 - `<path>` 指向不存在或非 SCIP 的文件时，会抛出明确的「file not found」或
   「could not be parsed as a SCIP protobuf index」错误。
-- 若图数据库的 `CALLS` 表是在此功能的 schema 变动（`provider`/`confidence`
-  列）之前创建的，会抛出说明修法的错误：**`--clean` 无法解决这个问题**
-  （它只通过 `DETACH DELETE` 清行数据，从不动表 schema——表一旦已存在，
-  `initSchema` 的 `CREATE TABLE` 就是空操作）。要修，得把图数据库文件本身删掉
-  （默认是 `.engram/graph.db` 加它的 `.wal` 附属文件，或
-  `ENGRAM_DB`/`--graph`/`--isolation` 解析出来的那个路径——见上方
-  [图数据库位置](#图数据库位置)），然后对着这个已清空的路径重新执行
-  `egr index`。
+- 若图数据库的 `CALLS`（或 `Function`/`Class`）表是在像这次
+  `provider`/`confidence` 列这样的 schema 变动之前创建的，任何 `egr` 命令
+  一打开这个数据库，就会**自动、非破坏性地**迁移：通过 `ALTER TABLE ... ADD`
+  就地补上缺的列（已有行的其他属性都保留，新列在这些旧行上读出来是
+  `NULL`），动手改之前会先把数据库文件备份到 `.pre-migration-backup` 附属
+  文件（不会覆盖已有的备份）。不需要 `--clean`、不需要删数据库文件、也不需要
+  重新索引——`--clean` 依然只通过 `DETACH DELETE` 清行数据、从不动表
+  schema，但这已经不是补这个缺口的机制了。真的发生迁移时，`egr` 会在 stderr
+  打印一行消息，说明加了哪些列、备份存在哪里。机制细节见
+  `src/graph-db/schema-migration.ts`。
 - 目前已对 `scip-dotnet`（C#）与 `scip-java`（Java）的输出验证过；理论上任何
   符合 SCIP 规范、对应到 tree-sitter 已支持语言的索引工具原理上都应该同样可用
   （合并逻辑本身与语言无关），但实际上尚未对第三种索引工具实测过。

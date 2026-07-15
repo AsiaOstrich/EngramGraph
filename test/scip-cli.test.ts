@@ -145,17 +145,21 @@ describe("cmdIndex --scip (direct call, real C# fixture)", () => {
     }
   }
 
-  it("CALLS schema predates provider/confidence columns (ingestScipOverlay in isolation): actionable message, NOT the (incorrect) '--clean' advice", async () => {
+  it("CALLS schema predates provider/confidence columns (ingestScipOverlay in isolation): actionable message, NOT the (now-removed) 'delete the DB file' advice", async () => {
     const { conn: oldConn, dbDir: oldDir } = openPreMigrationSchemaConnection();
     await createPreMigrationSchema(oldConn);
 
     try {
       const codeFiles = loadScipPocFixtureSources().map((f) => ({ path: f.relativePath, source: f.source }));
-      // Message must NOT tell the user to run `--clean` as the fix — verified
-      // empirically that `--clean` (clearGraph) only deletes row data, never
-      // touches table schema, so it would NOT actually resolve this error.
+      // This connection was opened directly (bypassing `openGraph`, which
+      // would have auto-migrated it via `migrateSchemaColumns` — see
+      // `schema-migration.ts`), so this fallback error path still fires.
+      // The message must NOT tell the user to delete the DB file any more —
+      // that was the old (data-lossy) remediation; the real fix now is
+      // calling `migrateSchemaColumns(conn)` (non-destructive `ALTER TABLE`),
+      // which this message points to instead.
       await expect(ingestScipOverlay(oldConn, FIXTURE_DIR, FIXTURE_SCIP, codeFiles)).rejects.toThrow(
-        /predates the "provider"\/"confidence" columns.*does NOT fix this.*Delete this project's graph DB file/s,
+        /predates the "provider"\/"confidence" columns.*not opened through "openGraph".*migrateSchemaColumns/s,
       );
     } finally {
       await oldConn.close();

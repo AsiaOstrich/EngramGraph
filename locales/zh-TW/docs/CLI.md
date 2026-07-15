@@ -103,14 +103,16 @@ egr index . --scip index.scip
   已經對不上。
 - `<path>` 指到不存在或非 SCIP 的檔案時，會丟出明確的「file not found」或
   「could not be parsed as a SCIP protobuf index」錯誤。
-- 若圖譜資料庫的 `CALLS` 表是在此功能的 schema 變動（`provider`/`confidence`
-  欄位）之前建立的，會丟出說明修法的錯誤：**`--clean` 無法解決這個問題**
-  （它只透過 `DETACH DELETE` 清資料列，從不動資料表 schema——資料表一旦存在，
-  `initSchema` 的 `CREATE TABLE` 就是空操作）。要修，得把圖譜資料庫檔案本身刪掉
-  （預設是 `.engram/graph.db` 加它的 `.wal` 附屬檔，或
-  `ENGRAM_DB`/`--graph`/`--isolation` 解出來的那個路徑——見上方
-  [圖譜資料庫位置](#圖譜資料庫位置)），然後對著這個已清空的路徑重新執行
-  `egr index`。
+- 若圖譜資料庫的 `CALLS`（或 `Function`/`Class`）表是在像這次
+  `provider`/`confidence` 欄位這樣的 schema 變動之前建立的，任何 `egr` 指令
+  一開啟這個資料庫，就會**自動、非破壞性地**遷移：透過 `ALTER TABLE ... ADD`
+  就地補上缺的欄位（既有資料列的其他屬性都保留，新欄位在這些舊列上讀出來是
+  `NULL`），動手改之前會先把資料庫檔案備份到 `.pre-migration-backup` 附屬檔
+  （不會覆蓋既有的備份）。不需要 `--clean`、不需要刪資料庫檔案、也不需要重新
+  索引——`--clean` 依然只透過 `DETACH DELETE` 清資料列、從不動資料表
+  schema，但這已經不是補這個缺口的機制了。真的發生遷移時，`egr` 會在 stderr
+  印一行訊息，說明加了哪些欄位、備份存在哪裡。機制細節見
+  `src/graph-db/schema-migration.ts`。
 - 目前已對 `scip-dotnet`（C#）與 `scip-java`（Java）的輸出驗證過；理論上任何
   符合 SCIP 規範、對應到 tree-sitter 已支援語言的索引工具原理上都應該同樣可用
   （合併邏輯本身與語言無關），但實際上尚未對第三種索引工具實測過。

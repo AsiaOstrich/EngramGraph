@@ -104,15 +104,18 @@ Requirements and failure modes:
   edited, so it no longer matches on content even though the paths agree.
 - A missing or non-SCIP file at `<path>` fails with a clear "file not found"
   or "could not be parsed as a SCIP protobuf index" error.
-- A graph DB whose `CALLS` table predates this feature's schema change
-  (the `provider`/`confidence` columns) fails with an error explaining the
-  fix: **`--clean` does NOT resolve this** (it only deletes row data via
-  `DETACH DELETE`, never table schema — `initSchema`'s `CREATE TABLE` is a
-  no-op once a table already exists). Delete the graph DB file itself (by
-  default `.engram/graph.db` + its `.wal` sidecar, or wherever
-  `ENGRAM_DB`/`--graph`/`--isolation` resolves it to — see
-  [Graph DB location](#graph-db-location) above) and re-run `egr index`
-  against the now-empty path.
+- A graph DB whose `CALLS` (or `Function`/`Class`) table predates a schema
+  change like this one's `provider`/`confidence` columns is migrated
+  **automatically and non-destructively** the moment any `egr` command opens
+  it: missing columns are added in place via `ALTER TABLE ... ADD` (existing
+  rows keep every other property, the new column reads as `NULL` on them),
+  after first backing up the DB file to a `.pre-migration-backup` sibling
+  (never overwriting a prior backup). No `--clean`, no deleting the DB file,
+  no re-index required — `--clean` still only deletes row data via `DETACH
+  DELETE`, never table schema, but that's no longer the mechanism that closes
+  this gap. When a migration actually runs, `egr` prints a one-line notice on
+  stderr naming the column(s) added and the backup path. See
+  `src/graph-db/schema-migration.ts` for the mechanism.
 - Currently verified against `scip-dotnet` (C#) and `scip-java` (Java)
   output; any SCIP-conformant indexer for a tree-sitter-supported language
   should work the same way in principle (the merge logic is language-generic),
