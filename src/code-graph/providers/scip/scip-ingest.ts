@@ -1,10 +1,19 @@
 /**
- * SCIP → {@link GraphFragment} ingest converter (XSPEC-333 R3 PoC).
+ * SCIP → {@link GraphFragment} ingest converter (XSPEC-333 R3 PoC; R3 Java
+ * PoC extension proved this converter's design — not just its C# instance
+ * — generalizes to a second SCIP-backed language).
  *
- * Turns a parsed SCIP `Index` (see `scip-reader.ts`) plus the same C# source
- * files tree-sitter already indexes into a `provider: "scip"` fragment,
- * written through the existing, unmodified `writeFragment` (`graph-db/writer.ts`)
- * so R1's provenance-aware merge policy decides what actually lands in Kuzu.
+ * Turns a parsed SCIP `Index` (see `scip-reader.ts`) plus the same source
+ * files tree-sitter already indexes (any {@link SupportedLanguage} both
+ * tree-sitter and a SCIP indexer cover — originally only C#/`scip-dotnet`,
+ * now also Java/`scip-java`) into a `provider: "scip"` fragment, written
+ * through the existing, unmodified `writeFragment` (`graph-db/writer.ts`) so
+ * R1's provenance-aware merge policy decides what actually lands in Kuzu.
+ * See `test/scip-java-ingest.test.ts`'s module doc for what the Java
+ * extension did and did not have to change here to make that generalization
+ * claim true (short version: only the language-detection/parser-cache glue
+ * this file used to hardcode to C# — see `buildFileScope` — nothing in the
+ * row-containment/merge logic itself is C#-specific).
  *
  * ## Why this reads tree-sitter's own AST instead of trusting SCIP ranges alone
  *
@@ -81,10 +90,11 @@
  * `test/scip-merge.test.ts`'s updated "cross-provider upgrade" test.
  */
 
-import Parser from "tree-sitter";
-import CSharp from "tree-sitter-c-sharp";
+import type Parser from "tree-sitter";
 
 import type { GraphEdge, GraphFragment, GraphNode } from "../../../graph-db/types.js";
+import type { SupportedLanguage } from "../../types.js";
+import { detectLanguage, languageFor, parserFor } from "../../extractor.js";
 import { tagsQuerySourceFor } from "../../queries/index.js";
 import {
   qualifyFunctions,
@@ -93,16 +103,27 @@ import {
   type QualifiedFunction,
 } from "../../tag-query-engine.js";
 import { classifySymbol, parseSymbol } from "./scip-symbol.js";
-import { isDefinitionOccurrence, isLocalSymbol, type ScipIndex } from "./scip-reader.js";
+import { isDefinitionOccurrence, isLocalSymbol, occurrenceRange, type ScipIndex } from "./scip-reader.js";
 
 export const SCIP_PROVIDER = "scip";
 export const SCIP_CONFIDENCE = 0.9;
 
-/** One source file this ingest run has access to, keyed the same way SCIP's `Document.relativePath` is. */
+/**
+ * One source file this ingest run has access to, keyed the same way SCIP's
+ * `Document.relativePath` is.
+ *
+ * `language` is optional, falling back to {@link detectLanguage}'s
+ * extension-based inference — the same convention `ProjectFile.language`
+ * (`extractor.ts`) already uses — rather than a second, SCIP-only inference
+ * rule (XSPEC-333 R3 Java PoC: this field, and the `parserFor`/`languageFor`
+ * reuse below, replace this module's original C#-only hardcoded parser
+ * cache, which had no way to ingest a second language at all).
+ */
 export interface ScipSourceFile {
   /** Must equal the corresponding `Document.relativePath` in the SCIP index. */
   relativePath: string;
   source: string;
+  language?: SupportedLanguage;
 }
 
 interface FileScope {
@@ -110,28 +131,10 @@ interface FileScope {
   classes: QualifiedClass[];
 }
 
-/**
- * Reuse one native Parser across every file/call in this module — same
- * rationale as `extractor.ts`'s own `parserCache`: tree-sitter parsers hold
- * native resources with no `delete()`, and allocating a fresh one per file
- * leaks handles that can crash a long-lived process (empirically hit while
- * building this PoC: the vitest worker process running `test/scip-merge.test.ts`
- * segfaulted between tests before this cache was added — multiple
- * uncached `new Parser()` calls across repeated `ingestScipIndex` calls in
- * one process, exactly the failure mode that comment warns about).
- */
-let csharpParser: Parser | null = null;
-function getCSharpParser(): Parser {
-  if (!csharpParser) {
-    csharpParser = new Parser();
-    csharpParser.setLanguage(CSharp);
-  }
-  return csharpParser;
-}
-
 function buildFileScope(file: ScipSourceFile): FileScope {
-  const tree = getCSharpParser().parse(file.source);
-  const { definitions } = runTagQuery(CSharp, "csharp", tagsQuerySourceFor("csharp"), tree.rootNode);
+  const language = file.language ?? detectLanguage(file.relativePath);
+  const tree = parserFor(language).parse(file.source);
+  const { definitions } = runTagQuery(languageFor(language), language, tagsQuerySourceFor(language), tree.rootNode);
   return qualifyFunctions(file.relativePath, definitions);
 }
 
@@ -204,7 +207,7 @@ export function ingestScipIndex(index: ScipIndex, files: ScipSourceFile[]): Scip
       if (!parsed) continue;
       const graphKind = classifySymbol(parsed);
       if (graphKind === "other") continue;
-      definitionSite.set(occ.symbol, { file: doc.relativePath, row: occ.range[0]!, graphKind });
+      definitionSite.set(occ.symbol, { file: doc.relativePath, row: occurrenceRange(occ)[0]!, graphKind });
     }
   }
 
@@ -297,7 +300,7 @@ export function ingestScipIndex(index: ScipIndex, files: ScipSourceFile[]): Scip
         }
         continue;
       }
-      const caller = smallestContaining(callerScope.functions, occ.range[0]!);
+      const caller = smallestContaining(callerScope.functions, occurrenceRange(occ)[0]!);
       if (!caller) {
         callsSkippedNoEnclosingCaller++;
         continue;

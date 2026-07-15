@@ -194,7 +194,12 @@ const CALLS_CONFIDENCE: Record<CallResolutionTier, number> = {
  * last mainstream-language batch). No extension-ambiguity questions like the
  * `.h` case above for any of the three: each extension is unambiguous.
  */
-function detectLanguage(filePath: string): SupportedLanguage {
+// Exported (XSPEC-333 R3 Java PoC) for the same reason as `parserFor` below:
+// `scip-ingest.ts` needs the same file-extension -> language inference
+// `ProjectFile.language` already falls back to, so `ScipSourceFile` can offer
+// the identical optional-`language`-with-extension-fallback convention
+// instead of a second, SCIP-only inference rule.
+export function detectLanguage(filePath: string): SupportedLanguage {
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".tsx")) return "tsx";
   if (lower.endsWith(".ts") || lower.endsWith(".mts") || lower.endsWith(".cts")) {
@@ -222,7 +227,8 @@ function detectLanguage(filePath: string): SupportedLanguage {
   return "javascript";
 }
 
-function languageFor(language: SupportedLanguage): Parser.Language {
+/** Exported (XSPEC-333 R3 Java PoC) — see {@link parserFor}'s doc comment. */
+export function languageFor(language: SupportedLanguage): Parser.Language {
   switch (language) {
     case "typescript":
       return TypeScript.typescript;
@@ -260,7 +266,17 @@ function languageFor(language: SupportedLanguage): Parser.Language {
  */
 const parserCache = new Map<SupportedLanguage, Parser>();
 
-function parserFor(language: SupportedLanguage): Parser {
+/**
+ * Exported (XSPEC-333 R3 Java PoC) so a second SCIP-ingest language doesn't
+ * have to duplicate this cache: `scip-ingest.ts`'s original C#-only PoC kept
+ * its own single-language `csharpParser` cache rather than reusing this one,
+ * which was fine when there was exactly one SCIP-backed language, but adding
+ * Java meant either duplicating this whole grammar-lookup switch a second
+ * time or reusing the one tree-sitter parser cache this module already
+ * maintains for every language `egr index` supports — the latter is the
+ * change made here, no behavior change for existing (non-SCIP) callers.
+ */
+export function parserFor(language: SupportedLanguage): Parser {
   let parser = parserCache.get(language);
   if (!parser) {
     parser = new Parser();
