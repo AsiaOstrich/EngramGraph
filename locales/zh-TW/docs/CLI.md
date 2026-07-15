@@ -1,8 +1,8 @@
 ---
 source: docs/CLI.md
-source_version: 0.2.0
-translation_version: 0.2.0
-last_synced: 2026-05-30
+source_version: 0.3.0
+translation_version: 0.3.0
+last_synced: 2026-07-15
 status: complete
 ---
 
@@ -42,14 +42,16 @@ egr <command> [args] [options]
 
 ## 命令
 
-### `index <dir> [--docs] [--clean]`
+### `index <dir> [--docs] [--clean] [--scip <path>]`
 
 遞迴將 `<dir>` 下的原始碼索引進**程式碼圖譜**（tree-sitter → `Function` / `Class` /
 `Module` 節點 + 跨檔 `CALLS`）。加上 `--docs` 時，也會把 `*.md` 索引進**知識圖譜**
 （front-matter → `Spec` / `Decision` + `IMPACTS` / `SUPERSEDES`）。
 
-- 程式碼副檔名：`.ts .tsx .js .jsx .mts .cts .mjs .cjs`（排除 `.d.ts`）。
-- 略過的目錄：`node_modules`、`dist`、`.engram`、`.git`、`coverage`。
+- 程式碼副檔名：`.ts .tsx .js .jsx .mts .cts .mjs .cjs .cs .py .go .java
+  .kt .kts .rs .cpp .cc .cxx .hpp .h .hh .rb .php .dart`（排除 `.d.ts`）。
+- 略過的目錄：`node_modules`、`dist`、`.engram`、`.git`、`coverage`、`bin`、
+  `obj`、`__pycache__`、`.venv`、`venv`、`vendor`、`target`、`build`。
 - `--clean`：索引前先清空圖譜資料。索引本是 upsert（MERGE）從不刪除，程式裡被移除的節點
   會殘留；`--clean` 從頭重建以清掉它。
 
@@ -62,6 +64,51 @@ egr index ./src --clean   # 重建，清掉已刪除的節點
 輸出計數：`files`、`functions`、`classes`、`calls`，以及 `ambiguous`（被呼叫名稱比對到
 > 1 個函式——略過）與 `unresolved`（比對不到——略過）；加上 `--docs` 時還有
 `specs` / `decisions` / `impacts` / `supersedes`。
+
+#### `--scip <path>` —— 疊加 SCIP 索引以提升 CALLS 精確度
+
+tree-sitter 自身以名稱比對的 CALLS 解析刻意保守：當被呼叫的名稱在整個 repo
+中比對到超過一個函式時，它會略過該呼叫而非用猜的（即上面輸出裡的
+`ambiguous`）。[SCIP] 索引——由該語言真正基於編譯器/型別檢查器的索引工具產生
+——帶有無歧義的符號參照，因此 `--scip` 會把它疊加在 tree-sitter pass 之上，
+解析出 tree-sitter 單獨無法解析的呼叫，並提升它已解析呼叫的信心值。
+
+[SCIP]: https://github.com/sourcegraph/scip
+
+```bash
+# 1. 自行用該語言的索引工具產生 .scip 檔。
+#    egr 本身不會呼叫 dotnet/java/maven 或任何其他建置工具鏈——
+#    這一步完全是你自己建置環境的責任。
+dotnet tool install --global scip-dotnet   # 只需一次
+scip-dotnet index MyProject.csproj --output index.scip
+
+# 2. 讓 egr 讀它。--scip 一律先跑完整的 tree-sitter pass，再疊加 SCIP 資料
+#    ——單一指令就是完整、從頭開始的索引；不需要先跑過一次普通的
+#    `egr index`。
+egr index . --scip index.scip
+```
+
+需求與失敗模式：
+
+- **`<dir>` 必須是外部索引工具當初執行的同一個專案根目錄。** SCIP 索引裡
+  occurrence 的路徑是相對於那個根目錄的；若跟 `<dir>` 自身的檔案路徑對不上，
+  `egr` 會丟出「none of the N document path(s) ... matched any source file
+  under `<dir>`」這類明確錯誤，而不是悄悄地什麼都沒 ingest 到。
+- `<path>` 指到不存在或非 SCIP 的檔案時，會丟出明確的「file not found」或
+  「could not be parsed as a SCIP protobuf index」錯誤。
+- 若圖譜資料庫是在此功能的 schema 變動（`CALLS` 的 `provider`/`confidence`
+  欄位）之前建立的，會丟出指引你執行 `egr index <dir> --clean` 重建的錯誤
+  ——`initSchema` 從不對既有資料表做 `ALTER`。
+- 目前已對 `scip-dotnet`（C#）與 `scip-java`（Java）的輸出驗證過；理論上任何
+  符合 SCIP 規範、對應到 tree-sitter 已支援語言的索引工具都應該同樣可用，
+  但尚未實測。
+
+輸出會多一個 `scip` 區塊：`documentsInIndex`（`.scip` 檔裡的文件數）、
+`filesMatched`（其中有多少與 `<dir>` 自身的檔案重疊——小於
+`documentsInIndex` 是正常現象，例如索引工具看得到、但 `egr` 刻意略過的
+編譯器產生檔）、`definitionsResolved` / `definitionsUnresolved`、
+`callsEmitted`，以及兩個略過計數 `callsSkippedNoEnclosingCaller` /
+`callsSkippedUnresolvedTarget`。
 
 ### `callers <symbol> [--depth N]`
 

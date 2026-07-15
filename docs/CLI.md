@@ -37,15 +37,17 @@ The directory is created on demand and the schema is ensured on every open
 
 ## Commands
 
-### `index <dir> [--docs] [--clean]`
+### `index <dir> [--docs] [--clean] [--scip <path>]`
 
 Recursively indexes source files under `<dir>` into the **code graph**
 (tree-sitter → `Function` / `Class` / `Module` nodes + cross-file `CALLS`).
 With `--docs`, also indexes `*.md` files into the **knowledge graph**
 (front-matter → `Spec` / `Decision` + `IMPACTS` / `SUPERSEDES`).
 
-- Code extensions: `.ts .tsx .js .jsx .mts .cts .mjs .cjs` (`.d.ts` excluded).
-- Skipped directories: `node_modules`, `dist`, `.engram`, `.git`, `coverage`.
+- Code extensions: `.ts .tsx .js .jsx .mts .cts .mjs .cjs .cs .py .go .java
+  .kt .kts .rs .cpp .cc .cxx .hpp .h .hh .rb .php .dart` (`.d.ts` excluded).
+- Skipped directories: `node_modules`, `dist`, `.engram`, `.git`, `coverage`,
+  `bin`, `obj`, `__pycache__`, `.venv`, `venv`, `vendor`, `target`, `build`.
 - `--clean`: drop the graph's data before indexing. Indexing is otherwise an
   upsert (MERGE) that never deletes, so a node removed from the code lingers;
   `--clean` rebuilds from scratch to prune it.
@@ -59,6 +61,55 @@ egr index ./src --clean   # rebuild, pruning deleted nodes
 Output counts: `files`, `functions`, `classes`, `calls`, plus `ambiguous`
 (callee name matched > 1 function — skipped) and `unresolved` (callee matched
 none — skipped); with `--docs`, `specs` / `decisions` / `impacts` / `supersedes`.
+
+#### `--scip <path>` — overlay a SCIP index for higher-precision CALLS
+
+tree-sitter's own name-based CALLS resolution is deliberately conservative:
+when a callee name matches more than one function across the repo it skips
+the call rather than guessing (`ambiguous` in the output above). A [SCIP]
+index — produced by a real compiler/type-checker-backed indexer for the
+language in question — carries unambiguous symbol references, so `--scip`
+overlays it on top of the tree-sitter pass to resolve calls tree-sitter alone
+can't, and to upgrade the confidence of ones it already resolved.
+
+[SCIP]: https://github.com/sourcegraph/scip
+
+```bash
+# 1. Produce the .scip file yourself, with an indexer for your language.
+#    egr does NOT invoke dotnet/java/maven or any other build toolchain —
+#    that step is entirely your own build environment's responsibility.
+dotnet tool install --global scip-dotnet   # once
+scip-dotnet index MyProject.csproj --output index.scip
+
+# 2. Point egr at it. --scip always runs a full tree-sitter pass first, then
+#    overlays the SCIP data — a single command is a complete, from-scratch
+#    index; you do not need to have run a plain `egr index` before this.
+egr index . --scip index.scip
+```
+
+Requirements and failure modes:
+
+- **`<dir>` must be the SAME project root the external indexer was run
+  against.** A SCIP index's occurrence paths are relative to that root; if
+  they don't match `<dir>`'s own file paths, `egr` fails with a "none of the
+  N document path(s) ... matched any source file under `<dir>`" error rather
+  than silently ingesting nothing.
+- A missing or non-SCIP file at `<path>` fails with a clear "file not found"
+  or "could not be parsed as a SCIP protobuf index" error.
+- A graph DB created before this feature's schema change (`CALLS`'s
+  `provider`/`confidence` columns) fails with an error pointing you at
+  `egr index <dir> --clean` to rebuild it — `initSchema` never `ALTER`s an
+  existing table.
+- Currently verified against `scip-dotnet` (C#) and `scip-java` (Java)
+  output; any SCIP-conformant indexer for a tree-sitter-supported language
+  should work the same way, but has not been tried.
+
+Output adds a `scip` block: `documentsInIndex` (documents in the `.scip`
+file), `filesMatched` (how many of those overlapped `<dir>`'s own files —
+less than `documentsInIndex` is normal, e.g. compiler-generated files an
+indexer sees but `egr` deliberately skips), `definitionsResolved` /
+`definitionsUnresolved`, `callsEmitted`, and the two skip counters
+`callsSkippedNoEnclosingCaller` / `callsSkippedUnresolvedTarget`.
 
 ### `callers <symbol> [--depth N]`
 
