@@ -129,15 +129,17 @@ describe("writer overwrite policy (XSPEC-333 R1)", () => {
     expect(rows[0]?.path).toBe("b.ts");
   });
 
-  // The real CALLS REL table (schema.ts) has no confidence/provider columns
-  // today — no provider currently attaches that data to an edge, and adding
-  // unused columns speculatively is out of scope for R1. This exercises the
-  // real writeFragment/mergeEdge code path against an ad-hoc REL table that
-  // *does* carry those columns (via a type-cast fragment, since GraphEdge's
-  // label/fromLabel/toLabel are typed to the schema's fixed unions but
-  // mergeEdge itself just interpolates whatever string it's given), so a
-  // future provider can rely on the same policy the moment it starts
-  // populating those columns on a real edge.
+  // Historical note: when this test was written (R1), the real CALLS REL
+  // table had no confidence/provider columns at all — no provider attached
+  // that data to an edge yet, and adding unused columns speculatively was
+  // out of scope for R1. XSPEC-333 R3 (SCIP PoC) has since added those two
+  // columns to the *real* CALLS table (see schema.ts) because a real second
+  // provider now exists to populate them (`src/code-graph/providers/scip/`,
+  // exercised end-to-end in test/scip-merge.test.ts). This test's synthetic
+  // `TEST_CALLS` table is kept as-is — it is still a useful, schema-agnostic
+  // check of mergeEdge's generic overwrite-policy logic in isolation, now
+  // simply no longer the *only* place that logic runs against a REL table
+  // with these columns.
   it("edges with provider+confidence properties follow the same policy", async () => {
     await conn.execute(`CREATE NODE TABLE TestFn(id STRING, PRIMARY KEY(id))`);
     await conn.execute(

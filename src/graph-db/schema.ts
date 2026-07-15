@@ -30,7 +30,38 @@ export const NODE_TABLE_DDL: readonly string[] = [
 
 /** REL TABLE DDL statements. Must run after their endpoint NODE tables. */
 export const REL_TABLE_DDL: readonly string[] = [
-  `CREATE REL TABLE CALLS(FROM Function TO Function, call_count INT64)`,
+  // `provider`/`confidence` (XSPEC-333 R3 PoC): added so a second CALLS
+  // provider (e.g. SCIP) can stamp provenance on an edge the way Function/
+  // Class nodes already could (R1) — writer.ts's mergeEdge overwrite-policy
+  // logic was already generic enough to support this (see its module doc and
+  // test/writer-merge-policy.test.ts's synthetic TEST_CALLS case), it simply
+  // had no real columns to read/write against until now. Purely additive and
+  // nullable: tree-sitter's own `buildCallEdges()` (extractor.ts) still only
+  // ever sets `call_count` on a CALLS edge it writes, so these two columns
+  // stay NULL on every tree-sitter-authored edge — the same "existing rows
+  // have no value until re-indexed post-migration" situation this file's own
+  // comment already documents for Function/Class's `provider` column above.
+  // A concrete, real consequence of that NULL (not merely nullable-in-theory):
+  // `writer.ts`'s `shouldOverwrite` treats a `null`/`undefined` existing
+  // `confidence` as "no signal to compare against" and refuses to let ANY
+  // other provider overwrite that edge's properties — so a second provider
+  // can only ever *fill a gap* (write a CALLS edge tree-sitter never created
+  // in the first place), never attach provenance to one tree-sitter already
+  // resolved. See `test/scip-merge.test.ts` for this verified end-to-end
+  // against a real second provider (SCIP) for the first time.
+  //
+  // IMPORTANT for any already-existing on-disk Kuzu DB created before this
+  // change: `initSchema` only ever `CREATE`s tables (see below) — Kuzu
+  // 0.11.x's `IF NOT EXISTS` handling means a pre-existing `CALLS` table
+  // missing these two columns is silently left as-is (the "already exists"
+  // error is swallowed), NOT altered. A DB indexed before this migration
+  // therefore needs a full `--clean` rebuild (this repo's own
+  // `index-all.sh --clean` / `egr index --clean`, per dev-platform's
+  // CLAUDE.md rule "egr schema 變動時必須 --clean") before any SCIP ingest can
+  // write `provider`/`confidence` onto a CALLS edge — writing against a
+  // stale schema throws a Kuzu binder error (`r.provider` / `r.confidence`
+  // do not exist on that table), it does not silently no-op.
+  `CREATE REL TABLE CALLS(FROM Function TO Function, call_count INT64, confidence DOUBLE, provider STRING)`,
   `CREATE REL TABLE IMPORTS(FROM Module TO Module)`,
   `CREATE REL TABLE DEFINES(FROM Module TO Function)`,
   `CREATE REL TABLE IMPLEMENTS(FROM Module TO Spec)`,
