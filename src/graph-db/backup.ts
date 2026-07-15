@@ -4,17 +4,31 @@
  * Pure filesystem helper (no Kuzu dependency) so it is unit-testable without a
  * live connection. Used by `schema-migration.ts` to snapshot the on-disk graph
  * DB file immediately before an `ALTER TABLE ... ADD` runs against it, so a
- * schema migration can never be the sole copy of a user's accumulated data
- * (notably SAGE confidence adjustments on Function/Class/Spec/Decision/Doc
- * nodes — see `sage/writer.ts` — which a from-scratch rebuild would zero out).
+ * schema migration can never be the sole copy of a user's accumulated data —
+ * concretely, `Function.confidence` (SAGE's feedback-adjusted score, see
+ * `sage/writer.ts`), which a from-scratch rebuild would reset to its `1.0`
+ * default. (An adversarial review flagged that this protection is real but
+ * narrower than it might sound: it protects the value AT THE MOMENT of
+ * migration — it does NOT change the separate, pre-existing fact that a
+ * subsequent plain `egr index` re-index resets `Function.confidence` back to
+ * `1` regardless of migration, since `writer.ts`'s `shouldOverwrite` always
+ * allows a same-provider rewrite — see `schema-migration.ts`'s module doc for
+ * the full accounting. This backup is still a strict improvement over the old
+ * "delete the whole DB" remediation, which destroyed that value immediately
+ * and unconditionally, not just on the next re-index.)
  *
- * Verified empirically (see `alter-table-experiment.mjs`-style probe against
- * ryugraph@25.9.1): this project's pinned Kuzu fork stores a graph DB as a
- * single regular file at the configured path (no sidecar directory), plus an
- * ephemeral `<path>.wal` that exists only between a write and the next clean
- * close/checkpoint. `fs.cpSync` is used (not `copyFileSync`) so this still
- * does the right thing if a future Kuzu version switches to directory-based
- * storage (`cpSync` recurses into directories; `copyFileSync` would throw).
+ * Callers should issue Kuzu's `CHECKPOINT` statement on their live connection
+ * immediately before calling this (see `schema-migration.ts`), so the on-disk
+ * file this copies is fully flushed and self-consistent rather than
+ * potentially depending on WAL entries not yet merged into it.
+ *
+ * Verified empirically against this project's pinned `ryugraph@25.9.1`
+ * (a Kuzu-derived embedded engine): a graph DB is a single regular file at
+ * the configured path (no sidecar directory), plus an ephemeral `<path>.wal`
+ * that exists only between a write and the next `CHECKPOINT`/clean close.
+ * `fs.cpSync` is used (not `copyFileSync`) so this still does the right thing
+ * if a future version switches to directory-based storage (`cpSync` recurses
+ * into directories; `copyFileSync` would throw).
  */
 
 import { cpSync, existsSync } from "node:fs";
@@ -48,11 +62,20 @@ export function backupDbFile(dbPath: string): string | null {
     target = `${base}-${n}`;
   }
 
-  cpSync(dbPath, target, { recursive: true, errorOnExist: true });
+  // `errorOnExist` only has an effect when `force: false` (Node's default for
+  // `force` is `true`, i.e. silently overwrite) — verified against Node's own
+  // docs after an adversarial review caught an earlier version of this
+  // function passing `errorOnExist: true` WITHOUT `force: false`, which was
+  // dead code: `force`'s default of `true` meant a raced collision (another
+  // process/call creating `target` between the `existsSync` loop above and
+  // this `cpSync` call) would have silently clobbered it instead of erroring.
+  // `force: false` closes that TOCTOU window: Node itself now refuses to
+  // overwrite `target` if it exists, on top of the `existsSync` pre-check.
+  cpSync(dbPath, target, { recursive: true, force: false, errorOnExist: true });
 
   const walPath = `${dbPath}.wal`;
   if (existsSync(walPath)) {
-    cpSync(walPath, `${target}.wal`, { recursive: true, errorOnExist: true });
+    cpSync(walPath, `${target}.wal`, { recursive: true, force: false, errorOnExist: true });
   }
 
   return target;

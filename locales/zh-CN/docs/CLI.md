@@ -106,12 +106,21 @@ egr index . --scip index.scip
 - 若图数据库的 `CALLS`（或 `Function`/`Class`）表是在像这次
   `provider`/`confidence` 列这样的 schema 变动之前创建的，任何 `egr` 命令
   一打开这个数据库，就会**自动、非破坏性地**迁移：通过 `ALTER TABLE ... ADD`
-  就地补上缺的列（已有行的其他属性都保留，新列在这些旧行上读出来是
-  `NULL`），动手改之前会先把数据库文件备份到 `.pre-migration-backup` 附属
-  文件（不会覆盖已有的备份）。不需要 `--clean`、不需要删数据库文件、也不需要
-  重新索引——`--clean` 依然只通过 `DETACH DELETE` 清行数据、从不动表
-  schema，但这已经不是补这个缺口的机制了。真的发生迁移时，`egr` 会在 stderr
-  打印一行消息，说明加了哪些列、备份存在哪里。机制细节见
+  就地补上缺的列（已有行的其他属性都保留），动手改之前会先 checkpoint 再把
+  数据库文件备份到 `.pre-migration-backup` 附属文件（不会覆盖已有的备份）。
+  不需要 `--clean`、不需要删数据库文件就能不再撞 schema 错误——`--clean`
+  依然只通过 `DETACH DELETE` 清行数据、从不动表 schema，但这已经不是补这个
+  缺口的机制了。真的发生迁移时，`egr` 会在 stderr 打印一行消息，说明加了
+  哪些列、备份存在哪里。`Function.provider`/`Class.provider`/
+  `CALLS.provider` 在迁移的行上会回填成 `"tree-sitter"`（这是可确认的历史
+  事实、不是猜的——这些列存在之前，tree-sitter 是唯一的抽取来源），所以迁移
+  后马上跑一次普通的 `egr index` 就能让它们完全解冻；`CALLS` 边的
+  `confidence` 则刻意留 `NULL`（我们不知道某条历史边当初是哪个解析层级），
+  所以 SCIP 叠加要*升级*那条特定边，仍需要先跑过一次那样的普通重新索引。
+  这不会改变另一件既有、与此无关的事实：普通重新索引本来就会把
+  `Function.confidence`（SAGE 反馈调整过的分数）重置回默认值 `1.0`，不论
+  有没有经过迁移——这个功能只防止迁移这个动作本身把该值毁掉，不防止迁移
+  之后的一般重新索引。机制细节与其已知限制见
   `src/graph-db/schema-migration.ts`。
 - 目前已对 `scip-dotnet`（C#）与 `scip-java`（Java）的输出验证过；理论上任何
   符合 SCIP 规范、对应到 tree-sitter 已支持语言的索引工具原理上都应该同样可用

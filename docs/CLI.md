@@ -108,14 +108,26 @@ Requirements and failure modes:
   change like this one's `provider`/`confidence` columns is migrated
   **automatically and non-destructively** the moment any `egr` command opens
   it: missing columns are added in place via `ALTER TABLE ... ADD` (existing
-  rows keep every other property, the new column reads as `NULL` on them),
-  after first backing up the DB file to a `.pre-migration-backup` sibling
-  (never overwriting a prior backup). No `--clean`, no deleting the DB file,
-  no re-index required — `--clean` still only deletes row data via `DETACH
-  DELETE`, never table schema, but that's no longer the mechanism that closes
-  this gap. When a migration actually runs, `egr` prints a one-line notice on
-  stderr naming the column(s) added and the backup path. See
-  `src/graph-db/schema-migration.ts` for the mechanism.
+  rows keep every other property they already have), after first checkpointing
+  and backing up the DB file to a `.pre-migration-backup` sibling (never
+  overwriting a prior backup). No `--clean`, no deleting the DB file required
+  to stop hitting the schema error — `--clean` still only deletes row data via
+  `DETACH DELETE`, never table schema, but that's no longer the mechanism that
+  closes this gap. When a migration actually runs, `egr` prints a one-line
+  notice on stderr naming the column(s) added and the backup path.
+  `Function.provider`/`Class.provider`/`CALLS.provider` are backfilled to
+  `"tree-sitter"` on migrated rows (a known historical fact, not a guess —
+  tree-sitter was the only extraction provider before these columns existed),
+  so a plain `egr index` re-index right afterwards fully un-freezes them; a
+  `CALLS` edge's `confidence` is deliberately left `NULL` (we don't know which
+  resolution tier a historical edge was), so a SCIP overlay's ability to
+  *upgrade* that specific edge still needs one such plain re-index first. This
+  does NOT change the separate, pre-existing fact that a plain re-index resets
+  `Function.confidence` (SAGE's feedback-adjusted score) back to its `1.0`
+  default regardless of migration — this feature only prevents that value
+  from being destroyed by the migration itself, not by ordinary re-indexing
+  after it. See `src/graph-db/schema-migration.ts` for the full mechanism and
+  its documented limits.
 - Currently verified against `scip-dotnet` (C#) and `scip-java` (Java)
   output; any SCIP-conformant indexer for a tree-sitter-supported language
   should work the same way in principle (the merge logic is language-generic),

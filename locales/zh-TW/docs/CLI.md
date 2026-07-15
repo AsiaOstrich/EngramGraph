@@ -106,12 +106,21 @@ egr index . --scip index.scip
 - 若圖譜資料庫的 `CALLS`（或 `Function`/`Class`）表是在像這次
   `provider`/`confidence` 欄位這樣的 schema 變動之前建立的，任何 `egr` 指令
   一開啟這個資料庫，就會**自動、非破壞性地**遷移：透過 `ALTER TABLE ... ADD`
-  就地補上缺的欄位（既有資料列的其他屬性都保留，新欄位在這些舊列上讀出來是
-  `NULL`），動手改之前會先把資料庫檔案備份到 `.pre-migration-backup` 附屬檔
-  （不會覆蓋既有的備份）。不需要 `--clean`、不需要刪資料庫檔案、也不需要重新
-  索引——`--clean` 依然只透過 `DETACH DELETE` 清資料列、從不動資料表
-  schema，但這已經不是補這個缺口的機制了。真的發生遷移時，`egr` 會在 stderr
-  印一行訊息，說明加了哪些欄位、備份存在哪裡。機制細節見
+  就地補上缺的欄位（既有資料列的其他屬性都保留），動手改之前會先 checkpoint
+  再把資料庫檔案備份到 `.pre-migration-backup` 附屬檔（不會覆蓋既有的備份）。
+  不需要 `--clean`、不需要刪資料庫檔案就能不再撞 schema 錯誤——`--clean`
+  依然只透過 `DETACH DELETE` 清資料列、從不動資料表 schema，但這已經不是補
+  這個缺口的機制了。真的發生遷移時，`egr` 會在 stderr 印一行訊息，說明加了
+  哪些欄位、備份存在哪裡。`Function.provider`/`Class.provider`/
+  `CALLS.provider` 在遷移的資料列上會回填成 `"tree-sitter"`（這是可確認的
+  歷史事實、不是用猜的——這些欄位存在之前，tree-sitter 是唯一的擷取來源），
+  所以遷移後馬上跑一次普通的 `egr index` 就能讓它們完全解凍；`CALLS` 邊的
+  `confidence` 則刻意留 `NULL`（我們不知道某條歷史邊當初是哪個解析層級），
+  所以 SCIP 疊加要*升級*那條特定邊，仍需要先跑過一次那樣的普通重新索引。
+  這不會改變另一件既有、與此無關的事實：普通重新索引本來就會把
+  `Function.confidence`（SAGE 回饋調整過的分數）重置回預設值 `1.0`，不論
+  有沒有經過遷移——這個功能只防止遷移這個動作本身把該值毀掉，不防止遷移
+  之後的一般重新索引。機制細節與其已知限制見
   `src/graph-db/schema-migration.ts`。
 - 目前已對 `scip-dotnet`（C#）與 `scip-java`（Java）的輸出驗證過；理論上任何
   符合 SCIP 規範、對應到 tree-sitter 已支援語言的索引工具原理上都應該同樣可用

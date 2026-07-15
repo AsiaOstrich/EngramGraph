@@ -93,7 +93,27 @@ export const REL_TABLE_DDL: readonly string[] = [
   // predates 85c0e56, or whose `Function`/`Class` table predates R1, no
   // longer needs `--clean` or a from-scratch rebuild to stop hitting the
   // Kuzu binder error described above — it self-heals the moment any
-  // command opens the DB through `openGraph`. `cli/run.ts`'s
+  // command opens the DB through `openGraph`.
+  //
+  // This ALSO closes the "stuck with NULL provenance forever" refusal
+  // described two paragraphs up — but only for the migration case, not the
+  // narrower, already-accepted 85c0e56-to-OQ-4 production window: a DB whose
+  // `CALLS` table PREDATES 85c0e56 entirely (missing the columns, not just
+  // NULL-valued) has every existing edge backfilled with
+  // `provider = 'tree-sitter'` the moment those columns are added (see
+  // `schema-migration.ts`'s `KNOWN_HISTORICAL_PROVIDER_BACKFILL` — a logical
+  // certainty, not a guess, since tree-sitter was the only CLI-reachable
+  // writer before these columns existed at all), so the very next plain
+  // `egr index` re-index un-freezes it via the ordinary same-provider path —
+  // no `--clean` needed even for this. `confidence` is deliberately left
+  // `NULL` (we don't know which resolution tier a historical edge was, and
+  // guessing would be fabricating data), so a SCIP upgrade still needs that
+  // one plain re-index to happen first before it can compare confidences.
+  // An edge that ALREADY had these columns with genuine NULL values (written
+  // during the real, narrow 85c0e56-to-OQ-4 production window this
+  // migration doesn't touch at all, since the column already existed) is
+  // untouched by any of this and remains the accepted "stuck until re-created
+  // from scratch" case described above. `cli/run.ts`'s
   // `rethrowAsSchemaMigrationError` / `assertCallsSchemaHasProvenanceColumns`
   // remain as a defense-in-depth check for callers that construct a
   // `GraphConnection` directly and skip `openGraph` (e.g. tests), not as the

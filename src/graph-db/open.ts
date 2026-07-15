@@ -88,7 +88,8 @@ export async function openGraph(loc?: string | GraphLocationOptions): Promise<Gr
   if (migration.migrated.length > 0) {
     const cols = migration.migrated.map((m) => `${m.table}.${m.column}`).join(", ");
     process.stderr.write(
-      `[egr] graph DB schema migrated: added column(s) ${cols} (existing rows keep NULL for them — see ` +
+      `[egr] graph DB schema migrated: added column(s) ${cols} on existing rows (most read back as NULL; a ` +
+        `few specific "provider" columns were backfilled to a known historical value — see ` +
         `graph-db/schema-migration.ts). Backup of the pre-migration DB saved to: ${migration.backupPath}\n`,
     );
   }

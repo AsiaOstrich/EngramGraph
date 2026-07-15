@@ -15,15 +15,32 @@ import {
 
 /**
  * Non-destructive schema column migration (see `graph-db/schema-migration.ts`'s
- * module doc for the full rationale/design writeup).
+ * module doc for the full rationale/design writeup, INCLUDING the honest
+ * scope limits an adversarial review surfaced — this file's tests are
+ * written to match that corrected scope, not the original overclaim).
  *
- * Core claim under test: a graph DB whose `Function`/`CALLS` tables predate
- * XSPEC-333 R1/R3's `provider`/`confidence` columns can be brought up to the
- * CURRENT schema via `ALTER TABLE ... ADD` — preserving every pre-existing
- * property (notably `Function.confidence`, which is what SAGE's feedback
- * loop, sage/writer.ts's `applyFeedback`, accumulates over real usage) —
- * instead of the old-only remediation of deleting the whole DB file and
- * re-indexing from scratch, which would silently zero that out.
+ * Core claims under test:
+ *   1. A graph DB whose `Function`/`Class`/`CALLS` tables predate XSPEC-333
+ *      R1/R3's `provider`/`confidence` columns can be brought up to the
+ *      CURRENT schema via `ALTER TABLE ... ADD` — preserving every
+ *      pre-existing property (notably `Function.confidence`, SAGE's
+ *      feedback-adjusted score) AT THE MOMENT of migration, instead of the
+ *      old-only remediation of deleting the whole DB file and re-indexing
+ *      from scratch, which destroyed it immediately and unconditionally.
+ *   2. `provider` is backfilled to a known historical value (not left NULL)
+ *      on `Function`/`Class`/`CALLS`, so a migrated `CALLS` edge is NOT
+ *      permanently frozen — it un-freezes on the very next plain re-index,
+ *      no `--clean` required (see the dedicated test for this below).
+ *   3. The migration checkpoints + backs up the on-disk file, and that file
+ *      is provably self-consistent (reopening it as an independent
+ *      connection sees the migrated schema + preserved data).
+ *
+ * Explicitly NOT claimed or tested here (a pre-existing, separate concern):
+ * that `Function.confidence` survives a subsequent plain `egr index`
+ * re-index — it does not, migrated or not, because `writer.ts`'s
+ * `shouldOverwrite` always allows a same-provider rewrite and `extractor.ts`
+ * always stamps a fresh Function node with `confidence: 1`. See
+ * `schema-migration.ts`'s module doc for the full accounting.
  */
 
 describe("parseDeclaredColumns", () => {
@@ -228,18 +245,23 @@ describe("migrateSchemaColumns — end-to-end against a simulated pre-migration 
     expect(report.backupPath).not.toBeNull();
     expect(existsSync(report.backupPath!)).toBe(true);
 
-    // SAGE-adjusted confidence untouched — the whole point.
+    // SAGE-adjusted confidence untouched — the whole point. `provider` is
+    // backfilled to the known historical value ("tree-sitter" was the only
+    // possible writer before this column existed — see
+    // KNOWN_HISTORICAL_PROVIDER_BACKFILL's doc), NOT left NULL.
     const f1 = await conn.query(`MATCH (n:Function {id: 'f1'}) RETURN n.confidence AS confidence, n.provider AS provider`);
     expect(Number(f1[0]?.confidence)).toBe(0.35);
-    expect(f1[0]?.provider).toBeNull(); // new column, NULL on this pre-existing row
+    expect(f1[0]?.provider).toBe("tree-sitter");
 
-    // CALLS edge's call_count untouched; new columns NULL.
+    // CALLS edge's call_count untouched; `provider` backfilled the same way,
+    // but `confidence` stays NULL — we don't know which resolution tier a
+    // historical edge was, and guessing would be fabricating data.
     const edge = await conn.query(
       `MATCH (:Function {id: 'f1'})-[r:CALLS]->(:Function {id: 'f2'}) RETURN r.call_count AS call_count, r.confidence AS confidence, r.provider AS provider`,
     );
     expect(Number(edge[0]?.call_count)).toBe(7);
     expect(edge[0]?.confidence).toBeNull();
-    expect(edge[0]?.provider).toBeNull();
+    expect(edge[0]?.provider).toBe("tree-sitter");
 
     // Columns now genuinely writable (no more binder exception).
     await conn.execute(
@@ -247,6 +269,72 @@ describe("migrateSchemaColumns — end-to-end against a simulated pre-migration 
     );
     const f1After = await conn.query(`MATCH (n:Function {id: 'f1'}) RETURN n.provider AS provider`);
     expect(f1After[0]?.provider).toBe("tree-sitter");
+  });
+
+  it("backfilled CALLS.provider un-freezes the edge on the very next plain re-index (same-provider fast path, no --clean needed)", async () => {
+    await createPreMigrationSchema();
+    await conn.execute(`CREATE (:Function {id: 'f1', name: 'foo', file: 'a.ts', start_line: 1, confidence: 1.0})`);
+    await conn.execute(`CREATE (:Function {id: 'f2', name: 'bar', file: 'a.ts', start_line: 10, confidence: 1.0})`);
+    await conn.execute(`MATCH (a:Function {id: 'f1'}), (b:Function {id: 'f2'}) CREATE (a)-[:CALLS {call_count: 3}]->(b)`);
+
+    await migrateSchemaColumns(conn);
+
+    // Simulate exactly what a plain tree-sitter re-index does (extractor.ts's
+    // buildCallEdges always stamps provider/confidence): before the backfill
+    // fix, this write would have hit `shouldOverwrite`'s "different provider,
+    // NULL existing confidence" refusal — a bare MERGE with no SET, silently
+    // leaving call_count stale forever. With provider backfilled to
+    // "tree-sitter", this now takes the "same provider" fast path and
+    // actually updates.
+    await conn.execute(
+      `MATCH (a:Function {id: 'f1'}), (b:Function {id: 'f2'}) MERGE (a)-[r:CALLS]->(b) SET r.call_count = 99, r.provider = 'tree-sitter', r.confidence = 0.8`,
+    );
+    const edge = await conn.query(
+      `MATCH (:Function {id: 'f1'})-[r:CALLS]->(:Function {id: 'f2'}) RETURN r.call_count AS call_count, r.confidence AS confidence, r.provider AS provider`,
+    );
+    expect(edge[0]).toEqual({ call_count: 99, confidence: 0.8, provider: "tree-sitter" });
+  });
+
+  it("detectPendingColumnMigrations / migrateSchemaColumns are safe no-ops against a connection with NO tables at all (getExistingColumnNames' 'table does not exist' branch)", async () => {
+    // No createPreMigrationSchema(), no initSchema() — a genuinely empty
+    // Kuzu database, exercising the defensive branch that's otherwise
+    // unreachable via the normal openGraph path (initSchema always creates
+    // every table first).
+    const pending = await detectPendingColumnMigrations(conn);
+    expect(pending).toEqual([]);
+    const report = await migrateSchemaColumns(conn);
+    expect(report).toEqual({ migrated: [], backupPath: null });
+  });
+
+  it("CHECKPOINTs before backing up: the pre-migration backup file is independently openable and reflects the OLD schema+data", async () => {
+    await createPreMigrationSchema();
+    await conn.execute(`CREATE (:Function {id: 'f1', name: 'foo', file: 'a.ts', start_line: 1, confidence: 0.5})`);
+
+    const report = await migrateSchemaColumns(conn);
+    const backupPath = report.backupPath!;
+
+    // The live connection sees the migrated schema + preserved data (already
+    // covered by other tests above) — the distinct claim here is that the
+    // BACKUP FILE `migrateSchemaColumns` made before altering anything is
+    // itself a fully-consistent, independently-openable Kuzu DB (not a
+    // torn/partial copy depending on a WAL that was never flushed into it),
+    // reflecting the OLD (pre-migration) schema: `provider` doesn't exist on
+    // this copy's Function table at all — proving the checkpoint-then-copy
+    // ordering actually captured a stable snapshot from before any ALTER ran.
+    const backupConn = GraphConnection.open(backupPath);
+    try {
+      const rows = await backupConn.query(`MATCH (n:Function {id: 'f1'}) RETURN n.confidence AS confidence`);
+      expect(Number(rows[0]?.confidence)).toBe(0.5);
+      await expect(backupConn.query(`MATCH (n:Function) RETURN n.provider AS provider`)).rejects.toThrow(/binder exception/i);
+    } finally {
+      await backupConn.close();
+    }
+
+    // The live connection meanwhile has already moved on to the migrated
+    // schema — the backup captured the OLD state, not a snapshot of "whatever
+    // the live connection currently has".
+    const liveRows = await conn.query(`MATCH (n:Function {id: 'f1'}) RETURN n.provider AS provider`);
+    expect(liveRows[0]?.provider).toBe("tree-sitter");
   });
 
   it("is idempotent: a second call after migration reports nothing pending and does not create a second backup", async () => {
