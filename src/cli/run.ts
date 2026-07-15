@@ -78,31 +78,31 @@ function readScipIndexOrThrow(path: string): ReturnType<typeof readScipIndex> {
  * column into a pointed, ACCURATE remediation message, regardless of which
  * write actually tripped it.
  *
- * Deliberately does NOT say "run `egr index <dir> --clean`" — verified
- * empirically that this does not work: `--clean` (`clearGraph`) only issues
- * `MATCH (n) DETACH DELETE n` (deletes row data), it never touches table
- * *schema*, and `initSchema`'s `CREATE TABLE` is a no-op on a table that
- * already exists (see `graph-db/schema.ts`'s `isAlreadyExistsError`) — so a
- * `CALLS` table that predates the `provider`/`confidence` columns is STILL
- * missing them after `--clean --scip`, and this same error fires again. The
- * columns only actually get created by deleting the on-disk `.db` file
- * itself so `initSchema`'s `CREATE TABLE` runs for real on a from-scratch
- * database. (This appears to also be a latent inaccuracy in `schema.ts`'s
- * own pre-existing module comment, which conflates dev-platform's separate
- * `index-all.sh --clean` wrapper — which DOES delete `.db` files before
- * re-indexing — with this CLI's own `--clean` flag, which does not; not
- * fixed here as out of scope for this change, but worth knowing.)
+ * **This should not fire in practice any more.** Every real `egr` invocation
+ * opens its `GraphConnection` via `graph-db/open.ts`'s `openGraph`, which now
+ * runs `schema-migration.ts`'s `migrateSchemaColumns` right after
+ * `initSchema` on EVERY connection open — it detects exactly this gap (an
+ * existing table missing a column `schema.ts` currently declares) and closes
+ * it with a non-destructive `ALTER TABLE ... ADD IF NOT EXISTS` before any
+ * command logic runs, backing up the on-disk DB file first. So by the time
+ * `cmdIndex` below reaches this check, the CALLS table should already have
+ * been migrated. This function remains as defense-in-depth for the one case
+ * that bypasses that: a caller that constructs a bare `GraphConnection` +
+ * `initSchema` directly instead of going through `openGraph` (some tests do
+ * this deliberately, to exercise a pre-migration schema). For that case the
+ * fix is simple and NON-destructive — no need to delete anything: call
+ * `migrateSchemaColumns(conn)` (or just switch the caller to `openGraph`,
+ * which does this automatically) — a full DB rebuild is only a last resort
+ * now, not the primary remediation.
  */
 function rethrowAsSchemaMigrationError(err: unknown): never {
   const msg = err instanceof Error ? err.message : String(err);
   throw new Error(
     `--scip: this graph's CALLS table predates the "provider"/"confidence" columns SCIP ingest needs ` +
-      `(a pre-XSPEC-333-R3 schema, never auto-migrated). "egr index --clean" does NOT fix this (it only ` +
-      `clears row data, not table schema — initSchema never ALTERs an existing table). Delete this ` +
-      `project's graph DB file itself (see "Graph DB location" in docs/CLI.md — by default ` +
-      `".engram/graph.db" plus its ".wal" sidecar, or wherever ENGRAM_DB/--graph/--isolation resolves it ` +
-      `to), then re-run "egr index <dir> --scip <path>" against the now-empty path to rebuild the schema ` +
-      `from scratch. (underlying error: ${msg})`,
+      `(a pre-XSPEC-333-R3 schema). This connection was not opened through "openGraph" (graph-db/open.ts), ` +
+      `which would have auto-migrated it — call "migrateSchemaColumns(conn)" (graph-db/schema-migration.ts) ` +
+      `on this connection first; it non-destructively ALTERs the existing table to add the missing column(s) ` +
+      `(backing up the DB file first) rather than requiring a full re-index. (underlying error: ${msg})`,
   );
 }
 
@@ -115,6 +115,14 @@ function isMissingProvenanceColumnError(err: unknown): boolean {
  * Pre-flight check, run BEFORE the tree-sitter pass whenever `--scip` is
  * requested: confirms the CALLS table actually has the `provider`/
  * `confidence` columns SCIP ingest's merge needs.
+ *
+ * As of `open.ts`'s `openGraph` auto-running `migrateSchemaColumns` on every
+ * connection open, this gap should already be closed by the time `cmdIndex`
+ * runs against any connection obtained the normal way — this check now only
+ * catches connections that bypassed `openGraph` (see
+ * `rethrowAsSchemaMigrationError`'s doc). Kept rather than removed: it's a
+ * cheap read, and a clear message beats a raw Kuzu Binder exception even in
+ * that narrower case.
  *
  * Why this can't just be a try/catch around the SCIP write alone (an earlier
  * version of this file did exactly that, and it was wrong): `cmdIndex` always

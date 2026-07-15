@@ -20,11 +20,13 @@ function lastResult(result: QueryResult | QueryResult[]): QueryResult {
 export class GraphConnection {
   private readonly db: Database;
   private readonly conn: Connection;
+  private readonly dbFilePath: string;
   private closed = false;
 
   private constructor(dbPath: string) {
     this.db = new Database(dbPath);
     this.conn = new Connection(this.db);
+    this.dbFilePath = dbPath;
   }
 
   /** Open (or create) a graph database at `dbPath`. */
@@ -67,6 +69,17 @@ export class GraphConnection {
   /** Expose the raw Connection for advanced callers (prepare/execute). */
   get raw(): Connection {
     return this.conn;
+  }
+
+  /**
+   * The on-disk path this connection was opened against (as passed to
+   * {@link GraphConnection.open}). Used by tooling that needs filesystem
+   * access alongside the connection, e.g. `schema-migration.ts`'s
+   * pre-migration backup, which copies this file before altering table
+   * schema.
+   */
+  get path(): string {
+    return this.dbFilePath;
   }
 
   /** Close the connection and database. Idempotent. */

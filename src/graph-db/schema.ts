@@ -63,36 +63,41 @@ export const REL_TABLE_DDL: readonly string[] = [
   // might suggest: `initSchema` only ever `CREATE`s tables (see below) —
   // Kuzu 0.11.x's `IF NOT EXISTS` handling means a pre-existing `CALLS`
   // table missing these two columns is silently left as-is (the "already
-  // exists" error is swallowed), NOT altered. Function/Class nodes never
-  // had this "column exists but tree-sitter leaves it NULL" window at all —
-  // R1 (ccd4974) added their `provider` column AND made tree-sitter stamp it
-  // unconditionally in the same change, so a Function/Class row either
-  // predates that column entirely (binder error, needs `--clean`, same as
-  // below) or has always had a real value since the moment the column
-  // existed. CALLS is different: 85c0e56 added the columns WITHOUT changing
+  // exists" error is swallowed), NOT altered by `initSchema` itself.
+  // Function/Class nodes never had this "column exists but tree-sitter
+  // leaves it NULL" window at all — R1 (ccd4974) added their `provider`
+  // column AND made tree-sitter stamp it unconditionally in the same
+  // change, so a Function/Class row either predates that column entirely or
+  // has always had a real value since the moment the column existed. CALLS
+  // is different: 85c0e56 added the columns WITHOUT changing
   // `buildCallEdges()`, so a real window exists where the columns exist but
   // every tree-sitter-written CALLS edge has genuinely NULL `provider`/
   // `confidence` — and an EXISTING CALLS edge in that state does NOT
-  // self-heal on a later plain re-index: the next
-  // tree-sitter write's `provider: "tree-sitter"` is not `=== null`, so
-  // `shouldOverwrite` takes the "different provider" branch, sees the
-  // existing NULL confidence, and refuses — the edge is stuck with NULL
-  // provenance until a `--clean` rebuild. Before this R3 OQ-4 change, only
-  // SCIP's (PoC, not CLI-wired) ingest path ever read/wrote these two
-  // columns, so a DB predating this migration would only hit a Kuzu binder
-  // error (`r.provider` / `r.confidence` do not exist on that table) if SCIP
-  // ingest were run against it. As of this change, tree-sitter's OWN
-  // `buildCallEdges()` unconditionally includes `provider`/`confidence` on
-  // every CALLS edge it writes — so `writer.ts`'s `mergeEdge` now issues that
-  // same `r.provider`/`r.confidence` read on EVERY ordinary `egr index` run
-  // that touches a CALLS edge, not only a SCIP-touching one. Any on-disk DB
-  // whose `CALLS` table predates this migration (created before 85c0e56)
-  // will hit that binder error on its very next plain tree-sitter re-index,
-  // not just on a SCIP run. A full `--clean` rebuild (this repo's own
-  // `index-all.sh --clean` / `egr index --clean`, per dev-platform's
-  // CLAUDE.md rule "egr schema 變動時必須 --clean") is required before
-  // upgrading past this change — this is not merely a latent, rarely-hit
-  // edge case any more, it is the default `egr index` path.
+  // self-heal on a later plain re-index: the next tree-sitter write's
+  // `provider: "tree-sitter"` is not `=== null`, so `shouldOverwrite` takes
+  // the "different provider" branch, sees the existing NULL confidence, and
+  // refuses — the edge is stuck with NULL provenance until it's re-created
+  // from scratch. That refusal is a correctness feature, not a bug: nothing
+  // here recovers "what confidence SHOULD this old edge have had" any better
+  // than NULL already expresses ("no signal"), so leaving it alone is the
+  // faithful answer, not a gap to close.
+  //
+  // **The missing-column problem itself IS fixed as of the schema-migration
+  // work below** (`schema-migration.ts`'s `migrateSchemaColumns`, called by
+  // `open.ts`'s `openGraph` right after `initSchema` on every connection
+  // open): Kuzu's own `ALTER TABLE <name> ADD IF NOT EXISTS <col> <type>
+  // DEFAULT NULL` (verified empirically to work against a REL table with
+  // existing rows, preserving every other property and leaving the new
+  // column `NULL` on old rows — see `test/schema-migration.test.ts`) adds
+  // the column to the EXISTING table in place, so a DB whose `CALLS` table
+  // predates 85c0e56, or whose `Function`/`Class` table predates R1, no
+  // longer needs `--clean` or a from-scratch rebuild to stop hitting the
+  // Kuzu binder error described above — it self-heals the moment any
+  // command opens the DB through `openGraph`. `cli/run.ts`'s
+  // `rethrowAsSchemaMigrationError` / `assertCallsSchemaHasProvenanceColumns`
+  // remain as a defense-in-depth check for callers that construct a
+  // `GraphConnection` directly and skip `openGraph` (e.g. tests), not as the
+  // primary remediation path any more.
   `CREATE REL TABLE CALLS(FROM Function TO Function, call_count INT64, confidence DOUBLE, provider STRING)`,
   `CREATE REL TABLE IMPORTS(FROM Module TO Module)`,
   `CREATE REL TABLE DEFINES(FROM Module TO Function)`,
