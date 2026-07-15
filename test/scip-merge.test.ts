@@ -38,8 +38,9 @@ import { loadScipPocFixtureIndex, loadScipPocFixtureSources } from "./fixtures/s
  *      `OrderService.Process -> OrderService.Validate`, a same-file call),
  *      SCIP's higher-confidence write now DOES upgrade it in place —
  *      `provider` flips from `tree-sitter` to `scip` and `confidence` from
- *      tree-sitter's `0.6` (`extractor.ts`'s `CALLS_CONFIDENCE`, an honest
- *      score for its bare-name resolution heuristic) to SCIP's `0.9`.
+ *      tree-sitter's `0.8` (`extractor.ts`'s `CALLS_CONFIDENCE["same-file"]`,
+ *      the higher of its two honest resolution-tier scores — this
+ *      particular pair is a same-file call) to SCIP's `0.9`.
  *
  *      This test used to assert the OPPOSITE — that the write was a no-op,
  *      because tree-sitter's `buildCallEdges` left `confidence`/`provider`
@@ -153,14 +154,15 @@ describe("SCIP merge onto a real tree-sitter-populated Kuzu graph (XSPEC-333 R3)
     await writeFragment(conn, treeSitter.fragment);
 
     // Ground truth: tree-sitter DOES resolve this one on its own (same-file
-    // call), now with its own honest, non-null confidence (0.6 —
+    // call, resolved via the local-name map — see extractProject), now with
+    // its own honest, non-null confidence (0.8 — the "same-file" tier of
     // CALLS_CONFIDENCE in extractor.ts) rather than a NULL that used to
     // block any cross-provider comparison.
     const before = await callsEdge(
       "Services/OrderService.cs#OrderService.Process",
       "Services/OrderService.cs#OrderService.Validate",
     );
-    expect(before).toEqual({ call_count: 1, confidence: 0.6, provider: "tree-sitter" });
+    expect(before).toEqual({ call_count: 1, confidence: 0.8, provider: "tree-sitter" });
 
     const { fragment } = ingestScipIndex(loadScipPocFixtureIndex(), sources);
     await writeFragment(conn, fragment);
@@ -169,7 +171,7 @@ describe("SCIP merge onto a real tree-sitter-populated Kuzu graph (XSPEC-333 R3)
       "Services/OrderService.cs#OrderService.Process",
       "Services/OrderService.cs#OrderService.Validate",
     );
-    // Upgraded: SCIP's strictly higher confidence (0.9 > 0.6) wins, through
+    // Upgraded: SCIP's strictly higher confidence (0.9 > 0.8) wins, through
     // the SAME shouldOverwrite policy writer-merge-policy.test.ts exercises —
     // no special-casing for CALLS edges.
     expect(after).toEqual({ call_count: 1, confidence: 0.9, provider: "scip" });

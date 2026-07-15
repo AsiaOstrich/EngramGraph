@@ -58,24 +58,27 @@
  *
  * Every `Function`/`Class` node and `CALLS` edge this module emits carries
  * `provider: "scip"`. `Function`/`CALLS` additionally carry
- * `confidence: SCIP_CONFIDENCE` (0.9) — chosen to be *lower* than 1.0 to stay
- * inside the `Function.confidence`'s documented `[0, 1]` range (see
- * `graph-db/types.ts`), even though this means it can in practice never
- * strictly exceed tree-sitter's own hardcoded `confidence: 1` on a
- * `Function` node it already created (`extractor.ts` stamps `confidence: 1`
- * unconditionally on every node it writes, deliberately: that `1` is a
- * syntactic-fact claim — "this line really does declare a function/class
- * with this name" — not a name-resolution guess, so it is not lowered just
- * to make room for a semantic provider to out-rank it) — see
- * `test/scip-merge.test.ts`'s "confidence ceiling" test for why this is a
- * real, empirically-confirmed consequence of R1's policy as written, not a
- * bug in this module. This ceiling is Function/Class-node-specific: the
+ * `confidence: SCIP_CONFIDENCE` (0.9, `Class` has no `confidence` column at
+ * all — see `schema.ts`) — chosen to be *lower* than 1.0 to stay inside the
+ * `Function.confidence`'s documented `[0, 1]` range (see `graph-db/types.ts`),
+ * even though this means it can in practice never strictly exceed
+ * tree-sitter's own hardcoded `confidence: 1` on a `Function` node it already
+ * created (`extractor.ts` stamps `confidence: 1` unconditionally on every
+ * node it writes). This is a real, empirically-confirmed consequence of R1's
+ * policy as written (see `test/scip-merge.test.ts`'s "confidence ceiling"
+ * test), left deliberately unaddressed here: `Function.confidence` is a SAGE
+ * confidence score with its own independent mutation path
+ * (`sage/writer.ts`'s `applyFeedback`), not solely an extraction-quality
+ * signal, so recalibrating tree-sitter's initial `1` is a SAGE-calibration
+ * decision out of scope for this module. This ceiling is Function-node-
+ * specific (`Class` has no confidence column to have a ceiling on): the
  * *CALLS-edge* case is different and, as of XSPEC-333 R3 OQ-4, no longer
  * ceiling-limited — tree-sitter's own CALLS edges now carry an honest,
- * non-null `confidence: 0.6` (`extractor.ts`'s `CALLS_CONFIDENCE`, well
- * below this module's 0.9), so `ingestScipIndex`'s CALLS writes DO upgrade a
- * CALLS edge tree-sitter already resolved, not only fill gaps it left empty
- * — see `test/scip-merge.test.ts`'s updated "cross-provider upgrade" test.
+ * non-null, per-resolution-tier `confidence` (`extractor.ts`'s
+ * `CALLS_CONFIDENCE`: 0.8 same-file / 0.5 cross-file-unique, both well below
+ * this module's 0.9), so `ingestScipIndex`'s CALLS writes DO upgrade a CALLS
+ * edge tree-sitter already resolved, not only fill gaps it left empty — see
+ * `test/scip-merge.test.ts`'s updated "cross-provider upgrade" test.
  */
 
 import Parser from "tree-sitter";

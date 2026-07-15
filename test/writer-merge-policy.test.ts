@@ -185,4 +185,63 @@ describe("writer overwrite policy (XSPEC-333 R1)", () => {
     await writeFragment(conn, edgeFragment(7, 0.9, "scip"));
     expect(await readEdge()).toEqual({ cc: 7, conf: 0.9, prov: "scip" });
   });
+
+  // XSPEC-333 R3 OQ-4: before this fix, tree-sitter's OWN `buildCallEdges()`
+  // never set `provider`/`confidence` on a CALLS edge, so every
+  // tree-sitter-authored CALLS edge in a real DB had genuinely NULL values
+  // for both — and `test/scip-merge.test.ts` used to be the one place that
+  // exercised this exact "existing NULL blocks a cross-provider overwrite"
+  // path end-to-end (against a real SCIP write). That test was rewritten to
+  // prove the OPPOSITE now (tree-sitter no longer leaves CALLS edges NULL,
+  // so SCIP's write upgrades them) — which means the NULL-blocks-overwrite
+  // behaviour itself lost its only real-table regression coverage. It is
+  // still load-bearing: any CALLS edge written before this fix (or any DB
+  // row from any other legitimately-never-scored source) must still refuse
+  // a cross-provider overwrite rather than treating NULL as "lower than
+  // anything" — so this test recreates that legacy shape directly against
+  // the REAL `CALLS` table (not the synthetic `TEST_CALLS` table above) and
+  // asserts the invariant still holds after the OQ-4 fix.
+  it("existing NULL confidence on a real CALLS edge (e.g. a pre-OQ-4 legacy row) still blocks a different-provider overwrite", async () => {
+    await conn.execute(
+      `CREATE (:Function {id: 'nf1', name: 'a', file: 'x.ts', start_line: 1, confidence: 1, provider: 'tree-sitter'})`,
+    );
+    await conn.execute(
+      `CREATE (:Function {id: 'nf2', name: 'b', file: 'x.ts', start_line: 2, confidence: 1, provider: 'tree-sitter'})`,
+    );
+    // Simulate a legacy CALLS edge written before tree-sitter stamped
+    // provider/confidence on its own CALLS edges: call_count only, leaving
+    // the other two columns genuinely NULL (not merely omitted from a
+    // GraphFragment — a real NULL value read back from Kuzu).
+    await conn.execute(
+      `MATCH (a:Function {id:'nf1'}), (b:Function {id:'nf2'}) CREATE (a)-[:CALLS {call_count: 1}]->(b)`,
+    );
+
+    async function readCalls() {
+      const rows = await conn.query(
+        `MATCH (:Function {id:'nf1'})-[r:CALLS]->(:Function {id:'nf2'}) RETURN r.call_count AS call_count, r.confidence AS confidence, r.provider AS provider`,
+      );
+      return rows[0];
+    }
+
+    expect(await readCalls()).toEqual({ call_count: 1, confidence: null, provider: null });
+
+    const scipUpgrade: GraphFragment = {
+      nodes: [],
+      edges: [
+        {
+          label: "CALLS",
+          fromLabel: "Function",
+          from: "nf1",
+          toLabel: "Function",
+          to: "nf2",
+          properties: { call_count: 99, confidence: 0.9, provider: "scip" },
+        },
+      ],
+    };
+    await writeFragment(conn, scipUpgrade);
+
+    // Refused: NULL is "no signal to compare", not "lower than 0.9" — the
+    // legacy row is unchanged, exactly like before this fix.
+    expect(await readCalls()).toEqual({ call_count: 1, confidence: null, provider: null });
+  });
 });

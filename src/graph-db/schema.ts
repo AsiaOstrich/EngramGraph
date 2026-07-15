@@ -36,37 +36,63 @@ export const REL_TABLE_DDL: readonly string[] = [
   // overwrite-policy logic was already generic enough to support this (see
   // its module doc and test/writer-merge-policy.test.ts's synthetic
   // TEST_CALLS case), it simply had no real columns to read/write against
-  // until now. Nullable for schema-migration safety (a pre-existing DB's
-  // rows have no value until re-indexed), but NOT left NULL by design on any
-  // freshly-written tree-sitter edge any more: `buildCallEdges()`
-  // (extractor.ts) originally only ever set `call_count`, and that NULL
-  // silently defeated the whole point of these two columns — `writer.ts`'s
-  // `shouldOverwrite` treats a `null`/`undefined` existing `confidence` as
-  // "no signal to compare against" and refuses to let ANY other provider
-  // overwrite that edge's properties, so a second provider could only ever
-  // *fill a gap* (write a CALLS edge tree-sitter never created), never
-  // upgrade one tree-sitter already resolved — confirmed end-to-end against
-  // a real second provider (SCIP) in an earlier version of
+  // until now. Nullable because the DDL itself never changes existing rows
+  // (see the non-ALTER caveat below) — NOT because tree-sitter is still
+  // expected to leave them NULL: `buildCallEdges()` (extractor.ts)
+  // originally only ever set `call_count`, and that NULL silently defeated
+  // the whole point of these two columns — `writer.ts`'s `shouldOverwrite`
+  // treats a `null`/`undefined` existing `confidence` as "no signal to
+  // compare against" and refuses to let ANY other provider overwrite that
+  // edge's properties, so a second provider could only ever *fill a gap*
+  // (write a CALLS edge tree-sitter never created), never upgrade one
+  // tree-sitter already resolved — confirmed end-to-end against a real
+  // second provider (SCIP) in an earlier version of
   // `test/scip-merge.test.ts`. R3 OQ-4 fixed this at the source instead of
   // in the merge policy: `buildCallEdges()` now stamps every CALLS edge it
-  // writes with `confidence: CALLS_CONFIDENCE` (0.6, see extractor.ts's
-  // module doc for the calibration rationale) and `provider: "tree-sitter"`,
-  // an honest, non-null confidence for its bare-name resolution heuristic —
-  // so a higher-confidence provider (SCIP at 0.9) can now upgrade it through
-  // the SAME, unmodified `shouldOverwrite` policy. See
-  // `test/scip-merge.test.ts` for this verified end-to-end.
+  // writes with an honest, non-null, per-resolution-tier `confidence`
+  // (`CALLS_CONFIDENCE` in extractor.ts — see its module doc for the
+  // tiering/calibration rationale) and `provider: "tree-sitter"`, so a
+  // higher-confidence provider (SCIP at 0.9) can now upgrade it through the
+  // SAME, unmodified `shouldOverwrite` policy. See `test/scip-merge.test.ts`
+  // for this verified end-to-end, and `test/writer-merge-policy.test.ts`'s
+  // dedicated regression test proving a genuinely NULL existing confidence
+  // still blocks the overwrite (that invariant is unchanged and load-bearing
+  // — it protects rows that predate this fix and haven't been re-indexed).
   //
-  // IMPORTANT for any already-existing on-disk Kuzu DB created before this
-  // change: `initSchema` only ever `CREATE`s tables (see below) — Kuzu
-  // 0.11.x's `IF NOT EXISTS` handling means a pre-existing `CALLS` table
-  // missing these two columns is silently left as-is (the "already exists"
-  // error is swallowed), NOT altered. A DB indexed before this migration
-  // therefore needs a full `--clean` rebuild (this repo's own
+  // IMPORTANT, and now with a WIDER blast radius than the paragraph above
+  // might suggest: `initSchema` only ever `CREATE`s tables (see below) —
+  // Kuzu 0.11.x's `IF NOT EXISTS` handling means a pre-existing `CALLS`
+  // table missing these two columns is silently left as-is (the "already
+  // exists" error is swallowed), NOT altered. Function/Class nodes never
+  // had this "column exists but tree-sitter leaves it NULL" window at all —
+  // R1 (ccd4974) added their `provider` column AND made tree-sitter stamp it
+  // unconditionally in the same change, so a Function/Class row either
+  // predates that column entirely (binder error, needs `--clean`, same as
+  // below) or has always had a real value since the moment the column
+  // existed. CALLS is different: 85c0e56 added the columns WITHOUT changing
+  // `buildCallEdges()`, so a real window exists where the columns exist but
+  // every tree-sitter-written CALLS edge has genuinely NULL `provider`/
+  // `confidence` — and an EXISTING CALLS edge in that state does NOT
+  // self-heal on a later plain re-index: the next
+  // tree-sitter write's `provider: "tree-sitter"` is not `=== null`, so
+  // `shouldOverwrite` takes the "different provider" branch, sees the
+  // existing NULL confidence, and refuses — the edge is stuck with NULL
+  // provenance until a `--clean` rebuild. Before this R3 OQ-4 change, only
+  // SCIP's (PoC, not CLI-wired) ingest path ever read/wrote these two
+  // columns, so a DB predating this migration would only hit a Kuzu binder
+  // error (`r.provider` / `r.confidence` do not exist on that table) if SCIP
+  // ingest were run against it. As of this change, tree-sitter's OWN
+  // `buildCallEdges()` unconditionally includes `provider`/`confidence` on
+  // every CALLS edge it writes — so `writer.ts`'s `mergeEdge` now issues that
+  // same `r.provider`/`r.confidence` read on EVERY ordinary `egr index` run
+  // that touches a CALLS edge, not only a SCIP-touching one. Any on-disk DB
+  // whose `CALLS` table predates this migration (created before 85c0e56)
+  // will hit that binder error on its very next plain tree-sitter re-index,
+  // not just on a SCIP run. A full `--clean` rebuild (this repo's own
   // `index-all.sh --clean` / `egr index --clean`, per dev-platform's
-  // CLAUDE.md rule "egr schema 變動時必須 --clean") before any SCIP ingest can
-  // write `provider`/`confidence` onto a CALLS edge — writing against a
-  // stale schema throws a Kuzu binder error (`r.provider` / `r.confidence`
-  // do not exist on that table), it does not silently no-op.
+  // CLAUDE.md rule "egr schema 變動時必須 --clean") is required before
+  // upgrading past this change — this is not merely a latent, rarely-hit
+  // edge case any more, it is the default `egr index` path.
   `CREATE REL TABLE CALLS(FROM Function TO Function, call_count INT64, confidence DOUBLE, provider STRING)`,
   `CREATE REL TABLE IMPORTS(FROM Module TO Module)`,
   `CREATE REL TABLE DEFINES(FROM Module TO Function)`,

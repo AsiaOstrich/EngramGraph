@@ -53,7 +53,7 @@ NODE Spec(id, title, status, confidence)                PK id
 NODE Decision(id, title, date, confidence)              PK id
 NODE Doc(id, title, status, confidence)                 PK id
 
-REL CALLS(Function → Function, call_count)
+REL CALLS(Function → Function, call_count, confidence, provider)
 REL IMPORTS(Module → Module)
 REL DEFINES(Module → Function)
 REL IMPLEMENTS(Function → Spec)

@@ -28,6 +28,21 @@
  * properties at all), the legacy unconditional overwrite is preserved —
  * there is no source-quality signal to gate on.
  *
+ * **Known consequence, accepted rather than fixed (XSPEC-333 R3 OQ-4):**
+ * the decision is all-or-nothing per node/edge, not per property. Once a
+ * higher-confidence provider wins (e.g. SCIP upgrades a CALLS edge
+ * tree-sitter resolved), every property on that row — including
+ * freshness-sensitive ones like `call_count`, which has nothing to do with
+ * *which provider is more precise* — is now frozen against the losing
+ * provider too, even if that provider keeps re-indexing daily while the
+ * winner never runs again. This was already true for Function nodes since
+ * R1 (a losing provider can't refresh `name`/`start_line` either); CALLS
+ * edges inherit the same tradeoff now that they carry provenance. Splitting
+ * "source-quality" properties from "freshness" properties would need a
+ * per-property overwrite decision instead of one decision for the whole
+ * SET clause — out of scope here; flagged so a future reader doesn't
+ * mistake a stale `call_count` on an upgraded edge for a bug.
+ *
  * ### Why this is a read-then-decide, not a single conditional query
  *
  * Kuzu's Cypher does support `MERGE ... ON CREATE SET ... ON MATCH SET ...`

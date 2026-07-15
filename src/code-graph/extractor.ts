@@ -58,60 +58,115 @@ import { collectComments, findEnclosingFunction, qualifyFunctions, runTagQuery }
 const PROVIDER = "tree-sitter";
 
 /**
- * Honest confidence for a CALLS edge this extractor resolves (XSPEC-333 R3
- * OQ-4). `buildCallEdges` used to leave `confidence`/`provider` unset on
- * every CALLS edge it wrote (the REL table's two columns stayed NULL — see
- * `schema.ts`'s prior module doc). That was not "no opinion", it was a real
- * bug in the *merge* policy's effect: `writer.ts`'s `shouldOverwrite` treats
- * an existing NULL confidence as "no signal to compare against" and refuses
- * ANY cross-provider overwrite in that case — so a second, more precise
- * provider (e.g. SCIP) could only ever fill a gap tree-sitter left empty,
- * never upgrade an edge tree-sitter already resolved, no matter how much
- * higher its confidence was. Confirmed end-to-end against a real SCIP index
- * in `test/scip-merge.test.ts` before this constant existed (that test used
- * to assert the block; it now asserts the upgrade — see that file's updated
+ * Honest, per-resolution-tier confidence for a CALLS edge this extractor
+ * writes (XSPEC-333 R3 OQ-4). `buildCallEdges` used to leave
+ * `confidence`/`provider` unset on every CALLS edge it wrote (the REL
+ * table's two columns stayed NULL — see `schema.ts`'s prior module doc).
+ * That was not "no opinion", it was a real bug in the *merge* policy's
+ * effect: `writer.ts`'s `shouldOverwrite` treats an existing NULL confidence
+ * as "no signal to compare against" and refuses ANY cross-provider
+ * overwrite in that case — so a second, more precise provider (e.g. SCIP)
+ * could only ever fill a gap tree-sitter left empty, never upgrade an edge
+ * tree-sitter already resolved, no matter how much higher its confidence
+ * was. Confirmed end-to-end against a real SCIP index in
+ * `test/scip-merge.test.ts` before this constant existed (that test used to
+ * assert the block; it now asserts the upgrade — see that file's updated
  * module doc for why the old assertion was validating a limitation, not a
  * still-correct behaviour).
  *
  * The fix here is at the source, not the merge policy: `shouldOverwrite`
  * itself is untouched (still: same-provider always wins; different-provider
- * wins only with strictly higher confidence; NULL still means "no signal").
- * Instead, this extractor now tells the truth about its own resolution
- * step's real reliability instead of leaving it unscored. `collectExtraction`
- * resolves a call's callee by **bare name only** — same-file map first
- * (lexical shadowing), else a single project-wide unique name match, with NO
- * type-awareness, overload disambiguation, or import-graph following (see
- * this file's own module doc and `extractProject`'s resolution policy
- * comment). That heuristic already refuses to guess when a name is
- * ambiguous (>1 project-wide candidate) — so a *resolved* edge is never a
- * total coin flip — but it can still land on the wrong same-named method in
- * an unrelated class/impl the resolver has no way to rule out (documented at
- * length in `docs/CROSS-FILE-COVERAGE.md`'s Open Questions: OOP/trait
- * polymorphism with repeated method names, e.g. many `Close`/`Read`/
- * `toString` implementers, is the dominant failure mode across 5 of the 10
- * measured languages). That doc's 7.0%-74.1% numbers measure a different
- * thing — the *fraction of candidates the resolver manages to wire up at
- * all* (recall over its own textual evidence) — not the odds any one
- * resolved edge points at the right target (precision), so they are not
- * used here as a literal conversion. What they do establish, and what this
- * constant is calibrated against: this is a **crude, unqualified, name-only
- * heuristic**, meaningfully less reliable than a real semantic resolver
- * (SCIP's `SCIP_CONFIDENCE = 0.9`, backed by an actual compiler's symbol
- * table), but also not "no better than noise" (ambiguous cases are already
- * filtered out before a CALLS edge is even written). 0.6 sits deliberately
- * in that middle band: comfortably below any real semantic provider's
- * confidence (so SCIP can upgrade it), comfortably above 0/NULL (so it is
- * never mistaken for "unscored").
+ * wins only with strictly higher confidence; NULL still means "no signal" —
+ * see `test/writer-merge-policy.test.ts`'s dedicated regression test for
+ * that exact NULL-still-blocks case, covering a legacy/pre-migration CALLS
+ * row that predates this fix). Instead, this extractor now tells the truth
+ * about its own resolution step's real reliability instead of leaving it
+ * unscored.
  *
- * Function/Class node `confidence` (see `qualifyFunctions`'s caller below)
- * is a *different* claim — "this file, this line, really does declare a
- * function/class with this name" — a syntactic fact tree-sitter's parser is
- * unconditionally correct about, not a name-resolution guess. It is
- * deliberately left at its existing `1` and NOT touched by this constant;
- * conflating the two would misrepresent a fact tree-sitter has zero
- * uncertainty about.
+ * ## Why two tiers, not one flat number
+ *
+ * `collectExtraction`/`extractProject` resolve a call's callee by **bare
+ * name only**, with NO type-awareness, overload disambiguation, or
+ * import-graph following — but they do NOT throw away all distinctions:
+ * they already tell apart, and already refuse to guess past, two
+ * meaningfully different levels of evidence (see `extractProject`'s own
+ * resolution-policy comment below):
+ *
+ *   - **same-file** (lexical shadowing: the callee's definition is a name in
+ *     THIS file's own map) — the call site and its resolved target are
+ *     textually in the same file, the strongest evidence this heuristic
+ *     ever has for an actual calling relationship (comparable to how a real
+ *     compiler resolves an unqualified in-scope name). Its one known
+ *     failure mode is two same-named definitions in *different* scopes of
+ *     one file colliding onto "last definition wins" (see this file's
+ *     `names` map comment) — real, but narrow.
+ *   - **cross-file-unique** (no same-file match; exactly one function
+ *     project-wide has this bare name) — a fundamentally weaker signal:
+ *     "there happens to be only one function named this string in the
+ *     files we were given" says nothing about whether the call site's
+ *     actual import/namespace path resolves there, or whether the real
+ *     target lives outside the indexed file set entirely and this is a
+ *     same-named coincidence. `docs/CROSS-FILE-COVERAGE.md`'s Open
+ *     Questions document the mirror-image failure mode that already proves
+ *     this tier is weaker in practice: 5 of 10 measured languages hit heavy
+ *     *ambiguity* (>1 candidate, correctly left unresolved) from exactly
+ *     the same bare-name blindness that, when it happens to find only one
+ *     candidate instead of several, still carries the same underlying risk
+ *     of an accidental name coincidence — the resolver just has no way to
+ *     tell the difference from inside one project's file set. That doc's
+ *     7.0%-74.1% numbers measure a different thing entirely — the
+ *     *fraction of candidates the resolver manages to wire up at all*
+ *     (recall over its own textual evidence), not the odds any one resolved
+ *     edge points at the right target (precision) — so they are not used
+ *     here as a literal conversion, only as corroborating evidence that
+ *     this whole heuristic is crude enough that collapsing its two
+ *     internally-distinguished tiers into one number would silently discard
+ *     a real, already-computed signal for no reason.
+ *
+ * `CALLS_CONFIDENCE.same-file` (0.8) and `.cross-file-unique` (0.5) are both
+ * hand-picked, not statistically derived (like SCIP's own `SCIP_CONFIDENCE
+ * = 0.9`, also a deliberately-chosen constant, not a measured one) — but
+ * both sit comfortably below 0.9 so a real semantic resolver can upgrade
+ * either tier, and comfortably above 0/NULL so neither is ever mistaken for
+ * "unscored".
+ *
+ * ## Function/Class node confidence is explicitly NOT touched here
+ *
+ * `FunctionNode.confidence` (`graph-db/types.ts`) is documented there as a
+ * "SAGE confidence score" — `sage/writer.ts`'s `applyFeedback` mutates it
+ * directly from real usage-feedback events (`SET n.confidence = ...`,
+ * clamped to `[MIN_CONFIDENCE, MAX_CONFIDENCE]`), independently of anything
+ * in this file. Tree-sitter's `confidence: 1` on a fresh Function node is
+ * only SAGE's *starting* value, not a permanent claim of syntactic
+ * certainty — an earlier draft of this comment argued the `1` was correct
+ * because "tree-sitter's parser is unconditionally correct that a function
+ * with this name exists here," which overstates it: that framing ignores
+ * SAGE's independent write path entirely. The real, narrower reason this
+ * constant does not touch Function-node confidence: (1) SCIP's inability to
+ * exceed a tree-sitter Function node's `1` is a separate, already-documented
+ * "confidence ceiling" limitation with its own passing test
+ * (`test/scip-merge.test.ts`'s "confidence ceiling" case) and was explicitly
+ * called out as out-of-scope for this fix; (2) Function-node confidence has
+ * a second, independent consumer (SAGE's evolution loop) this fix has no
+ * mandate to recalibrate — changing tree-sitter's initial stamp would be a
+ * SAGE-calibration decision, not a CALLS-edge-merge decision, and deserves
+ * its own deliberation. Note also `Class` nodes have NO `confidence` column
+ * at all (`schema.ts`'s `Class` table, `ClassNode` in `types.ts`) — there is
+ * nothing to leave alone or touch there in the first place.
  */
-const CALLS_CONFIDENCE = 0.6;
+
+/**
+ * How a CALLS edge's callee was resolved (XSPEC-333 R3 OQ-4) — drives which
+ * {@link CALLS_CONFIDENCE} tier the edge is stamped with. See
+ * `CALLS_CONFIDENCE`'s module doc (above) for what each tier means and why
+ * they are scored differently.
+ */
+export type CallResolutionTier = "same-file" | "cross-file-unique";
+
+const CALLS_CONFIDENCE: Record<CallResolutionTier, number> = {
+  "same-file": 0.8,
+  "cross-file-unique": 0.5,
+};
 
 /**
  * `.kt`/`.kts` → kotlin, `.rs` → rust, `.cpp`/`.cc`/`.cxx`/`.hpp`/`.h`/`.hh` →
@@ -379,24 +434,35 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
 
 /**
  * Turn resolved (from → to) call records into aggregated CALLS edges
- * (call_count per pair, self-recursion dropped).
+ * (call_count per pair, self-recursion dropped). Each pair is stamped with
+ * `CALLS_CONFIDENCE[tier]` (XSPEC-333 R3 OQ-4) — if the same (from, to) pair
+ * is somehow reached via call sites of differing tiers (not expected in
+ * practice: a given caller-file + callee-name combination resolves the same
+ * way at every call site within one `collectExtraction`/`extractProject`
+ * run, since the same-file map is checked first and is stable per file),
+ * the LOWER-confidence tier wins, so an aggregated edge never overstates its
+ * own reliability based on only its best call site.
  */
-function buildCallEdges(resolved: Array<{ from: string; to: string }>): GraphEdge[] {
-  const counts = new Map<string, { from: string; to: string; count: number }>();
-  for (const { from, to } of resolved) {
+function buildCallEdges(resolved: Array<{ from: string; to: string; tier: CallResolutionTier }>): GraphEdge[] {
+  const counts = new Map<string, { from: string; to: string; count: number; tier: CallResolutionTier }>();
+  for (const { from, to, tier } of resolved) {
     if (!to || to === from) continue;
-    const key = `${from} ${to}`;
+    const key = `${from} ${to}`;
     const existing = counts.get(key);
-    if (existing) existing.count += 1;
-    else counts.set(key, { from, to, count: 1 });
+    if (existing) {
+      existing.count += 1;
+      if (CALLS_CONFIDENCE[tier] < CALLS_CONFIDENCE[existing.tier]) existing.tier = tier;
+    } else {
+      counts.set(key, { from, to, count: 1, tier });
+    }
   }
-  return [...counts.values()].map(({ from, to, count }) => ({
+  return [...counts.values()].map(({ from, to, count, tier }) => ({
     label: "CALLS",
     fromLabel: "Function",
     from,
     toLabel: "Function",
     to,
-    properties: { call_count: count, confidence: CALLS_CONFIDENCE, provider: PROVIDER },
+    properties: { call_count: count, confidence: CALLS_CONFIDENCE[tier], provider: PROVIDER },
   }));
 }
 
@@ -408,8 +474,11 @@ function buildCallEdges(resolved: Array<{ from: string; to: string }>): GraphEdg
  */
 export function extractCodeGraph(source: string, opts: ExtractOptions): GraphFragment {
   const { nodes, defines, implementsEdges, rawCalls, names } = collectExtraction(source, opts);
+  // Single-file extraction only ever resolves against this file's own name
+  // map — every resolution here is by construction "same-file" (XSPEC-333
+  // R3 OQ-4's higher-confidence tier; see CALLS_CONFIDENCE's module doc).
   const resolved = rawCalls
-    .map((c) => ({ from: c.from, to: names.get(c.callee) ?? "" }))
+    .map((c) => ({ from: c.from, to: names.get(c.callee) ?? "", tier: "same-file" as const }))
     .filter((c) => c.to);
   return { nodes, edges: [...defines, ...buildCallEdges(resolved), ...implementsEdges] };
 }
@@ -466,7 +535,7 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
     }
   }
 
-  const resolved: Array<{ from: string; to: string }> = [];
+  const resolved: Array<{ from: string; to: string; tier: CallResolutionTier }> = [];
   let ambiguous = 0;
   let unresolved = 0;
 
@@ -474,14 +543,24 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
     for (const call of ex.rawCalls) {
       const local = localByFile.get(call.file)?.get(call.callee);
       if (local) {
-        resolved.push({ from: call.from, to: local });
+        // Lexical shadowing: this caller's own file defines the name — if
+        // the global branch below were reached instead, this file would
+        // have had to be missing from its own local map, which it isn't.
+        // So this branch is genuinely same-file (XSPEC-333 R3 OQ-4).
+        resolved.push({ from: call.from, to: local, tier: "same-file" });
         continue;
       }
       const ids = globalIndex.get(call.callee);
       if (!ids || ids.size === 0) {
         unresolved += 1;
       } else if (ids.size === 1) {
-        resolved.push({ from: call.from, to: [...ids][0]! });
+        // No local match (checked above), so this unique project-wide name
+        // is necessarily defined in some OTHER file — genuinely cross-file,
+        // and the weaker of the two tiers (XSPEC-333 R3 OQ-4): see
+        // CALLS_CONFIDENCE's module doc for why this carries materially
+        // less evidence of a real calling relationship than a same-file
+        // match.
+        resolved.push({ from: call.from, to: [...ids][0]!, tier: "cross-file-unique" });
       } else {
         ambiguous += 1;
       }
