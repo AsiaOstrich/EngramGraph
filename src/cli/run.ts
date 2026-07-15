@@ -10,6 +10,7 @@ import { join } from "node:path";
 
 import type { GraphConnection } from "../graph-db/connection.js";
 import { clearGraph } from "../graph-db/schema.js";
+import { writeFragment } from "../graph-db/writer.js";
 import { gitBranchEngramDir, listBranches, sanitizeBranch } from "../graph-db/git-branch.js";
 import {
   indexProject,
@@ -21,6 +22,8 @@ import {
   type ImplementersResult,
   type ImplementedSpecsResult,
 } from "../code-graph/index.js";
+import { readScipIndex } from "../code-graph/providers/scip/scip-reader.js";
+import { ingestScipIndex, type ScipIngestStats, type ScipSourceFile } from "../code-graph/providers/scip/scip-ingest.js";
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType, topByConfidence, type ConfidenceLabel } from "../sage/index.js";
 import { godNodes, communities, related, type GodNode, type CommunityMember, type RelatedNode } from "../structural-memory/index.js";
@@ -36,12 +39,127 @@ const CODE_EXTS = [
 export interface IndexResultSummary {
   code: { files: number; functions: number; classes: number; calls: number; implements: number; ambiguous: number; unresolved: number };
   knowledge?: { specs: number; decisions: number; impacts: number; supersedes: number; relates: number };
+  /** Present only when `--scip` was given. See {@link ingestScipOverlay}. */
+  scip?: ScipIngestStats & { documentsInIndex: number; filesMatched: number };
 }
 
-/** `egr index <dir> [--docs] [--clean]` — index code (always) + knowledge docs (--docs). */
+/**
+ * Read+parse a `.scip` (protobuf) index file, turning the low-level failure
+ * modes a user can actually hit into a clear, actionable CLI error instead of
+ * a bare filesystem/protobuf exception:
+ *   - the path doesn't exist (typo, forgot to generate it, wrong cwd), or
+ *   - the file exists but isn't a valid SCIP protobuf (wrong file entirely,
+ *     truncated/corrupt, or a `.scip.gz`/other format `scip-dotnet`/`scip-java`
+ *     didn't produce this way).
+ *
+ * Deliberately does NOT attempt to invoke `scip-dotnet`/`scip-java`/etc.
+ * itself — egr only ever *reads* an already-generated `.scip` file; producing
+ * one is the caller's own build toolchain's job (see docs).
+ */
+function readScipIndexOrThrow(path: string): ReturnType<typeof readScipIndex> {
+  if (!existsSync(path)) {
+    throw new Error(`--scip: file not found: ${path}`);
+  }
+  try {
+    return readScipIndex(path);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `--scip: "${path}" could not be parsed as a SCIP protobuf index (${msg}). ` +
+        `egr does not generate .scip files itself — produce one with an external SCIP indexer for the ` +
+        `language in question (e.g. \`scip-dotnet index\` for C#, \`scip-java index\` for Java) and pass ` +
+        `its output file here.`,
+    );
+  }
+}
+
+/**
+ * `--scip <path>` overlay: read an externally-generated SCIP index, resolve
+ * it against the SAME source files `egr index` just walked, and merge the
+ * result on top of whatever `indexProject` already wrote (XSPEC-333 R3).
+ *
+ * ## Path basis
+ *
+ * A SCIP index's `Document.relativePath` is relative to whatever project
+ * root the external indexer was invoked from (verified against real
+ * `scip-dotnet`/`scip-java` output — see `test/fixtures/scip-*-poc/load-fixture.ts`).
+ * `egr index <dir>`'s own paths (`walkFiles`) are relative to that same
+ * `<dir>`. These two are only guaranteed to line up when `<dir>` IS the
+ * project root the `.scip` file's indexer ran against — this function
+ * intersects the two path sets and fails loudly (rather than silently
+ * ingesting zero data) when the overlap is empty, which is the observable
+ * symptom of a root mismatch.
+ *
+ * ## Schema compatibility
+ *
+ * `writeFragment` reads back a CALLS edge's existing `provider`/`confidence`
+ * columns to decide whether SCIP's higher-confidence write may overwrite it
+ * (see `graph-db/writer.ts`). A graph DB created before XSPEC-333 R3 OQ-4
+ * (`schema.ts`'s `CALLS` DDL gained those two columns without an `ALTER`
+ * migration path — `initSchema` only ever `CREATE`s tables) throws a Kuzu
+ * "Binder exception" on that read. That failure is turned into a pointed
+ * "rebuild with --clean" instruction instead of a raw binder error.
+ */
+export async function ingestScipOverlay(
+  conn: GraphConnection,
+  dir: string,
+  scipPath: string,
+  codeFiles: Array<{ path: string; source: string }>,
+): Promise<NonNullable<IndexResultSummary["scip"]>> {
+  const index = readScipIndexOrThrow(scipPath);
+  if (index.documents.length === 0) {
+    throw new Error(`--scip: "${scipPath}" parsed as a valid SCIP index but contains no documents — is it empty?`);
+  }
+
+  const docPaths = new Set(index.documents.map((d) => d.relativePath));
+  const scipFiles: ScipSourceFile[] = codeFiles
+    .filter((f) => docPaths.has(f.path))
+    .map((f) => ({ relativePath: f.path, source: f.source }));
+
+  if (scipFiles.length === 0) {
+    const sample = index.documents[0]?.relativePath;
+    throw new Error(
+      `--scip: none of the ${docPaths.size} document path(s) in "${scipPath}" (e.g. "${sample}") matched ` +
+        `any source file under "${dir}". SCIP document paths are relative to the project root the external ` +
+        `indexer (scip-dotnet/scip-java/etc.) was run against — pass that same root as <dir>, then retry.`,
+    );
+  }
+
+  const { fragment, stats } = ingestScipIndex(index, scipFiles);
+  try {
+    await writeFragment(conn, fragment);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/binder exception/i.test(msg) && /(provider|confidence)/i.test(msg)) {
+      throw new Error(
+        `--scip: this graph's CALLS table predates the "provider"/"confidence" columns SCIP ingest needs ` +
+          `(a pre-XSPEC-333-R3 schema, never auto-migrated). Rebuild it once with "egr index <dir> --clean" ` +
+          `(no --scip), then re-run this command with --scip. (underlying error: ${msg})`,
+      );
+    }
+    throw err;
+  }
+
+  return { ...stats, documentsInIndex: docPaths.size, filesMatched: scipFiles.length };
+}
+
+/**
+ * `egr index <dir> [--docs] [--clean] [--scip <path>]` — index code (always)
+ * + knowledge docs (--docs) + an external SCIP index overlay (--scip).
+ *
+ * `--scip` always runs AFTER the tree-sitter pass above, but this ordering is
+ * not load-bearing: `writeFragment`'s provenance-aware merge policy is
+ * confidence-based, not arrival-order-based, so re-running either pass in
+ * either order converges to the same graph (see `graph-db/writer.ts`'s
+ * `shouldOverwrite` and `test/scip-merge.test.ts`'s "cross-provider upgrade"
+ * case). This command still assumes NEITHER pass has to have run before —
+ * a single `egr index <dir> --scip <path>` call is a complete, from-scratch
+ * index (tree-sitter baseline + SCIP overlay in one shot); it does not require
+ * a prior plain `egr index <dir>` run.
+ */
 export async function cmdIndex(
   conn: GraphConnection,
-  opts: { dir: string; docs?: boolean; clean?: boolean },
+  opts: { dir: string; docs?: boolean; clean?: boolean; scip?: string },
 ): Promise<IndexResultSummary> {
   if (opts.clean) await clearGraph(conn); // drop existing data so deleted nodes are pruned
   const codeFiles = walkFiles(opts.dir, CODE_EXTS);
@@ -50,6 +168,9 @@ export async function cmdIndex(
   if (opts.docs) {
     const docs = walkFiles(opts.dir, [".md"]).map((f) => ({ content: f.source, fallbackId: f.path }));
     result.knowledge = await indexKnowledgeDocs(conn, docs);
+  }
+  if (opts.scip) {
+    result.scip = await ingestScipOverlay(conn, opts.dir, opts.scip, codeFiles);
   }
   return result;
 }

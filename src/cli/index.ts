@@ -22,10 +22,19 @@ const HELP = `egr — code + knowledge graph memory CLI
 Usage: egr <command> [args] [options]
 
 Commands:
-  index <dir> [--docs] [--clean]  Index source (.ts/.js/.cs/.py/.go/.java/
+  index <dir> [--docs] [--clean] [--scip <path>]
+                                  Index source (.ts/.js/.cs/.py/.go/.java/
                                   .kt/.rs/.cpp) into the code graph;
                                   --docs also indexes .md; --clean drops the
-                                  graph first (prunes deleted nodes)
+                                  graph first (prunes deleted nodes); --scip
+                                  <path> additionally overlays a pre-generated
+                                  SCIP index (a .scip file YOU produce with an
+                                  external indexer, e.g. 'scip-dotnet index'
+                                  for C# or 'scip-java index' for Java — egr
+                                  does not run those tools itself) to
+                                  upgrade/fill CALLS edges tree-sitter alone
+                                  can't resolve; <path>'s SCIP document paths
+                                  must be relative to this same <dir>
   callers <symbol> [--depth N]    Functions that (transitively) call <symbol>
   callees <symbol> [--depth N]    Functions that <symbol> (transitively) calls
   implementers <spec-id>          Files (+ functions) that implement a spec (spec→code)
@@ -94,6 +103,7 @@ async function main(): Promise<void> {
       graph: { type: "string" },
       isolation: { type: "string" },
       clean: { type: "boolean" },
+      scip: { type: "string" },
       "dry-run": { type: "boolean" },
     },
   });
@@ -157,11 +167,17 @@ async function main(): Promise<void> {
   switch (cmd) {
     case "index": {
       if (!a1) throw new Error("index requires a <dir>");
-      const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean });
+      const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean, scip: values.scip });
       out(r, values.json, (d) => {
         const s = d as Awaited<ReturnType<typeof cmdIndex>>;
         const k = s.knowledge ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relates} relates` : "";
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}`;
+        const scip = s.scip
+          ? `\nscip: ${s.scip.filesMatched}/${s.scip.documentsInIndex} indexed files matched, ` +
+            `${s.scip.definitionsResolved} definitions resolved (${s.scip.definitionsUnresolved} unresolved), ` +
+            `${s.scip.callsEmitted} calls emitted (${s.scip.callsSkippedNoEnclosingCaller} skipped: no enclosing caller, ` +
+            `${s.scip.callsSkippedUnresolvedTarget} skipped: unresolved target)`
+          : "";
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${scip}`;
       });
       break;
     }
