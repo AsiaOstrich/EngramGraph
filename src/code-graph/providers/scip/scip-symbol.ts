@@ -109,6 +109,50 @@ export interface ParsedSymbol {
 const SIGIL_CHARS = "/#.([:!";
 
 /**
+ * Scan one `<name>` token starting at `i`, handling SCIP's
+ * `<escaped-identifier> ::= '`' (<escaped-character>)+ '`'` form (spec's
+ * grammar comment in `scip.proto`) — e.g. Java's implicit-constructor symbol
+ * `` `<init>` `` (real string seen in this PoC's Java fixture, since
+ * `<`/`>`/`(`-adjacent chars in a raw identifier are exactly the "at least
+ * one non-identifier-character" case the spec requires escaping for).
+ * Backticks inside an escaped identifier are themselves escaped by
+ * doubling (`` '' `` per spec: "escape backticks with double backtick").
+ * Returns the DECODED name (backticks stripped, `` `` `` un-escaped to a
+ * literal backtick) and the index just past the token, so the caller's
+ * normal sigil-dispatch logic runs unchanged on whatever follows.
+ *
+ * XSPEC-333 R3 Java PoC finding: before this function existed, the bare
+ * "scan until a sigil char" loop below had no special case for backticks
+ * (not in {@link SIGIL_CHARS}), so an escaped identifier like `` `<init>` ``
+ * silently kept its literal backticks (and any embedded sigil-like
+ * characters) in the parsed `name` instead of the intended semantic name —
+ * never hit by C# (`scip-dotnet`'s sample never emits escaped identifiers)
+ * but real and reachable once Java constructors entered the fixture set.
+ */
+function scanName(path: string, i: number): [name: string, next: number] {
+  if (path[i] !== "`") {
+    const start = i;
+    while (i < path.length && !SIGIL_CHARS.includes(path[i]!)) i++;
+    return [path.slice(start, i), i];
+  }
+  let decoded = "";
+  let j = i + 1;
+  while (j < path.length) {
+    if (path[j] === "`") {
+      if (path[j + 1] === "`") {
+        decoded += "`";
+        j += 2;
+        continue;
+      }
+      return [decoded, j + 1]; // real closing backtick
+    }
+    decoded += path[j];
+    j++;
+  }
+  return [decoded, j]; // unterminated (malformed input) — best effort
+}
+
+/**
  * Split a descriptor-path string into ordered {@link Descriptor} segments.
  *
  * Hand-written scanner rather than one mega-regex: the `Method` vs
@@ -121,9 +165,8 @@ export function parseDescriptors(path: string): Descriptor[] {
   const out: Descriptor[] = [];
   let i = 0;
   while (i < path.length) {
-    const start = i;
-    while (i < path.length && !SIGIL_CHARS.includes(path[i]!)) i++;
-    const name = path.slice(start, i);
+    const [name, nextI] = scanName(path, i);
+    i = nextI;
     if (i >= path.length) break; // malformed / trailing bare name with no sigil — drop it
 
     const ch = path[i]!;
@@ -147,6 +190,13 @@ export function parseDescriptors(path: string): Descriptor[] {
       i = close === -1 ? path.length : close + 1;
       out.push({ kind: "typeParameter", name });
     } else if (ch === "(") {
+      // Known remaining scope limit (not fixed here, not hit by any current
+      // fixture): unlike the outer name token above, the disambiguator/
+      // parameter-name text INSIDE the parens is still found via a bare
+      // `indexOf(")")`, so a method-disambiguator or parameter name that is
+      // ITSELF a backtick-escaped identifier containing a literal `)` would
+      // be split incorrectly. Escaped disambiguators/parameter names were
+      // not observed in either this PoC's C# or Java fixture data.
       const close = path.indexOf(")", i);
       if (close === -1) {
         i = path.length;

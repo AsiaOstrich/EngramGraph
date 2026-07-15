@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { ingestScipIndex } from "../src/code-graph/providers/scip/scip-ingest.js";
 import { extractProject } from "../src/code-graph/extractor.js";
+import { isDefinitionOccurrence, isLocalSymbol } from "../src/code-graph/providers/scip/scip-reader.js";
+import { parseSymbol, classifySymbol } from "../src/code-graph/providers/scip/scip-symbol.js";
 import { loadScipJavaPocFixtureIndex, loadScipJavaPocFixtureSources } from "./fixtures/scip-java-poc/load-fixture.js";
 
 /**
@@ -141,7 +143,7 @@ describe("ingestScipIndex (Java, XSPEC-333 R3 Java PoC)", () => {
     expect(stats.callsSkippedUnresolvedTarget).toBeGreaterThan(0);
   });
 
-  it("leaves exactly the 7 implicit default constructors unresolved (documented pre-existing gap, not a regression)", () => {
+  it("leaves exactly the implicit default constructors unresolved, tied to an independently-derived count (not a bare magic number) -- documented pre-existing gap, not a regression", () => {
     // None of the 7 fixture classes declare an explicit constructor, so javac
     // synthesizes an implicit `<init>()` for each -- scip-java still emits a
     // definition occurrence for it (a real symbol in the class file), but
@@ -151,8 +153,34 @@ describe("ingestScipIndex (Java, XSPEC-333 R3 Java PoC)", () => {
     // flagged as unverified (nested classes, partial classes, local
     // functions, constructors) -- Java surfacing it concretely is expected
     // corroborating evidence, not a new problem introduced by this PoC.
+    //
+    // Asserting `toBe(7)` alone (an earlier draft of this test did exactly
+    // that) is a real risk flagged by adversarial review: a DIFFERENT
+    // regression that happens to also drop 7 definitions would pass the same
+    // assertion silently. So this test instead independently re-derives,
+    // straight from the raw SCIP index (bypassing ingestScipIndex entirely),
+    // which symbols are function/class-kind definition occurrences whose
+    // last descriptor segment is the synthesized `<init>` constructor name --
+    // then asserts ingest's unresolved count equals exactly THAT count, not
+    // a number this test merely observed once and hardcoded.
+    const implicitConstructorSymbols = new Set<string>();
+    for (const doc of index.documents) {
+      for (const occ of doc.occurrences) {
+        if (!isDefinitionOccurrence(occ) || isLocalSymbol(occ.symbol)) continue;
+        const parsed = parseSymbol(occ.symbol);
+        if (!parsed) continue;
+        if (classifySymbol(parsed) !== "function") continue;
+        const last = parsed.descriptors.at(-1);
+        if (last?.kind === "method" && last.name === "<init>") implicitConstructorSymbols.add(occ.symbol);
+      }
+    }
+    // Sanity-check the independent derivation itself: exactly one
+    // constructor per fixture class (7 classes), none sharing a symbol
+    // string (SCIP symbols are unique per definition).
+    expect(implicitConstructorSymbols.size).toBe(7);
+
     const { stats } = ingestScipIndex(index, sources);
-    expect(stats.definitionsUnresolved).toBe(7);
+    expect(stats.definitionsUnresolved).toBe(implicitConstructorSymbols.size);
     expect(stats.definitionsResolved).toBeGreaterThan(0);
   });
 });

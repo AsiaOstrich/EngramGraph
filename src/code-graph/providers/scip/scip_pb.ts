@@ -20,10 +20,26 @@
 // normalize both encodings back to the pre-existing `number[]` shape so
 // `scip-ingest.ts` did not need to change at all.
 //
+// Licensing: `scip.proto` and the code generated from it (this file) are
+// derived from `github.com/scip-code/scip`, which is Apache-2.0 licensed
+// (verified via that repo's own `LICENSE` file; matches what `@c4312/scip`'s
+// now-removed `LICENSE` file also declared for its equivalent generated
+// output). Apache-2.0 is permissive and compatible with inclusion in this
+// project's MIT-licensed codebase (`../../../../LICENSE`), but the
+// Apache-2.0 terms still apply to this specific vendored file/derivative —
+// this comment IS that attribution notice, kept here rather than invented as
+// a separate top-level NOTICE file for a single vendored pair of files.
+//
 // To regenerate (e.g. scip.proto adds fields again in the future):
 //   mkdir /tmp/scip-regen && cd /tmp/scip-regen && npm init -y
 //   npm install @bufbuild/buf@1 @bufbuild/protoc-gen-es@2 @bufbuild/protobuf@2
-//   curl -fsL https://raw.githubusercontent.com/sourcegraph/scip/main/scip.proto -o scip.proto
+//   curl -fsL https://raw.githubusercontent.com/scip-code/scip/main/scip.proto -o scip.proto
+//   # (`scip-code/scip` is the current canonical repo — this vendored
+//   # `scip.proto`'s own `go_package` option already says so. Prior to
+//   # regenerating this file, `sourcegraph/scip` was fetched instead, which
+//   # still 301-redirects to the same content today, but the direct URL
+//   # above is preferred going forward so the fetch and the file's own
+//   # embedded provenance agree without depending on a redirect staying up.)
 //   cat > buf.gen.yaml <<'YAML'
 //   version: v2
 //   inputs:

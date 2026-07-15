@@ -12,20 +12,16 @@
     <maven.compiler.source>17</maven.compiler.source>
     <maven.compiler.target>17</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <!-- XSPEC-333 R3 Java PoC: scip-java's forked custom-javac.sh wrapper
-         does javac with JAVAC_JVM_OPTIONS then NEW_JAVAC_OPTS then
-         LAUNCHER_ARGS array expansions, under bash `set -eu`. LAUNCHER_ARGS
-         only gets populated from -J prefixed args forwarded to the forked
-         javac process; with none passed, the array stays declared but
-         empty, and macOS's stock bash (3.2.57, GPLv2 frozen, no newer bash
-         shipped by Apple) throws "unbound variable" expanding an empty
-         array under set -u, a real bash pre-4.4 defect, not a scip-java
-         bug. Forcing maven-compiler-plugin's fork to also emit Xms/Xmx JVM
-         flags (via these two standard properties) gives LAUNCHER_ARGS one
-         or more elements, sidestepping the empty-array case entirely. See
-         EngramGraph docs for this finding (mirrors other already
-         documented bash 3.2 gotchas in this codebase's history). -->
-    <maven.compiler.meminitial>64m</maven.compiler.meminitial>
-    <maven.compiler.maxmem>256m</maven.compiler.maxmem>
   </properties>
+
+  <!-- Regenerating index.scip from this project requires a real environment
+       fix unrelated to anything in this pom.xml (an earlier draft of this
+       file wrongly tried to work around it via maven.compiler.meminitial
+       and maven.compiler.maxmem properties here, which did NOT actually
+       work; adversarial review caught the stale, incorrect comment that
+       claimed it did, corrected by removing it from here entirely). See
+       load-fixture.ts's module doc in this same directory for the actual
+       fix (a newer bash on PATH) and the full, accurate regeneration
+       recipe. -->
+
 </project>

@@ -230,3 +230,54 @@ describe("canonicalIdForSymbol agrees with tree-sitter's real ids (cross-check)"
     expect(canonicalIdForSymbol("scip-dotnet nuget . . Services/", "Services/OrderService.cs")).toBeNull();
   });
 });
+
+/**
+ * XSPEC-333 R3 Java PoC: SCIP's `<escaped-identifier>` form
+ * (`` '`' (<escaped-character>)+ '`' ``, backticks doubled inside — see
+ * `scip.proto`'s grammar comment on `Symbol`) — required for any identifier
+ * that is not itself all `<identifier-character>`s (`_`, `+`, `-`, `$`,
+ * ASCII letter/digit). `scip-dotnet`'s C# fixture never happens to emit one
+ * (every C# identifier it produces symbols for satisfies the simple-
+ * identifier grammar), so this whole code path was previously untested — a
+ * real gap: `scip-java`'s output for a Java constructor's implicit `<init>`
+ * name is `` `<init>` ``, and a naive "scan to the next sigil character"
+ * loop (backtick is not a sigil character) would keep the literal backticks
+ * (and the `<`/`>` inside) in the parsed name instead of decoding them.
+ */
+describe("parseDescriptors: escaped identifiers (backtick-quoted names)", () => {
+  it("decodes a real scip-java constructor symbol's escaped `<init>` name, not the literal backtick-quoted text", () => {
+    // Real string decoded from this PoC's fixture
+    // test/fixtures/scip-java-poc/index.scip (NotificationService's
+    // implicit no-arg constructor).
+    expect(parseDescriptors("com/example/services/NotificationService#`<init>`().")).toEqual([
+      { kind: "namespace", name: "com" },
+      { kind: "namespace", name: "example" },
+      { kind: "namespace", name: "services" },
+      { kind: "type", name: "NotificationService" },
+      { kind: "method", name: "<init>", disambiguator: undefined },
+    ]);
+  });
+
+  it("un-escapes a doubled backtick inside an escaped identifier to one literal backtick", () => {
+    // Synthetic (per scip.proto's grammar comment: "escape backticks with
+    // double backtick") -- not observed in either fixture project, but the
+    // spec requires it and the decoder should honor it rather than stopping
+    // at the first backtick.
+    expect(parseDescriptors("Weird#`a``b`.")).toEqual([
+      { kind: "type", name: "Weird" },
+      { kind: "term", name: "a`b" },
+    ]);
+  });
+
+  it("canonicalIdForSymbol resolves the real scip-java `<init>` symbol to a sane, backtick-free function id", () => {
+    expect(
+      canonicalIdForSymbol(
+        "scip-java maven maven/com.example/scip-java-poc 1.0.0 com/example/services/NotificationService#`<init>`().",
+        "src/main/java/com/example/services/NotificationService.java",
+      ),
+    ).toEqual({
+      kind: "function",
+      id: "src/main/java/com/example/services/NotificationService.java#NotificationService.<init>",
+    });
+  });
+});
