@@ -93,23 +93,35 @@ Requirements and failure modes:
   against.** A SCIP index's occurrence paths are relative to that root; if
   they don't match `<dir>`'s own file paths, `egr` fails with a "none of the
   N document path(s) ... matched any source file under `<dir>`" error rather
-  than silently ingesting nothing.
+  than silently ingesting nothing. **Not verified on Windows**: SCIP paths
+  are always `/`-separated by spec, while `egr`'s own paths use the OS
+  separator — on Windows this comparison may not line up even with the
+  correct `<dir>`. If `--scip` reports 0 definitions/calls resolved despite
+  matching files, this is a likely cause; a warning is printed in that case.
 - A missing or non-SCIP file at `<path>` fails with a clear "file not found"
   or "could not be parsed as a SCIP protobuf index" error.
-- A graph DB created before this feature's schema change (`CALLS`'s
-  `provider`/`confidence` columns) fails with an error pointing you at
-  `egr index <dir> --clean` to rebuild it — `initSchema` never `ALTER`s an
-  existing table.
+- A graph DB whose `CALLS` table predates this feature's schema change
+  (the `provider`/`confidence` columns) fails with an error explaining the
+  fix: **`--clean` does NOT resolve this** (it only deletes row data via
+  `DETACH DELETE`, never table schema — `initSchema`'s `CREATE TABLE` is a
+  no-op once a table already exists). Delete the graph DB file itself (by
+  default `.engram/graph.db` + its `.wal` sidecar, or wherever
+  `ENGRAM_DB`/`--graph`/`--isolation` resolves it to — see
+  [Graph DB location](#graph-db-location) above) and re-run `egr index`
+  against the now-empty path.
 - Currently verified against `scip-dotnet` (C#) and `scip-java` (Java)
   output; any SCIP-conformant indexer for a tree-sitter-supported language
-  should work the same way, but has not been tried.
+  should work the same way in principle (the merge logic is language-generic),
+  but this has not actually been tried against a third indexer.
 
 Output adds a `scip` block: `documentsInIndex` (documents in the `.scip`
 file), `filesMatched` (how many of those overlapped `<dir>`'s own files —
 less than `documentsInIndex` is normal, e.g. compiler-generated files an
 indexer sees but `egr` deliberately skips), `definitionsResolved` /
 `definitionsUnresolved`, `callsEmitted`, and the two skip counters
-`callsSkippedNoEnclosingCaller` / `callsSkippedUnresolvedTarget`.
+`callsSkippedNoEnclosingCaller` / `callsSkippedUnresolvedTarget`. If files
+matched but resolution came back at zero, the human-readable output adds a
+`WARNING` line rather than silently reporting an all-zero result as success.
 
 ### `callers <symbol> [--depth N]`
 

@@ -93,22 +93,32 @@ egr index . --scip index.scip
 - **`<dir>` 必須是外部索引工具當初執行的同一個專案根目錄。** SCIP 索引裡
   occurrence 的路徑是相對於那個根目錄的；若跟 `<dir>` 自身的檔案路徑對不上，
   `egr` 會丟出「none of the N document path(s) ... matched any source file
-  under `<dir>`」這類明確錯誤，而不是悄悄地什麼都沒 ingest 到。
+  under `<dir>`」這類明確錯誤，而不是悄悄地什麼都沒 ingest 到。**尚未在
+  Windows 上驗證**：SCIP 路徑依規範一律用 `/` 分隔，而 `egr` 自身的路徑用
+  作業系統的分隔符——在 Windows 上，即使 `<dir>` 給對了，這個比對也可能對不上。
+  若 `--scip` 回報檔案有匹配到、但解析出的 definitions/calls 數是零，這是常見
+  可能成因之一；此情況下會印出警告。
 - `<path>` 指到不存在或非 SCIP 的檔案時，會丟出明確的「file not found」或
   「could not be parsed as a SCIP protobuf index」錯誤。
-- 若圖譜資料庫是在此功能的 schema 變動（`CALLS` 的 `provider`/`confidence`
-  欄位）之前建立的，會丟出指引你執行 `egr index <dir> --clean` 重建的錯誤
-  ——`initSchema` 從不對既有資料表做 `ALTER`。
+- 若圖譜資料庫的 `CALLS` 表是在此功能的 schema 變動（`provider`/`confidence`
+  欄位）之前建立的，會丟出說明修法的錯誤：**`--clean` 無法解決這個問題**
+  （它只透過 `DETACH DELETE` 清資料列，從不動資料表 schema——資料表一旦存在，
+  `initSchema` 的 `CREATE TABLE` 就是空操作）。要修，得把圖譜資料庫檔案本身刪掉
+  （預設是 `.engram/graph.db` 加它的 `.wal` 附屬檔，或
+  `ENGRAM_DB`/`--graph`/`--isolation` 解出來的那個路徑——見上方
+  [圖譜資料庫位置](#圖譜資料庫位置)），然後對著這個已清空的路徑重新執行
+  `egr index`。
 - 目前已對 `scip-dotnet`（C#）與 `scip-java`（Java）的輸出驗證過；理論上任何
-  符合 SCIP 規範、對應到 tree-sitter 已支援語言的索引工具都應該同樣可用，
-  但尚未實測。
+  符合 SCIP 規範、對應到 tree-sitter 已支援語言的索引工具原理上都應該同樣可用
+  （合併邏輯本身與語言無關），但實際上尚未對第三種索引工具實測過。
 
 輸出會多一個 `scip` 區塊：`documentsInIndex`（`.scip` 檔裡的文件數）、
 `filesMatched`（其中有多少與 `<dir>` 自身的檔案重疊——小於
 `documentsInIndex` 是正常現象，例如索引工具看得到、但 `egr` 刻意略過的
 編譯器產生檔）、`definitionsResolved` / `definitionsUnresolved`、
 `callsEmitted`，以及兩個略過計數 `callsSkippedNoEnclosingCaller` /
-`callsSkippedUnresolvedTarget`。
+`callsSkippedUnresolvedTarget`。若檔案有匹配到、但解析結果是零，人類可讀輸出
+會多印一行 `WARNING`，而不是把全零結果悄悄當成成功回報。
 
 ### `callers <symbol> [--depth N]`
 

@@ -48,13 +48,17 @@ describe("cmdIndex --scip (direct call, real C# fixture)", () => {
     const r = await cmdIndex(conn, { dir: FIXTURE_DIR, scip: FIXTURE_SCIP });
 
     expect(r.scip).toBeDefined();
-    // The real fixture index.scip has 10 documents: the 7 real .cs sources
-    // PLUS 3 MSBuild-generated files under obj/ (GlobalUsings.g.cs,
-    // AssemblyInfo.cs, AssemblyAttributes.cs) that scip-dotnet indexed but
-    // `walkFiles`'s SKIP_DIRS (which already excludes "obj" for tree-sitter,
-    // see cli/walk.ts) never walks — so filesMatched (7) is intentionally
-    // less than documentsInIndex (10) here; that is a normal, non-error
-    // partial match, not the zero-overlap failure case.
+    // The real fixture index.scip has 10 documents: the 7 real, committed .cs
+    // sources under FIXTURE_DIR PLUS 3 MSBuild-generated files scip-dotnet
+    // indexed under obj/ at generation time (GlobalUsings.g.cs,
+    // AssemblyInfo.cs, AssemblyAttributes.cs) — see load-fixture.ts's module
+    // doc: that obj/ directory is deliberately NOT committed to this repo at
+    // all (only the .cs sources + the generated index.scip binary are), so
+    // those 3 documents simply have no corresponding file on disk here (this
+    // is NOT walkFiles's SKIP_DIRS at work — "obj" is in SKIP_DIRS too, but
+    // it's moot when the directory doesn't exist in the first place). Either
+    // way, filesMatched (7) being less than documentsInIndex (10) is a
+    // normal, non-error partial match, not the zero-overlap failure case.
     expect(r.scip!.documentsInIndex).toBe(10);
     expect(r.scip!.filesMatched).toBe(7);
     expect(r.scip!.definitionsUnresolved).toBe(0);
@@ -105,28 +109,82 @@ describe("cmdIndex --scip (direct call, real C# fixture)", () => {
     );
   });
 
-  it("CALLS schema predates provider/confidence columns: points at --clean instead of a raw Binder exception", async () => {
-    const oldDir = mkdtempSync(join(tmpdir(), "engram-scip-old-schema-"));
-    const oldConn = GraphConnection.open(join(oldDir, "old.db"));
+  /**
+   * Two tests against the SAME pre-migration schema reproduction:
+   *
+   *  - `ingestScipOverlay` in isolation (the unit-level check).
+   *  - the FULL, real-world `cmdIndex(conn, { dir, scip })` path — this is
+   *    the regression test for a real defect an adversarial review caught:
+   *    an earlier version of this feature only wrapped the SCIP write in a
+   *    try/catch, but `cmdIndex` always runs the tree-sitter `indexProject`
+   *    pass FIRST, and tree-sitter's own CALLS write (XSPEC-333 R3 OQ-4)
+   *    ALSO unconditionally touches the missing `provider`/`confidence`
+   *    columns — so on a real pre-migration DB, tree-sitter's own write hit
+   *    the exact same Binder exception first, before the SCIP-specific
+   *    try/catch was ever reached, and the user got a raw Kuzu exception
+   *    instead of the friendly message. `run.ts`'s
+   *    `assertCallsSchemaHasProvenanceColumns` now runs BEFORE the
+   *    tree-sitter pass specifically to fix this; this second test is the
+   *    one that would have caught the original bug (the first, isolated one
+   *    would NOT have, since it deliberately bypassed `indexProject`).
+   */
+  function openPreMigrationSchemaConnection(): { conn: GraphConnection; dbDir: string } {
+    const dbDir = mkdtempSync(join(tmpdir(), "engram-scip-old-schema-"));
+    const oldConn = GraphConnection.open(join(dbDir, "old.db"));
     // Full current schema, EXCEPT CALLS reverted to its pre-XSPEC-333-R3-OQ4
     // shape (no provider/confidence) — reproduces the exact documented gap
     // in schema.ts without going through a real historical migration.
+    return { conn: oldConn, dbDir };
+  }
+
+  async function createPreMigrationSchema(oldConn: GraphConnection): Promise<void> {
     for (const ddl of NODE_TABLE_DDL) await oldConn.execute(ddl);
     await oldConn.execute(`CREATE REL TABLE CALLS(FROM Function TO Function, call_count INT64)`);
     for (const ddl of REL_TABLE_DDL) {
       if (!ddl.includes("CREATE REL TABLE CALLS")) await oldConn.execute(ddl);
     }
+  }
+
+  it("CALLS schema predates provider/confidence columns (ingestScipOverlay in isolation): actionable message, NOT the (incorrect) '--clean' advice", async () => {
+    const { conn: oldConn, dbDir: oldDir } = openPreMigrationSchemaConnection();
+    await createPreMigrationSchema(oldConn);
 
     try {
-      // Exercise just the SCIP overlay half in isolation (no tree-sitter
-      // write on this connection at all — see module doc in run.ts for why
-      // going through the full cmdIndex here would hit the SAME schema gap
-      // on the tree-sitter write first, masking the SCIP-specific message
-      // this test exists to check).
       const codeFiles = loadScipPocFixtureSources().map((f) => ({ path: f.relativePath, source: f.source }));
+      // Message must NOT tell the user to run `--clean` as the fix — verified
+      // empirically that `--clean` (clearGraph) only deletes row data, never
+      // touches table schema, so it would NOT actually resolve this error.
       await expect(ingestScipOverlay(oldConn, FIXTURE_DIR, FIXTURE_SCIP, codeFiles)).rejects.toThrow(
-        /predates the "provider"\/"confidence" columns.*egr index <dir> --clean/s,
+        /predates the "provider"\/"confidence" columns.*does NOT fix this.*Delete this project's graph DB file/s,
       );
+    } finally {
+      await oldConn.close();
+      rmSync(oldDir, { recursive: true, force: true });
+    }
+  });
+
+  it("CALLS schema predates provider/confidence columns (full cmdIndex path, --scip): the friendly message fires even though tree-sitter's OWN write would hit the same gap first", async () => {
+    const { conn: oldConn, dbDir: oldDir } = openPreMigrationSchemaConnection();
+    await createPreMigrationSchema(oldConn);
+
+    try {
+      // The real end-user path: cmdIndex runs indexProject (tree-sitter)
+      // BEFORE the scip overlay. Without the cmdIndex-level pre-flight check,
+      // this would surface a raw "Binder exception: Cannot find property
+      // provider for r." instead of ever reaching this friendly message.
+      let caught: unknown;
+      try {
+        await cmdIndex(oldConn, { dir: FIXTURE_DIR, scip: FIXTURE_SCIP });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      const message = (caught as Error).message;
+      expect(message).toMatch(/predates the "provider"\/"confidence" columns/);
+      // Not the raw, unwrapped Kuzu exception a pre-fix version of this code
+      // would have surfaced here (tree-sitter's own write hits the schema
+      // gap first, before the SCIP-specific try/catch is ever reached).
+      expect(message.startsWith("Binder exception")).toBe(false);
     } finally {
       await oldConn.close();
       rmSync(oldDir, { recursive: true, force: true });

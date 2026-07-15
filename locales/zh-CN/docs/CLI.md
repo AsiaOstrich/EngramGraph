@@ -93,22 +93,32 @@ egr index . --scip index.scip
 - **`<dir>` 必须是外部索引工具当初运行时的同一个项目根目录。** SCIP 索引里
   occurrence 的路径是相对于那个根目录的；如果和 `<dir>` 自身的文件路径对不上，
   `egr` 会抛出「none of the N document path(s) ... matched any source file
-  under `<dir>`」这类明确错误，而不是悄悄地什么都没 ingest 到。
+  under `<dir>`」这类明确错误，而不是悄悄地什么都没 ingest 到。**尚未在
+  Windows 上验证**：SCIP 路径按规范一律用 `/` 分隔，而 `egr` 自身的路径用
+  操作系统的分隔符——在 Windows 上，即使 `<dir>` 给对了，这个比对也可能对不上。
+  若 `--scip` 报告文件有匹配到、但解析出的 definitions/calls 数是零，这是常见
+  可能成因之一；此情况下会打印警告。
 - `<path>` 指向不存在或非 SCIP 的文件时，会抛出明确的「file not found」或
   「could not be parsed as a SCIP protobuf index」错误。
-- 若图数据库是在此功能的 schema 变动（`CALLS` 的 `provider`/`confidence`
-  列）之前创建的，会抛出指引你执行 `egr index <dir> --clean` 重建的错误
-  ——`initSchema` 从不对已有表做 `ALTER`。
+- 若图数据库的 `CALLS` 表是在此功能的 schema 变动（`provider`/`confidence`
+  列）之前创建的，会抛出说明修法的错误：**`--clean` 无法解决这个问题**
+  （它只通过 `DETACH DELETE` 清行数据，从不动表 schema——表一旦已存在，
+  `initSchema` 的 `CREATE TABLE` 就是空操作）。要修，得把图数据库文件本身删掉
+  （默认是 `.engram/graph.db` 加它的 `.wal` 附属文件，或
+  `ENGRAM_DB`/`--graph`/`--isolation` 解析出来的那个路径——见上方
+  [图数据库位置](#图数据库位置)），然后对着这个已清空的路径重新执行
+  `egr index`。
 - 目前已对 `scip-dotnet`（C#）与 `scip-java`（Java）的输出验证过；理论上任何
-  符合 SCIP 规范、对应到 tree-sitter 已支持语言的索引工具都应该同样可用，
-  但尚未实测。
+  符合 SCIP 规范、对应到 tree-sitter 已支持语言的索引工具原理上都应该同样可用
+  （合并逻辑本身与语言无关），但实际上尚未对第三种索引工具实测过。
 
 输出会多一个 `scip` 区块：`documentsInIndex`（`.scip` 文件里的文档数）、
 `filesMatched`（其中有多少与 `<dir>` 自身的文件重叠——小于
 `documentsInIndex` 是正常现象，例如索引工具能看到、但 `egr` 刻意跳过的
 编译器生成文件）、`definitionsResolved` / `definitionsUnresolved`、
 `callsEmitted`，以及两个跳过计数 `callsSkippedNoEnclosingCaller` /
-`callsSkippedUnresolvedTarget`。
+`callsSkippedUnresolvedTarget`。若文件有匹配到、但解析结果是零，人类可读输出
+会多打印一行 `WARNING`，而不是把全零结果悄悄当成成功报告。
 
 ### `callers <symbol> [--depth N]`
 

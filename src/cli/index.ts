@@ -24,7 +24,8 @@ Usage: egr <command> [args] [options]
 Commands:
   index <dir> [--docs] [--clean] [--scip <path>]
                                   Index source (.ts/.js/.cs/.py/.go/.java/
-                                  .kt/.rs/.cpp) into the code graph;
+                                  .kt/.rs/.cpp/.rb/.php/.dart) into the code
+                                  graph;
                                   --docs also indexes .md; --clean drops the
                                   graph first (prunes deleted nodes); --scip
                                   <path> additionally overlays a pre-generated
@@ -171,11 +172,22 @@ async function main(): Promise<void> {
       out(r, values.json, (d) => {
         const s = d as Awaited<ReturnType<typeof cmdIndex>>;
         const k = s.knowledge ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relates} relates` : "";
+        // A matched-files-but-zero-resolution result is a real, silent-failure-
+        // shaped signal worth surfacing even though it isn't a hard error: it's
+        // consistent with (among other causes) a path-separator mismatch that
+        // matched by filename coincidence but produced no usable data (see
+        // ingestScipOverlay's module doc in cli/run.ts for the Windows case
+        // this can't fully rule out at the CLI layer).
+        const scipWarning =
+          s.scip && s.scip.filesMatched > 0 && s.scip.definitionsResolved === 0 && s.scip.callsEmitted === 0
+            ? `\nscip: WARNING — ${s.scip.filesMatched} file(s) matched but 0 definitions/calls were resolved; ` +
+              `double-check <dir> is the exact project root the external SCIP indexer ran against.`
+            : "";
         const scip = s.scip
           ? `\nscip: ${s.scip.filesMatched}/${s.scip.documentsInIndex} indexed files matched, ` +
             `${s.scip.definitionsResolved} definitions resolved (${s.scip.definitionsUnresolved} unresolved), ` +
             `${s.scip.callsEmitted} calls emitted (${s.scip.callsSkippedNoEnclosingCaller} skipped: no enclosing caller, ` +
-            `${s.scip.callsSkippedUnresolvedTarget} skipped: unresolved target)`
+            `${s.scip.callsSkippedUnresolvedTarget} skipped: unresolved target)${scipWarning}`
           : "";
         return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${scip}`;
       });
