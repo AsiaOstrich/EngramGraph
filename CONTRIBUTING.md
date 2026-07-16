@@ -16,6 +16,19 @@ cd EngramGraph
 npm install --legacy-peer-deps
 ```
 
+Then install the README locale-sync pre-commit hook (one-time, per clone — `.git/hooks`
+isn't tracked by git, so this doesn't happen automatically):
+
+```bash
+ln -sf ../../scripts/hooks/pre-commit .git/hooks/pre-commit
+```
+
+It blocks a commit that adds/removes a `README.md` section without touching the
+corresponding section in `locales/zh-TW/README.md` / `locales/zh-CN/README.md` — the two
+locale READMEs sat stale for 7 minor versions before anyone noticed, because nothing ever
+checked them. Bypass once with `git commit --no-verify` if a translation is intentionally
+coming in a follow-up commit.
+
 ## The loop
 
 ```bash

@@ -1,8 +1,8 @@
 ---
 source: CONTRIBUTING.md
-source_version: 0.1.0
-translation_version: 0.1.0
-last_synced: 2026-05-30
+source_version: 0.7.0
+translation_version: 0.7.0
+last_synced: 2026-07-16
 status: complete
 ---
 
@@ -22,6 +22,18 @@ git clone https://github.com/AsiaOstrich/EngramGraph.git
 cd EngramGraph
 npm install --legacy-peer-deps
 ```
+
+接著安裝 README 語言版同步 pre-commit hook（每次 clone 只需裝一次——`.git/hooks`
+不受 git 版控，所以不會自動裝好）：
+
+```bash
+ln -sf ../../scripts/hooks/pre-commit .git/hooks/pre-commit
+```
+
+它會擋下「`README.md` 新增/移除章節，但對應的
+`locales/zh-TW/README.md` / `locales/zh-CN/README.md` 章節沒有同步更新」的 commit——
+兩個語言版 README 曾經停滯了 7 個小版本沒人發現，就是因為從沒有任何機制檢查過。
+若翻譯確定會在後續 commit 補上，可用 `git commit --no-verify` 略過一次。
 
 ## 開發迴圈
 
