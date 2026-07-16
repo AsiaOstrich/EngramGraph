@@ -41,6 +41,27 @@ import {
  * `shouldOverwrite` always allows a same-provider rewrite and `extractor.ts`
  * always stamps a fresh Function node with `confidence: 1`. See
  * `schema-migration.ts`'s module doc for the full accounting.
+ *
+ * A note on a real native-crash root cause found (and fixed) while adding
+ * this file's resumability/backup-retry coverage above: this suite calls
+ * `migrateSchemaColumns`/`detectPendingColumnMigrations` many times across
+ * many short-lived `GraphConnection`s (one per test, `beforeEach`/`afterEach`
+ * below), and the added detection queries pushed an already-marginal native
+ * resource budget over the edge — every individual assertion still passed,
+ * but the worker crashed at process-exit teardown (the same DOCUMENTED CLASS
+ * of native-addon issue as `test/structural-memory.test.ts`'s module doc,
+ * which blames it on cumulative connections; this turned out to have a more
+ * specific root cause here). The actual cause: `ryugraph`'s `QueryResult`
+ * carries native-side cursor resources and exposes an explicit `close()` to
+ * release them, which `graph-db/connection.ts`'s `GraphConnection.query()`
+ * was never calling — every single query (in this file and project-wide)
+ * leaked a native handle, relying entirely on GC to eventually reclaim it,
+ * with no bound on how many could accumulate before a connection closes.
+ * Fixed in `connection.ts` (now closes every `QueryResult` after extracting
+ * its rows); verified this resolves the crash (repeated full-suite and
+ * isolated-file runs went from consistently crashing at exit to consistently
+ * clean). Left here as a pointer in case a future addition to this
+ * particularly query-heavy file ever revives similar symptoms.
  */
 
 describe("parseDeclaredColumns", () => {
@@ -233,6 +254,16 @@ describe("migrateSchemaColumns — end-to-end against a simulated pre-migration 
       `MATCH (a:Function {id: 'f1'}), (b:Function {id: 'f2'}) CREATE (a)-[:CALLS {call_count: 7}]->(b)`,
     );
 
+    // Resumability (see schema-migration.ts's module doc, "Resumability"
+    // section): simulate a PRIOR process that crashed right after its ALTER
+    // committed but before the paired backfill ran, by manually issuing ONLY
+    // the ALTER for Function.provider ahead of time — the column already
+    // exists, present-but-NULL on f1/f2, exactly like a resumed run would
+    // find it. `migrateSchemaColumns` below must still notice and fix it
+    // (that's exactly what this test's `f1.provider`/`f2` assertions check),
+    // not skip it just because the column is no longer missing.
+    await conn.execute(`ALTER TABLE Function ADD IF NOT EXISTS provider STRING DEFAULT NULL`);
+
     const report = await migrateSchemaColumns(conn);
 
     expect(report.migrated).toEqual(
@@ -337,7 +368,7 @@ describe("migrateSchemaColumns — end-to-end against a simulated pre-migration 
     expect(liveRows[0]?.provider).toBe("tree-sitter");
   });
 
-  it("is idempotent: a second call after migration reports nothing pending and does not create a second backup", async () => {
+  it("is idempotent; a retry against still-pending work reuses the existing backup instead of making an unbounded number of full-DB copies", async () => {
     await createPreMigrationSchema();
     await conn.execute(`CREATE (:Function {id: 'f1', name: 'foo', file: 'a.ts', start_line: 1, confidence: 1.0})`);
 
@@ -352,6 +383,28 @@ describe("migrateSchemaColumns — end-to-end against a simulated pre-migration 
     // Only the one backup from the first call exists — no "-2" suffix.
     expect(existsSync(`${conn.path}.pre-migration-backup`)).toBe(true);
     expect(existsSync(`${conn.path}.pre-migration-backup-2`)).toBe(false);
+
+    // --- Bounding backup accumulation across retries (Fix 2) ---
+    //
+    // Fabricate a "stalled retry" state without a third real DB: manually
+    // re-null Function.provider (as if a subsequent process had crashed
+    // between re-adding it — a no-op here, it already exists — and its
+    // backfill). `first`'s backup already covers "Function.provider" (it was
+    // part of the ORIGINAL pending set backed up before anything was
+    // touched), so a retry against this same still-pending column must reuse
+    // that existing backup rather than making a new full-DB copy.
+    await conn.execute(`MATCH (n:Function {id: 'f1'}) SET n.provider = NULL`);
+    expect(await detectPendingColumnMigrations(conn)).toEqual(
+      expect.arrayContaining([{ table: "Function", column: "provider", type: "STRING" }]),
+    );
+
+    const third = await migrateSchemaColumns(conn);
+    expect(third.migrated.length).toBeGreaterThan(0);
+    expect(third.backupPath).toBe(first.backupPath); // reused, not a new copy
+    expect(existsSync(`${conn.path}.pre-migration-backup-2`)).toBe(false);
+
+    const f1AfterThird = await conn.query(`MATCH (n:Function {id: 'f1'}) RETURN n.provider AS provider`);
+    expect(f1AfterThird[0]?.provider).toBe("tree-sitter"); // still gets fixed despite the reused backup
   });
 
   it("initSchema (CREATE TABLE only) leaves the old schema untouched, exactly reproducing the documented gap before migrateSchemaColumns runs", async () => {
