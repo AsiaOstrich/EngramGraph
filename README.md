@@ -102,6 +102,54 @@ If you hit something not covered here, please check
 before assuming it's an EngramGraph bug — most native-loading failures originate in the
 `ryugraph` dependency, not this package.
 
+### Dependency vulnerability warnings (`npm audit`, deprecated packages)
+
+A plain `npm install` — global, `npx`, or as a project dependency — currently prints
+warnings like this:
+
+```
+npm warn deprecated npmlog@6.0.2: This package is no longer supported.
+npm warn deprecated are-we-there-yet@3.0.1: This package is no longer supported.
+npm warn deprecated gauge@4.0.4: This package is no longer supported.
+npm warn deprecated tar@6.2.1: ...widely publicized security vulnerabilities...
+4 high severity vulnerabilities
+```
+
+All four trace back to a single chain: `ryugraph` (this package's embedded graph-DB
+engine) pins `cmake-js@^7.3.0`, which depends on `tar@^6.2.0` (several high-severity
+path-traversal CVEs, fixed in `tar@7.5.11`+) and the now-deprecated `npmlog`/`gauge`/
+`are-we-there-yet` stack. `cmake-js@8.0.0` already dropped `npmlog` and bumped `tar` to
+`^7.5.6` — the fix exists upstream, `ryugraph` just hasn't picked it up yet. Tracked at
+[predictable-labs/ryugraph#49](https://github.com/predictable-labs/ryugraph/issues/49).
+
+**Actual exposure is narrower than the warning count suggests.** `ryugraph`'s own
+`install.js` only invokes `cmake-js` (and therefore `tar`) when no prebuilt native binary
+exists for your platform — see the platform support matrix above. On every platform
+listed there as `✅ Works`, the prebuilt binary is copied directly and `cmake-js`/`tar`
+are fetched into `node_modules` but never executed. The declared vulnerability is real
+(and shows up in `npm audit`/SBOM tooling regardless), but the live exploitation window is
+effectively limited to build-from-source paths (unsupported platforms, or
+`NPM_CONFIG_BUILD_FROM_SOURCE` set explicitly).
+
+**If you consume `engramgraph` as a dependency inside your own project** (not a global
+install), you can clear this yourself today — add the same override to *your own*
+`package.json`:
+
+```json
+"overrides": {
+  "cmake-js": "^8.0.0"
+}
+```
+
+(npm-only syntax shown; pnpm/Yarn have equivalent `pnpm.overrides` / `resolutions`
+fields.) This works because npm's `overrides` field only takes effect at the root of
+whichever project runs `npm install` — it does **not** propagate from a dependency's own
+`package.json` to yours, which is exactly why `engramgraph`'s own `overrides` entry (added
+in an earlier fix) doesn't help you: it only cleans `npm audit` inside this repo's own
+source checkout, not for anyone installing the published package. For a global install or
+`npx engramgraph` there is no project root to attach an override to, so that path has no
+workaround available yet — it depends on the linked upstream issue landing.
+
 ## Quickstart
 
 ```bash

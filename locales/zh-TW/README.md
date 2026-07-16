@@ -1,8 +1,8 @@
 ---
 source: README.md
-source_version: 0.1.0
-translation_version: 0.1.0
-last_synced: 2026-05-30
+source_version: 0.7.0
+translation_version: 0.7.0
+last_synced: 2026-07-16
 status: complete
 ---
 
@@ -41,6 +41,98 @@ npm install -g engramgraph
 ```bash
 npx engramgraph index ./src
 ```
+
+### 平台支援矩陣
+
+EngramGraph 依賴 [`ryugraph`](https://github.com/predictable-labs/ryugraph) 作為嵌入式圖譜資料庫，該套件按平台附上預先編譯好的原生二進位檔。截至 `ryugraph@25.9.1`，已驗證的支援狀況為：
+
+| 平台 | 狀態 | 備註 |
+|------|------|------|
+| macOS ARM64（Apple Silicon）| ✅ 可用 | 已透過 [Cross-Platform Compatibility Check](.github/workflows/release-compat-check.yml)（`macos-latest`）驗證 |
+| macOS x64（Intel）| ⚠️ 未經 CI 驗證（已知限制，見下方）| 目前無已知問題——`ryujs-darwin-x64.node` 是獨立、正當建置的二進位檔（不同於 Linux ARM64 的情況）——但沒有自動化發布關卡驗證 |
+| Linux x64，glibc ≥ 2.38（Ubuntu 24.04+、Debian 13+）| ✅ 可用 | 已透過 CI glibc 相容性矩陣驗證（`node:24-trixie`，glibc 2.41）|
+| Linux x64，glibc < 2.38（Ubuntu 22.04 LTS、Debian 12）| ❌ 無法使用 | 上游 `ryugraph` 二進位檔需要比這些仍常見的 LTS 發行版所附更新的 glibc。已透過 CI glibc 相容性矩陣驗證（`node:24`，glibc 2.36）|
+| Linux ARM64（任何 glibc）| ❌ 無法使用 | 上游把 x86-64 的二進位檔用 arm64 的檔名發布——追蹤於 [predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48)。已透過 CI（`ubuntu-24.04-arm`）驗證 |
+| Windows x64 | ✅ 可用 | 已透過 CI（`windows-latest`）驗證 |
+
+這會影響 **Apple Silicon Mac 上的 Docker Desktop**（預設用 `linux/arm64`）與
+**AWS Graviton／其他 ARM64 Linux 主機**——若 `egr` 在這些環境上失敗，很可能就是
+[#48](https://github.com/predictable-labs/ryugraph/issues/48)，不是你的環境設定有問題。
+在受影響的 Docker 主機上強制 `--platform linux/amd64` 可以繞過（代價是在 ARM64 硬體上以模擬方式執行），直到上游修正為止。
+
+另外請注意：npm ≥ 11 預設會把原生安裝腳本（含 `ryugraph` 的）擋在核准提示之後。若 `npm install`
+印出 `npm warn allow-scripts`，請執行 `npm approve-scripts --all` 後重新安裝——否則原生二進位檔永遠不會被複製到位。
+
+**為什麼 macOS Intel 沒有納入自動化發布關卡。** 這不是疏漏，是刻意的決定，有兩個獨立事實指向同一個方向：
+
+- **GitHub 自家的 Intel Mac（`macos-13`）代管 runner 目前有嚴重的排隊容量限制。** 2026-07-10 的一次實測執行在
+  `queued` 狀態卡了約 50 分鐘都沒開始跑。GitHub Actions 的 `timeout-minutes` 無法限制這種情況——它只在
+  job 真正開始執行後才開始計時，排隊期間不算——所以沒有可靠的方式能限制一個發布卡在等待這個 runner 上的時間。
+- **Apple 自家的支援生命週期正在收尾。** macOS 26「Tahoe」是最後一個支援 Intel Mac 的主要版本；
+  macOS 27「Golden Gate」（預計 2026 年 9 月）會完全移除 Intel 支援，macOS 26 大約只到 2029 年為止還有
+  純安全性更新。Intel Mac 在 Apple 與 GitHub 兩邊都是正在淡出的平台。
+
+既然如此，讓每次發布都卡在一個可能永遠排不到、而且是正在淡出的平台的 runner 上，並不合理。改為讓
+[`release-compat-check.yml`](.github/workflows/release-compat-check.yml) 裡的 `macos-x64-intel-manual`
+以**盡力而為、非阻斷**的方式跑 Intel Mac 驗證：可透過 `workflow_dispatch` 手動觸發、`continue-on-error: true`
+所以永遠不會讓發布失敗，也不掛在 `release: published` 觸發條件上，確保真正的發布不會被它卡住。若你特別
+需要確認 Intel Mac 支援狀況，可手動觸發該 job 查看結果——但發布流程本身不依賴它。
+
+### 疑難排解：容易誤導人的原生二進位檔錯誤
+
+Linux 上的原生二進位檔載入失敗，會透過 Node 的 `dlopen` 呈現，其錯誤文字不見得能反映真正的原因：
+
+| 你看到的錯誤 | 通常代表的意思 |
+|------|------|
+| `ryujs.node: cannot open shared object file: No such file or directory`（用 `ls` 檢查檔案*確實存在*）| CPU 架構不對——該路徑上的二進位檔是給另一個平台/架構用的 |
+| `.../libc.so.6: version 'GLIBC_2.38' not found` | 你的發行版 glibc 版本比預建二進位檔要求的舊（見上方矩陣）|
+| `npm warn allow-scripts ... not yet covered by allowScripts` | npm ≥ 11 擋下了複製原生二進位檔的安裝腳本——執行 `npm approve-scripts --all` 後重新安裝/重建 |
+
+若你遇到的問題不在上表範圍內，請先查
+[predictable-labs/ryugraph 的 issues](https://github.com/predictable-labs/ryugraph/issues)，
+再判斷是不是 EngramGraph 本身的問題——多數原生載入失敗都源自 `ryugraph` 這個相依套件，不是本套件。
+
+### 相依套件安全性警告（`npm audit`、已棄用套件）
+
+不論全域安裝、`npx`、或當成專案相依套件安裝，目前跑 `npm install` 都會印出這類警告：
+
+```
+npm warn deprecated npmlog@6.0.2: This package is no longer supported.
+npm warn deprecated are-we-there-yet@3.0.1: This package is no longer supported.
+npm warn deprecated gauge@4.0.4: This package is no longer supported.
+npm warn deprecated tar@6.2.1: ...widely publicized security vulnerabilities...
+4 high severity vulnerabilities
+```
+
+四項全部源自同一條依賴鏈：`ryugraph`（本套件的嵌入式圖譜資料庫引擎）鎖定
+`cmake-js@^7.3.0`，而它依賴 `tar@^6.2.0`（多個高風險路徑穿越 CVE，已在 `tar@7.5.11`+
+修復）與現已棄用的 `npmlog`/`gauge`/`are-we-there-yet` 堆疊。`cmake-js@8.0.0` 已經拿掉
+`npmlog`、把 `tar` 升到 `^7.5.6`——修法在上游已經存在，只是 `ryugraph` 還沒採用。追蹤於
+[predictable-labs/ryugraph#49](https://github.com/predictable-labs/ryugraph/issues/49)。
+
+**實際風險範圍比警告數量看起來要窄。** `ryugraph` 自己的 `install.js` 只有在你的平台
+沒有預建原生二進位檔時，才會呼叫 `cmake-js`（進而牽動 `tar`）——見上方平台支援矩陣。
+在矩陣裡標示 `✅ 可用` 的每個平台上，預建二進位檔會直接被複製使用，`cmake-js`/`tar`
+雖然會被抓進 `node_modules`，但完全不會被執行。這個宣告的漏洞是真實的（不管有沒有
+被執行，`npm audit`／SBOM 工具照樣會回報），但實際能被利用的窗口，實質上僅限於
+走 build-from-source 路徑的情境（不支援的平台，或明確設定 `NPM_CONFIG_BUILD_FROM_SOURCE`）。
+
+**若你是把 `engramgraph`當成自己專案裡的一般相依套件安裝**（而非全域安裝），你今天
+就能自行解決——把同樣的 override 加進**你自己的** `package.json`：
+
+```json
+"overrides": {
+  "cmake-js": "^8.0.0"
+}
+```
+
+（上面是 npm 語法；pnpm/Yarn 有對應的 `pnpm.overrides` / `resolutions` 欄位。）這之所以
+有效，是因為 npm 的 `overrides` 欄位只在「執行 `npm install` 的那個專案本身」才會生效——
+不會從相依套件自己的 `package.json` 傳遞到你的專案，這正是為什麼 `engramgraph` 自己
+package.json 裡（先前修復時加的）那個 `overrides` 對你沒有幫助：它只清乾淨了本 repo
+原始碼 checkout 裡的 `npm audit`，對裝了已發布套件的人完全沒用。若是全域安裝或
+`npx engramgraph`，沒有專案根目錄可以掛 override，這條路目前還沒有解法——得等上面連結的
+上游 issue 被處理。
 
 ## 快速上手
 
