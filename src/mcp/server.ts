@@ -47,7 +47,15 @@ export function createMcpServer(conn: GraphConnection): McpServer {
     },
     async ({ files }) => {
       try {
-        return ok(await indexProject(conn, files));
+        // Drop the per-file `parseHealth` array (XSPEC-334 R1b) from the MCP
+        // tool result: surfacing index health to MCP consumers is R2's job (a
+        // compact `indexHealth` field + `possiblyIncomplete` on QUERY
+        // responses), so the index_code response shape stays unchanged until
+        // that lands rather than shipping the raw array as an unstable interim
+        // surface. The manifest is still the SSOT; the CLI still writes it.
+        const { parseHealth, ...res } = await indexProject(conn, files);
+        void parseHealth;
+        return ok(res);
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }

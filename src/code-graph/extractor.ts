@@ -49,6 +49,7 @@ import type { ExtractOptions, ProjectFile, SupportedLanguage } from "./types.js"
 import { tagsQuerySourceFor } from "./queries/index.js";
 import { toPosixPath } from "./path-utils.js";
 import { collectComments, findEnclosingFunction, qualifyFunctions, runTagQuery } from "./tag-query-engine.js";
+import { measureErrorSpan, type FileParseHealth } from "./parse-health.js";
 
 /**
  * Provenance stamp for every node this extractor produces (XSPEC-333 R1).
@@ -307,6 +308,15 @@ export interface Extraction {
   rawCalls: RawCall[];
   /** This file's bare function name → id. */
   names: Map<string, string>;
+  /**
+   * Parse-health measurement for this file (XSPEC-334 R1b) — top-most
+   * `ERROR`/`MISSING` node count, the extent they cover, and the total source
+   * extent (all in tree-sitter's UTF-16 code-unit index; see
+   * `parse-health.ts`). A clean parse is `{ errorNodes: 0, errorExtent: 0 }`.
+   */
+  errorNodes: number;
+  errorExtent: number;
+  sourceExtent: number;
 }
 
 /**
@@ -338,6 +348,14 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   const filePath = toPosixPath(opts.filePath);
   const language = opts.language ?? detectLanguage(filePath);
   const tree = parserFor(language).parse(source);
+
+  // Parse-health (XSPEC-334 R1b): tree-sitter never throws on malformed
+  // source — it recovers with ERROR/MISSING nodes and parses the rest — so
+  // this is the one place that can see whether the parse was partial. Guarded
+  // by `hasError` so a clean tree (the overwhelming majority) pays nothing.
+  const { errorNodes, errorExtent } = tree.rootNode.hasError
+    ? measureErrorSpan(tree.rootNode)
+    : { errorNodes: 0, errorExtent: 0 };
 
   const moduleId = filePath;
 
@@ -461,7 +479,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     });
   }
 
-  return { nodes, defines, implementsEdges, rawCalls, names };
+  return { nodes, defines, implementsEdges, rawCalls, names, errorNodes, errorExtent, sourceExtent: source.length };
 }
 
 /**
@@ -528,6 +546,8 @@ export interface ProjectExtraction {
   ambiguous: number;
   /** Calls whose callee name matched no known function (skipped). */
   unresolved: number;
+  /** Per-file raw parse-health, one entry per input file (XSPEC-334 R1b). */
+  parseHealth: FileParseHealth[];
 }
 
 /**
@@ -538,11 +558,57 @@ export interface ProjectExtraction {
  * wins (lexical shadowing); otherwise a globally unique definition of that
  * name; otherwise the call is dropped and counted as ambiguous/unresolved
  * (precision over recall).
+ *
+ * Per-file fault tolerance (XSPEC-334 R1a): each file's `collectExtraction`
+ * runs in its own try/catch. A file that throws (rare — tree-sitter recovers
+ * from malformed source without throwing; this catches genuine failures like
+ * an unreadable-encoding edge case) is recorded as `failed` in `parseHealth`
+ * and skipped, and every OTHER file is still indexed — a single bad file no
+ * longer aborts the whole index run (which is what happened before: the old
+ * `files.map(collectExtraction)` let one throw propagate out of the batch).
  */
 export function extractProject(files: ProjectFile[]): ProjectExtraction {
-  const extractions = files.map((f) =>
-    collectExtraction(f.source, { filePath: f.path, language: f.language }),
-  );
+  const parseHealth: FileParseHealth[] = [];
+  // `extractions` and `okFiles` are kept parallel (same length/order): files
+  // that threw are recorded in parseHealth and excluded from BOTH, so the
+  // cross-file resolution below only ever sees successfully-parsed files.
+  const extractions: Extraction[] = [];
+  const okFiles: ProjectFile[] = [];
+  for (const f of files) {
+    const language = f.language ?? detectLanguage(f.path);
+    try {
+      const ex = collectExtraction(f.source, { filePath: f.path, language: f.language });
+      extractions.push(ex);
+      okFiles.push(f);
+      parseHealth.push({
+        path: toPosixPath(f.path),
+        language,
+        errorNodes: ex.errorNodes,
+        errorExtent: ex.errorExtent,
+        sourceExtent: ex.sourceExtent,
+        functions: ex.nodes.reduce((n, node) => n + (node.label === "Function" ? 1 : 0), 0),
+        classes: ex.nodes.reduce((n, node) => n + (node.label === "Class" ? 1 : 0), 0),
+      });
+    } catch (err) {
+      // `failed` is best-effort truncated (not source text by design, but
+      // `err.message` comes from arbitrary downstream code — truncating caps a
+      // pathological message and shrinks the surface for any accidental source
+      // leak; see FileParseHealth.failed's doc). `f.source.length` is guarded
+      // because a non-string source (the very thing that made parse throw) has
+      // no `.length` number.
+      const message = err instanceof Error ? err.message : String(err);
+      parseHealth.push({
+        path: toPosixPath(f.path),
+        language,
+        errorNodes: 0,
+        errorExtent: 0,
+        sourceExtent: typeof f.source === "string" ? f.source.length : 0,
+        functions: 0,
+        classes: 0,
+        failed: message.slice(0, 200),
+      });
+    }
+  }
 
   const nodes: GraphNode[] = [];
   const defines: GraphEdge[] = [];
@@ -552,11 +618,17 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
 
   for (let i = 0; i < extractions.length; i++) {
     const ex = extractions[i]!;
-    const file = files[i]!.path;
+    const file = okFiles[i]!.path;
     nodes.push(...ex.nodes);
     defines.push(...ex.defines);
     implementsEdges.push(...ex.implementsEdges);
-    localByFile.set(file, ex.names);
+    // Key by the POSIX-normalized path: `RawCall.file` below is built from
+    // `collectExtraction`'s already-normalized `filePath` (XSPEC-333 path
+    // normalization), so a raw `okFiles[i].path` key (`src\a.ts` on Windows)
+    // would never match the `src/a.ts` lookup — silently demoting every
+    // same-file resolution to cross-file (wrong tier) or dropping it as
+    // ambiguous. Pre-existing gap, fixed here while this loop is being touched.
+    localByFile.set(toPosixPath(file), ex.names);
     for (const [name, id] of ex.names) {
       let ids = globalIndex.get(name);
       if (!ids) {
@@ -609,5 +681,6 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
     implements: implementsEdges.length,
     ambiguous,
     unresolved,
+    parseHealth,
   };
 }

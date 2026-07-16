@@ -6,8 +6,9 @@
  */
 
 import { existsSync, readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
+import pkg from "../../package.json" with { type: "json" };
 import type { GraphConnection } from "../graph-db/connection.js";
 import { clearGraph } from "../graph-db/schema.js";
 import { writeFragment } from "../graph-db/writer.js";
@@ -27,7 +28,18 @@ import { ingestScipIndex, type ScipIngestStats, type ScipSourceFile } from "../c
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType, topByConfidence, type ConfidenceLabel } from "../sage/index.js";
 import { godNodes, communities, related, type GodNode, type CommunityMember, type RelatedNode } from "../structural-memory/index.js";
+import {
+  diffRuns,
+  manifestPathForDb,
+  readManifest,
+  summarize,
+  upsertRun,
+  writeManifest,
+  type ParseHealthSummary,
+} from "../code-graph/parse-manifest.js";
 import { walkFiles } from "./walk.js";
+
+const EGR_VERSION = (pkg as { version: string }).version;
 
 const CODE_EXTS = [
   ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".cs",
@@ -41,6 +53,15 @@ export interface IndexResultSummary {
   knowledge?: { specs: number; decisions: number; impacts: number; supersedes: number; relates: number };
   /** Present only when `--scip` was given. See {@link ingestScipOverlay}. */
   scip?: ScipIngestStats & { documentsInIndex: number; filesMatched: number };
+  /**
+   * Parse-health rollup (XSPEC-334 R1b/R1d): the coarse clean/partial/failed
+   * counts derived from this run's per-file health, plus the healed/regressed
+   * file lists vs. the previous manifest. The bulky per-file array itself is
+   * NOT surfaced here — it lives in the on-disk manifest (see
+   * `parse-manifest.ts`); this is the compact summary a CLI line / JSON
+   * consumer wants. Present on every index run.
+   */
+  parseHealth?: ParseHealthSummary & { healed: string[]; regressed: string[] };
 }
 
 /**
@@ -256,12 +277,26 @@ export async function ingestScipOverlay(
  */
 export async function cmdIndex(
   conn: GraphConnection,
-  opts: { dir: string; docs?: boolean; clean?: boolean; scip?: string },
+  opts: { dir: string; docs?: boolean; clean?: boolean; scip?: string; manifestPath?: string },
 ): Promise<IndexResultSummary> {
   if (opts.clean) await clearGraph(conn); // drop existing data so deleted nodes are pruned
   if (opts.scip) await assertCallsSchemaHasProvenanceColumns(conn);
   const codeFiles = walkFiles(opts.dir, CODE_EXTS);
-  const code = await indexProject(conn, codeFiles); // { files, functions, classes, calls, ambiguous, unresolved }
+
+  // Read the PREVIOUS manifest before this run rewrites this dir's section, so
+  // R1d can diff which files healed/regressed. Keyed by ABSOLUTE index root so
+  // a shared DB indexed from several dirs (dev-platform's index-all.sh) diffs
+  // each dir only against its own prior section — see parse-manifest.ts's
+  // module doc for why a flat file list would break here. Null on a first
+  // index / when no manifest path is supplied (e.g. a bare-connection test).
+  const prevManifest = opts.manifestPath ? readManifest(opts.manifestPath) : null;
+  const root = resolve(opts.dir);
+  const prevRun = prevManifest?.runs[root] ?? null;
+
+  // `parseHealth` (the bulky per-file array) is split off here: it feeds the
+  // on-disk manifest, while `code` (the 7 numeric counts) is what the compact
+  // summary surfaces — keeping the per-file array out of `--json` output.
+  const { parseHealth, ...code } = await indexProject(conn, codeFiles);
   const result: IndexResultSummary = { code };
   if (opts.docs) {
     const docs = walkFiles(opts.dir, [".md"]).map((f) => ({ content: f.source, fallbackId: f.path }));
@@ -270,6 +305,26 @@ export async function cmdIndex(
   if (opts.scip) {
     result.scip = await ingestScipOverlay(conn, opts.dir, opts.scip, codeFiles);
   }
+
+  // Parse-health manifest (XSPEC-334 R1b/R1d): replace ONLY this root's section
+  // (preserving other roots), and diff against this root's previous section.
+  // A manifest-write failure (disk full / read-only dir) is surfaced on stderr
+  // but does NOT fail the index — the graph is already written, and observability
+  // failing must not undo a successful index (same spirit as R1a's per-file
+  // tolerance). The summary/diff are still computed when no manifestPath is
+  // given, so programmatic/test callers get the counts without a file.
+  const nextManifest = upsertRun(prevManifest, root, new Date().toISOString(), parseHealth, EGR_VERSION);
+  if (opts.manifestPath) {
+    try {
+      writeManifest(opts.manifestPath, nextManifest);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[egr] warning: parse-health manifest not written (${msg}); the index itself succeeded\n`);
+    }
+  }
+  const { healed, regressed } = diffRuns(prevRun?.files ?? null, parseHealth);
+  result.parseHealth = { ...summarize(parseHealth), healed, regressed };
+
   return result;
 }
 
@@ -366,6 +421,10 @@ export function cmdGc(opts: { cwd?: string; dryRun?: boolean }): GcResult {
     for (const f of orphans) {
       rmSync(join(dir, f), { recursive: true, force: true });
       rmSync(join(dir, `${f}.wal`), { recursive: true, force: true });
+      // Also remove the per-branch parse-health manifest sibling (XSPEC-334
+      // R1b) — a new sibling file class gc must learn to clean, else it leaks
+      // one `<branch>.parse-manifest.json` per deleted branch forever.
+      rmSync(join(dir, manifestPathForDb(f)), { force: true });
     }
   }
   return { dir, orphans, deleted: !opts.dryRun && orphans.length > 0 };

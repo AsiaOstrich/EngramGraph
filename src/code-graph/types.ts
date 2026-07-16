@@ -6,6 +6,8 @@
  * extractor/indexer surface.
  */
 
+import type { FileParseHealth } from "./parse-health.js";
+
 /** Languages the extractor can parse with the bundled tree-sitter grammars. */
 export type SupportedLanguage =
   | "typescript"
@@ -73,4 +75,6 @@ export interface ProjectIndexResult {
   ambiguous: number;
   /** Calls whose callee name matched no known function (skipped). */
   unresolved: number;
+  /** Per-file raw parse-health, one entry per input file (XSPEC-334 R1b). */
+  parseHealth: FileParseHealth[];
 }

@@ -17,6 +17,7 @@ import { startMcpStdio } from "../mcp/serve-stdio.js";
 import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, type GcResult } from "./run.js";
 import type { ConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
+import { manifestPathForDb } from "../code-graph/parse-manifest.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
 
@@ -169,7 +170,10 @@ async function main(): Promise<void> {
   switch (cmd) {
     case "index": {
       if (!a1) throw new Error("index requires a <dir>");
-      const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean, scip: values.scip });
+      // The parse-health manifest (XSPEC-334 R1b) lives beside this graph's DB
+      // file; derive its path from the same resolution the connection used.
+      const manifestPath = manifestPathForDb(resolveDbPath(loc));
+      const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean, scip: values.scip, manifestPath });
       out(r, values.json, (d) => {
         const s = d as Awaited<ReturnType<typeof cmdIndex>>;
         const k = s.knowledge ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relates} relates` : "";
@@ -205,7 +209,17 @@ async function main(): Promise<void> {
             `${s.scip.callsEmitted} calls emitted (${s.scip.callsSkippedNoEnclosingCaller} skipped: no enclosing caller, ` +
             `${s.scip.callsSkippedUnresolvedTarget} skipped: unresolved target)${scipWarning}`
           : "";
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${scip}`;
+        // Parse-health line (XSPEC-334 R1b/R1d): the clean/partial/failed
+        // rollup makes silent partial parses visible, and the healed/regressed
+        // delta (present when a previous manifest existed) surfaces what a
+        // grammar/egr upgrade fixed or broke since the last index.
+        const ph = s.parseHealth;
+        const delta =
+          ph && (ph.healed.length > 0 || ph.regressed.length > 0)
+            ? ` (healed ${ph.healed.length}, regressed ${ph.regressed.length} since last index)`
+            : "";
+        const parse = ph ? `\nparse: ${ph.clean} clean, ${ph.partial} partial, ${ph.failed} failed${delta}` : "";
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${scip}${parse}`;
       });
       break;
     }

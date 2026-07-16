@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -105,6 +105,27 @@ describe("cmdGc (SPEC-245 AC-4)", () => {
 
       const after = cmdGc({ cwd: repo, dryRun: true });
       expect(after.orphans).toEqual([]); // orphan gone, live kept
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("also removes an orphan branch's parse-health manifest sibling (XSPEC-334 R1b)", () => {
+    const repo = initRepo();
+    try {
+      git(repo, ["commit", "--allow-empty", "-m", "init"]);
+      const egrDir = join(repo, ".git", "engram");
+      mkdirSync(egrDir, { recursive: true });
+      const orphan = `${sanitizeBranch("deleted-branch")}.db`;
+      const orphanManifest = `${sanitizeBranch("deleted-branch")}.parse-manifest.json`;
+      writeFileSync(join(egrDir, orphan), "x");
+      writeFileSync(join(egrDir, orphan + ".wal"), "x");
+      writeFileSync(join(egrDir, orphanManifest), "{}");
+
+      cmdGc({ cwd: repo, dryRun: false });
+
+      expect(existsSync(join(egrDir, orphan))).toBe(false);
+      expect(existsSync(join(egrDir, orphanManifest))).toBe(false); // manifest cleaned too
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
