@@ -11,13 +11,16 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { openGraph, resolveDbPath } from "../graph-db/open.js";
+import { manifestPathForDb } from "../code-graph/parse-manifest.js";
 import { createMcpServer } from "./server.js";
 
 export async function startMcpStdio(dbPath?: string): Promise<void> {
   const path = resolveDbPath(dbPath ?? {});
   process.stderr.write(`egr-mcp: graph ${path}\n`);
   const conn = await openGraph(path);
-  const server = createMcpServer(conn);
+  // Parse-health manifest sibling (R2): lets code queries flag answers built
+  // on partially-parsed files. Absent manifest → queries behave as pre-R2.
+  const server = createMcpServer(conn, { manifestPath: manifestPathForDb(path) });
   await server.connect(new StdioServerTransport());
   // Stays alive on stdio; the connection is never closed (teardown caveat).
 }

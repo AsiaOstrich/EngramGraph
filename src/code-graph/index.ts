@@ -1,7 +1,8 @@
 export { extractCodeGraph, extractProject } from "./extractor.js";
 export type { Extraction, ProjectExtraction, RawCall } from "./extractor.js";
 export { indexFile, indexProject } from "./indexer.js";
-export { callers, callees, callChain, implementers, implementedSpecs } from "./query.js";
+export { computeIndexHealth, readIndexHealth, type IndexHealth } from "./index-health.js";
+export { callers, callees, callChain, definitionFiles, implementers, implementedSpecs } from "./query.js";
 export type {
   CallDirection,
   CallNode,

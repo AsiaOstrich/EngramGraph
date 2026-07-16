@@ -29,7 +29,9 @@ import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js"
 import { applyFeedback, feedbackForEventType, topByConfidence, type ConfidenceLabel } from "../sage/index.js";
 import { godNodes, communities, related, type GodNode, type CommunityMember, type RelatedNode } from "../structural-memory/index.js";
 import {
+  allFiles,
   diffRuns,
+  isHealthy,
   manifestPathForDb,
   readManifest,
   summarize,
@@ -292,6 +294,12 @@ export async function cmdIndex(
   const prevManifest = opts.manifestPath ? readManifest(opts.manifestPath) : null;
   const root = resolve(opts.dir);
   const prevRun = prevManifest?.runs[root] ?? null;
+  // `--clean` drops the WHOLE graph (clearGraph above), then rebuilds only this
+  // dir — so the manifest must likewise drop every OTHER root's section, else
+  // indexHealth (R2) would keep counting/warning about files from roots that
+  // are no longer in the graph (zombie sections). Rebuild the manifest from
+  // scratch on clean (this root's prevRun is still kept for the healed diff).
+  const upsertBase = opts.clean ? null : prevManifest;
 
   // `parseHealth` (the bulky per-file array) is split off here: it feeds the
   // on-disk manifest, while `code` (the 7 numeric counts) is what the compact
@@ -313,7 +321,7 @@ export async function cmdIndex(
   // failing must not undo a successful index (same spirit as R1a's per-file
   // tolerance). The summary/diff are still computed when no manifestPath is
   // given, so programmatic/test callers get the counts without a file.
-  const nextManifest = upsertRun(prevManifest, root, new Date().toISOString(), parseHealth, EGR_VERSION);
+  const nextManifest = upsertRun(upsertBase, root, new Date().toISOString(), parseHealth, EGR_VERSION);
   if (opts.manifestPath) {
     try {
       writeManifest(opts.manifestPath, nextManifest);
@@ -390,6 +398,44 @@ export function cmdCommunities(conn: GraphConnection): Promise<CommunityMember[]
 /** `egr related <node-id> [--depth N] [--limit N]` — seed-anchored ranking (DEC-028 L4a). */
 export function cmdRelated(conn: GraphConnection, seedId: string, depth = 2, limit = 10): Promise<RelatedNode[]> {
   return related(conn, seedId, depth, limit);
+}
+
+/** One blindspot file (a file that parsed partially or failed). */
+export interface Blindspot {
+  path: string;
+  language: string;
+  /** Top-most ERROR/MISSING nodes; 0 when the file threw (see `failed`). */
+  errorNodes: number;
+  /** True when parsing threw entirely (the file contributed nothing). */
+  failed: boolean;
+}
+
+export interface BlindspotsResult {
+  filesIndexed: number;
+  partial: number;
+  failed: number;
+  /** Every unhealthy file, worst-first (failed before partial, then by errorNodes desc). */
+  blindspots: Blindspot[];
+}
+
+/**
+ * `egr blindspots` (XSPEC-334 R2b) — a VIEW over the parse-health manifest
+ * (R1b), listing every file that parsed partially or failed. The manifest is
+ * the single source of truth; this is not a second store. Returns empty when
+ * no manifest exists (nothing indexed yet with a manifest-writing egr).
+ */
+export function cmdBlindspots(manifestPath: string): BlindspotsResult {
+  const manifest = readManifest(manifestPath);
+  if (!manifest) return { filesIndexed: 0, partial: 0, failed: 0, blindspots: [] };
+  const files = allFiles(manifest);
+  const unhealthy = files.filter((f) => !isHealthy(f));
+  let partial = 0;
+  let failed = 0;
+  for (const f of unhealthy) (f.failed !== undefined ? failed++ : partial++);
+  const blindspots: Blindspot[] = unhealthy
+    .map((f) => ({ path: f.path, language: f.language, errorNodes: f.errorNodes, failed: f.failed !== undefined }))
+    .sort((a, b) => Number(b.failed) - Number(a.failed) || b.errorNodes - a.errorNodes || a.path.localeCompare(b.path));
+  return { filesIndexed: files.length, partial, failed, blindspots };
 }
 
 export interface GcResult {

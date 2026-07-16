@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { extractProject, parserFor } from "../src/code-graph/extractor.js";
 import { measureErrorSpan, type FileParseHealth } from "../src/code-graph/parse-health.js";
@@ -233,5 +233,16 @@ describe("cmdIndex manifest write + healing diff (R1b/R1d)", () => {
     expect(Object.keys(m.runs).length).toBeGreaterThanOrEqual(2);
     expect(allFiles(m).some((f) => f.path === "c.ts")).toBe(true); // new dir indexed
     expect(allFiles(m).some((f) => f.path === "a.ts")).toBe(true); // first dir survived
+  });
+
+  it("--clean drops other roots' manifest sections (no zombie health)", async () => {
+    // At this point the manifest has >=2 roots (src, repo2). A --clean rebuild
+    // of src drops the whole graph, so the manifest must drop repo2's section
+    // too — else indexHealth would count/warn about repo2 files no longer in
+    // the graph.
+    await cmdIndex(conn, { dir: src, manifestPath, clean: true });
+    const m = readManifest(manifestPath)!;
+    expect(Object.keys(m.runs)).toEqual([resolve(src)]);
+    expect(allFiles(m).some((f) => f.path === "c.ts")).toBe(false); // repo2 section gone
   });
 });

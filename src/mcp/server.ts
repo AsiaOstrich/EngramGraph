@@ -13,11 +13,17 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import pkg from "../../package.json" with { type: "json" };
 import type { GraphConnection } from "../graph-db/connection.js";
-import { indexProject, callChain, implementers, implementedSpecs } from "../code-graph/index.js";
+import { indexProject, callChain, definitionFiles, implementers, implementedSpecs, readIndexHealth } from "../code-graph/index.js";
+import { readManifest, upsertRun, writeManifest } from "../code-graph/parse-manifest.js";
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType } from "../sage/index.js";
 import { related } from "../structural-memory/index.js";
+
+/** Sentinel manifest root for MCP-side `index_code` (R2). See its use below. */
+const MCP_INDEX_ROOT = "mcp:index_code";
+const EGR_VERSION = (pkg as { version: string }).version;
 
 const ok = (data: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -31,9 +37,16 @@ const fail = (message: string) => ({
  * Register EngramGraph's tools on an MCP server backed by a graph connection.
  * The connection is long-lived (caller owns its lifecycle); never closed
  * per-call (ryugraph+tree-sitter teardown caveat).
+ *
+ * `opts.manifestPath` (XSPEC-334 R2) is the graph's parse-health manifest
+ * sibling — when given, code queries attach an `indexHealth` field warning the
+ * querier that the answer may be built on partially-parsed files (see
+ * `index-health.ts`). Omitting it disables the surfacing (queries behave
+ * exactly as before R2).
  */
-export function createMcpServer(conn: GraphConnection): McpServer {
+export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: string } = {}): McpServer {
   const server = new McpServer({ name: "engramgraph", version: "0.1.0" });
+  const manifestPath = opts.manifestPath;
 
   server.registerTool(
     "index_code",
@@ -47,14 +60,25 @@ export function createMcpServer(conn: GraphConnection): McpServer {
     },
     async ({ files }) => {
       try {
-        // Drop the per-file `parseHealth` array (XSPEC-334 R1b) from the MCP
-        // tool result: surfacing index health to MCP consumers is R2's job (a
-        // compact `indexHealth` field + `possiblyIncomplete` on QUERY
-        // responses), so the index_code response shape stays unchanged until
-        // that lands rather than shipping the raw array as an unstable interim
-        // surface. The manifest is still the SSOT; the CLI still writes it.
+        // The per-file `parseHealth` array is not returned in the tool result
+        // (that stays the pre-R2 shape — health is surfaced on QUERY responses
+        // as the compact `indexHealth`, not on index_code). But it IS written
+        // to the manifest under a sentinel root (R2): otherwise a long-running
+        // server would keep warning about blindspots the agent already fixed
+        // via index_code (false positive → warning fatigue) and miss new
+        // failures (false negative) — the served health would drift from the
+        // graph it describes. Known limitation: successive index_code batches
+        // replace this one section (one MCP "project" tracked at a time).
+        // Best-effort — a manifest-write failure must not fail the index.
         const { parseHealth, ...res } = await indexProject(conn, files);
-        void parseHealth;
+        if (manifestPath) {
+          try {
+            const next = upsertRun(readManifest(manifestPath), MCP_INDEX_ROOT, new Date().toISOString(), parseHealth, EGR_VERSION);
+            writeManifest(manifestPath, next);
+          } catch {
+            // observability write failure must not undo a successful index
+          }
+        }
         return ok(res);
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
@@ -95,7 +119,21 @@ export function createMcpServer(conn: GraphConnection): McpServer {
     },
     async ({ symbol, direction, depth }) => {
       try {
-        return ok(await callChain(conn, symbol, direction ?? "both", depth ?? 1));
+        const result = await callChain(conn, symbol, direction ?? "both", depth ?? 1);
+        // Coarse index-health (R2). The anchor set for the blindspot match is
+        // the queried symbol's OWN definition file(s) PLUS the result files —
+        // critically including the def file(s), because the flagship case is an
+        // EMPTY result ("nothing calls foo, safe to delete") which has no
+        // result files: without the def-file anchor that highest-risk answer
+        // would carry no warning even when foo's neighborhood has unparsed
+        // files. See `definitionFiles`' doc.
+        const anchor = [
+          ...(await definitionFiles(conn, symbol)),
+          ...result.callers.map((n) => n.file),
+          ...result.callees.map((n) => n.file),
+        ];
+        const health = readIndexHealth(manifestPath, anchor);
+        return ok(health ? { ...result, indexHealth: health } : result);
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }
@@ -162,7 +200,9 @@ export function createMcpServer(conn: GraphConnection): McpServer {
     },
     async ({ specId }) => {
       try {
-        return ok(await implementers(conn, specId));
+        const result = await implementers(conn, specId);
+        const health = readIndexHealth(manifestPath, result.modules.map((m) => m.module));
+        return ok(health ? { ...result, indexHealth: health } : result);
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }
@@ -181,7 +221,10 @@ export function createMcpServer(conn: GraphConnection): McpServer {
     },
     async ({ moduleId }) => {
       try {
-        return ok(await implementedSpecs(conn, moduleId));
+        const result = await implementedSpecs(conn, moduleId);
+        // The queried file itself is the relevant "result file" here.
+        const health = readIndexHealth(manifestPath, [result.module]);
+        return ok(health ? { ...result, indexHealth: health } : result);
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }

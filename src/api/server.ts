@@ -12,6 +12,12 @@ export interface ServerOptions {
    * (self-contained) health route is mounted — graph routes need a live DB.
    */
   connection?: GraphConnection;
+  /**
+   * Path to the graph's parse-health manifest (XSPEC-334 R2). When given,
+   * query routes attach `indexHealth` on a graph with blindspots. Omitting it
+   * disables the surfacing (routes behave exactly as pre-R2).
+   */
+  manifestPath?: string;
 }
 
 /**
@@ -29,7 +35,7 @@ export function createServer(options: ServerOptions = {}): Hono {
   if (options.connection) {
     app.route("/", impactRoute(options.connection));
     app.route("/", ingestRoute(options.connection));
-    app.route("/", callChainRoute(options.connection));
+    app.route("/", callChainRoute(options.connection, options.manifestPath));
   }
 
   return app;

@@ -14,9 +14,10 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, type GcResult } from "./run.js";
+import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, cmdBlindspots, type GcResult, type BlindspotsResult } from "./run.js";
 import type { ConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
+import { readIndexHealth, definitionFiles, type IndexHealth } from "../code-graph/index.js";
 import { manifestPathForDb } from "../code-graph/parse-manifest.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
@@ -51,6 +52,9 @@ Commands:
   related <node-id> [--depth N] [--limit N]
                                   Nodes important *around* a seed (seeded PageRank approx.)
   gc [--dry-run]                  Remove per-branch graphs for deleted branches
+  blindspots                      Files that parsed partially or failed (from
+                                  the parse-health manifest) — where the graph
+                                  may be missing nodes/edges
   serve [--port 3000]             Run the REST server (routes under /graph/*)
   mcp                             Run the MCP server over stdio (for coding assistants)
 
@@ -88,6 +92,18 @@ const fmtNodes = (
         })
         .join("\n")
     : "  (none)";
+
+/**
+ * A human-facing "⚠ possibly incomplete" line for a query whose result sits
+ * near blindspot files (XSPEC-334 R2). Uses `blindspotsTotal` (the true count),
+ * never the possibly-truncated `blindspots` list length. Empty when the graph
+ * is healthy or the result touches no blindspot subtree.
+ */
+function healthNote(h: IndexHealth | null): string {
+  if (!h?.possiblyIncomplete) return "";
+  const n = h.blindspotsTotal ?? h.blindspots?.length ?? 0;
+  return `\n⚠ possibly incomplete: ${n} file(s) near this result parsed partially/failed (see \`egr blindspots\`)`;
+}
 
 async function main(): Promise<void> {
   const { values, positionals } = parseArgs({
@@ -139,11 +155,30 @@ async function main(): Promise<void> {
     return;
   }
 
+  // blindspots reads the parse-health manifest, not a graph connection.
+  if (cmd === "blindspots") {
+    const r = cmdBlindspots(manifestPathForDb(resolveDbPath(loc)));
+    out(r, values.json, (d) => {
+      const b = d as BlindspotsResult;
+      if (b.blindspots.length === 0) {
+        return b.filesIndexed === 0
+          ? "blindspots: no parse-health manifest yet (run `egr index <dir>` first)"
+          : `blindspots: none — all ${b.filesIndexed} indexed files parsed cleanly`;
+      }
+      const head = `blindspots: ${b.blindspots.length} of ${b.filesIndexed} files (${b.partial} partial, ${b.failed} failed) — the graph may be missing nodes/edges here:`;
+      const body = b.blindspots
+        .map((f) => `  ${f.path} [${f.language}] ${f.failed ? "FAILED" : `partial (${f.errorNodes} error node${f.errorNodes === 1 ? "" : "s"})`}`)
+        .join("\n");
+      return `${head}\n${body}`;
+    });
+    return;
+  }
+
   // Long-running commands manage their own lifecycle (no exit).
   if (cmd === "mcp") return startMcpStdio(resolveDbPath(loc));
   if (cmd === "serve") {
     const conn = await openGraph(loc);
-    const app = createServer({ connection: conn });
+    const app = createServer({ connection: conn, manifestPath: manifestPathForDb(resolveDbPath(loc)) });
     const port = num(values.port, 3000);
     createHttpServer(async (req, res) => {
       const url = `http://${req.headers.host ?? "localhost"}${req.url ?? "/"}`;
@@ -227,19 +262,28 @@ async function main(): Promise<void> {
     case "callees": {
       if (!a1) throw new Error(`${cmd} requires a <symbol>`);
       const rows = cmd === "callers" ? await cmdCallers(conn, a1, num(values.depth, 1)) : await cmdCallees(conn, a1, num(values.depth, 1));
-      out(rows, values.json, (d) => `${cmd}(${a1}):\n${fmtNodes(d as Array<{ name: string; file: string }>)}`);
+      // Coarse index-health note (R2): warn a human reader when blindspot files
+      // sit near this result — most pointed for `callers` ("nothing calls X,
+      // safe to delete" is wrong if X's caller lives in an unparsed file). The
+      // anchor includes X's OWN definition file(s) so an EMPTY result (the
+      // highest-risk answer) still gets the check. --json stays a bare array
+      // (its established shape); `egr blindspots` is the machine-readable surface.
+      const anchor = [...(await definitionFiles(conn, a1)), ...rows.map((r) => r.file)];
+      const health = readIndexHealth(manifestPathForDb(resolveDbPath(loc)), anchor);
+      out(rows, values.json, (d) => `${cmd}(${a1}):\n${fmtNodes(d as Array<{ name: string; file: string }>)}${healthNote(health)}`);
       break;
     }
     case "implementers": {
       if (!a1) throw new Error("implementers requires a <spec-id>");
       const r = await cmdImplementers(conn, a1);
+      const health = readIndexHealth(manifestPathForDb(resolveDbPath(loc)), r.modules.map((m) => m.module));
       out(r, values.json, (d) => {
         const res = d as Awaited<ReturnType<typeof cmdImplementers>>;
         const head = `implementers(${res.spec})${res.title ? ` — ${res.title}` : ""}:`;
         const body = res.modules.length
           ? res.modules.map((m) => `  ${m.module}${m.functions.length ? ` (${m.functions.join(", ")})` : ""}`).join("\n")
           : "  (none)";
-        return `${head}\n${body}`;
+        return `${head}\n${body}${healthNote(health)}`;
       });
       break;
     }
@@ -251,9 +295,10 @@ async function main(): Promise<void> {
       // still matches on a Windows shell where that's the natural way to
       // type a path.
       const r = await cmdImplementedSpecs(conn, toPosixPath(a1));
+      const health = readIndexHealth(manifestPathForDb(resolveDbPath(loc)), [r.module]);
       out(r, values.json, (d) => {
         const res = d as Awaited<ReturnType<typeof cmdImplementedSpecs>>;
-        return `implemented-by(${res.module}):\n${res.specs.length ? res.specs.map((s) => `  ${s.id}${s.title ? ` — ${s.title}` : ""}`).join("\n") : "  (none)"}`;
+        return `implemented-by(${res.module}):\n${res.specs.length ? res.specs.map((s) => `  ${s.id}${s.title ? ` — ${s.title}` : ""}`).join("\n") : "  (none)"}${healthNote(health)}`;
       });
       break;
     }

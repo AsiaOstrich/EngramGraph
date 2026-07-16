@@ -70,6 +70,24 @@ export async function callees(
   return toNodes(rows);
 }
 
+/**
+ * Files that define a Function named `name` (XSPEC-334 R2 query anchor).
+ *
+ * A symbol's callers most often live in — or in a sibling of — the symbol's
+ * OWN definition file, so this anchors the coarse index-health blindspot match
+ * even when the caller/callee result set is EMPTY. That empty case is exactly
+ * the highest-risk answer ("nothing calls foo, safe to delete") and, without
+ * this anchor, would carry no blindspot signal at all (an empty result has no
+ * result files to match against). Cheap: one indexed lookup by name.
+ */
+export async function definitionFiles(conn: GraphConnection, name: string): Promise<string[]> {
+  const rows = await conn.query(
+    `MATCH (f:Function {name: $name}) RETURN DISTINCT f.file AS file`,
+    { name },
+  );
+  return rows.map((r) => String(r.file)).filter((f) => f && f !== "null");
+}
+
 /** Combined call chain for a symbol. */
 export async function callChain(
   conn: GraphConnection,

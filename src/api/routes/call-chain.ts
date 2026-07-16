@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 
 import type { GraphConnection } from "../../graph-db/connection.js";
-import { callChain, type CallDirection } from "../../code-graph/query.js";
+import { callChain, definitionFiles, type CallDirection } from "../../code-graph/query.js";
+import { readIndexHealth } from "../../code-graph/index-health.js";
 
 const DIRECTIONS: ReadonlySet<string> = new Set(["callers", "callees", "both"]);
 
@@ -9,9 +10,11 @@ const DIRECTIONS: ReadonlySet<string> = new Set(["callers", "callees", "both"]);
  * Call-chain route.
  *
  * `POST /graph/call-chain { symbol, direction?, depth? }` returns the callers
- * and/or callees of a function symbol.
+ * and/or callees of a function symbol. When `manifestPath` is given (XSPEC-334
+ * R2) the response carries an `indexHealth` field on a graph with blindspots —
+ * mirroring the MCP tool, so a REST querier gets the same completeness signal.
  */
-export function callChainRoute(conn: GraphConnection): Hono {
+export function callChainRoute(conn: GraphConnection, manifestPath?: string): Hono {
   const app = new Hono();
 
   app.post("/graph/call-chain", async (c) => {
@@ -34,7 +37,13 @@ export function callChainRoute(conn: GraphConnection): Hono {
 
     try {
       const result = await callChain(conn, symbol, direction, depth);
-      return c.json(result, 200);
+      const anchor = [
+        ...(await definitionFiles(conn, symbol)),
+        ...result.callers.map((n) => n.file),
+        ...result.callees.map((n) => n.file),
+      ];
+      const health = readIndexHealth(manifestPath, anchor);
+      return c.json(health ? { ...result, indexHealth: health } : result, 200);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 500);

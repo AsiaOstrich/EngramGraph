@@ -176,13 +176,32 @@ export function upsertRun(
 
 /** Every file across every root's section — the whole-graph view (R2 SSOT). */
 export function allFiles(manifest: ParseManifest): FileParseHealth[] {
-  return Object.values(manifest.runs).flatMap((r) => r.files);
+  // Defensive `?? {}`: a manifest from an older egr / hand-edited file may lack
+  // `runs`; `readManifest` already rejects those, but a bare `Object.values`
+  // on `undefined` would throw and take a *query* down with it (R2 reads this
+  // on every query) — the same "observability must not break the real op"
+  // rule cmdIndex follows for manifest writes.
+  return Object.values(manifest.runs ?? {}).flatMap((r) => r.files ?? []);
 }
 
-/** Read a manifest, or `null` if absent/unreadable (a first index has none). */
+/**
+ * Read a manifest, or `null` if absent/unreadable/malformed (a first index has
+ * none). Validates the shape (`runs` must be an object) so a syntactically
+ * valid but structurally wrong JSON — `{}`, `[]`, a pre-`runs` manifest — is
+ * treated as "no manifest" rather than crashing a downstream `allFiles`.
+ */
 export function readManifest(path: string): ParseManifest | null {
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as ParseManifest;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      typeof (parsed as { runs?: unknown }).runs !== "object" ||
+      (parsed as { runs?: unknown }).runs === null
+    ) {
+      return null;
+    }
+    return parsed as ParseManifest;
   } catch {
     return null;
   }
