@@ -76,6 +76,14 @@ export interface FileParseHealth {
    * partial) parse.
    */
   failed?: string;
+  /**
+   * Parse-failure signatures for this file (XSPEC-334 R3a) — one per distinct
+   * ERROR/MISSING neighborhood shape, `<language>@<grammarVersion>:<hash>`.
+   * Present (non-empty) only on a partial parse; lets `egr signatures` bucket
+   * many files that hit the SAME grammar gap into one row. Structural node
+   * TYPES only, never source text (see `error-signature.ts`).
+   */
+  signatures?: string[];
 }
 
 /**

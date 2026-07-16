@@ -14,7 +14,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, cmdBlindspots, type GcResult, type BlindspotsResult } from "./run.js";
+import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, type GcResult, type BlindspotsResult, type SignaturesResult } from "./run.js";
 import type { ConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { readIndexHealth, definitionFiles, type IndexHealth } from "../code-graph/index.js";
@@ -55,6 +55,9 @@ Commands:
   blindspots                      Files that parsed partially or failed (from
                                   the parse-health manifest) — where the graph
                                   may be missing nodes/edges
+  signatures                      Partial-parse files grouped by failure
+                                  signature — one grammar gap = one bucket
+                                  (turns "48 files" into "2 failure types")
   serve [--port 3000]             Run the REST server (routes under /graph/*)
   mcp                             Run the MCP server over stdio (for coding assistants)
 
@@ -168,6 +171,32 @@ async function main(): Promise<void> {
       const head = `blindspots: ${b.blindspots.length} of ${b.filesIndexed} files (${b.partial} partial, ${b.failed} failed) — the graph may be missing nodes/edges here:`;
       const body = b.blindspots
         .map((f) => `  ${f.path} [${f.language}] ${f.failed ? "FAILED" : `partial (${f.errorNodes} error node${f.errorNodes === 1 ? "" : "s"})`}`)
+        .join("\n");
+      return `${head}\n${body}`;
+    });
+    return;
+  }
+
+  // signatures reads the parse-health manifest, not a graph connection.
+  if (cmd === "signatures") {
+    const mp = manifestPathForDb(resolveDbPath(loc));
+    const r = cmdSignatures(mp);
+    out(r, values.json, (d) => {
+      const s = d as SignaturesResult;
+      if (s.buckets.length === 0) {
+        // Empty buckets does NOT mean "all clean" — differentiate the cases so
+        // the message never contradicts `egr blindspots` (an older-egr manifest
+        // has partial files but no recorded signatures; a failed-only graph has
+        // blindspots but no signatures).
+        const b = cmdBlindspots(mp);
+        if (b.filesIndexed === 0) return "signatures: no parse-health manifest yet (run `egr index <dir>` first)";
+        if (b.partial > 0) return `signatures: ${b.partial} partial file(s) but no signatures recorded — this manifest predates signature support; re-run \`egr index\` to populate them`;
+        if (b.failed > 0) return `signatures: no partial-parse signatures; ${b.failed} file(s) failed to parse entirely (see \`egr blindspots\`)`;
+        return `signatures: none — all ${b.filesIndexed} indexed files parsed cleanly`;
+      }
+      const head = `signatures: ${s.buckets.length} distinct failure type(s) across ${s.filesWithSignatures} partial-parse file(s):`;
+      const body = s.buckets
+        .map((b) => `  [${b.fileCount}x] ${b.signature}\n${b.sampleFiles.map((f) => `      ${f}`).join("\n")}`)
         .join("\n");
       return `${head}\n${body}`;
     });

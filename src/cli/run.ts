@@ -418,6 +418,60 @@ export interface BlindspotsResult {
   blindspots: Blindspot[];
 }
 
+/** One parse-failure signature bucket (XSPEC-334 R3a). */
+export interface SignatureBucket {
+  signature: string;
+  language: string;
+  /** How many files hit this exact failure shape. */
+  fileCount: number;
+  /** A few example files (capped) — the full list is in the manifest. */
+  sampleFiles: string[];
+}
+
+export interface SignaturesResult {
+  /** Files that carry ≥1 signature (i.e. partial parses; failed files have none). */
+  filesWithSignatures: number;
+  /** Buckets, most-files-first — a single grammar gap collapses many files here. */
+  buckets: SignatureBucket[];
+}
+
+const SIGNATURE_SAMPLE_LIMIT = 5;
+
+/**
+ * `egr signatures` (XSPEC-334 R3a) — group the manifest's partial-parse files
+ * by failure signature, so one grammar gap that broke many files shows as ONE
+ * bucket ("N files, same shape") instead of N scattered blindspots. A VIEW
+ * over the manifest (R1b); the signatures themselves are structural node-type
+ * fingerprints, never source text (see `error-signature.ts`).
+ */
+export function cmdSignatures(manifestPath: string): SignaturesResult {
+  const manifest = readManifest(manifestPath);
+  if (!manifest) return { filesWithSignatures: 0, buckets: [] };
+  const bySig = new Map<string, { language: string; files: string[] }>();
+  let filesWithSignatures = 0;
+  for (const f of allFiles(manifest)) {
+    if (!f.signatures || f.signatures.length === 0) continue;
+    filesWithSignatures += 1;
+    for (const sig of f.signatures) {
+      let entry = bySig.get(sig);
+      if (!entry) {
+        entry = { language: f.language, files: [] };
+        bySig.set(sig, entry);
+      }
+      entry.files.push(f.path);
+    }
+  }
+  const buckets: SignatureBucket[] = [...bySig.entries()]
+    .map(([signature, e]) => ({
+      signature,
+      language: e.language,
+      fileCount: e.files.length,
+      sampleFiles: e.files.slice(0, SIGNATURE_SAMPLE_LIMIT),
+    }))
+    .sort((a, b) => b.fileCount - a.fileCount || a.signature.localeCompare(b.signature));
+  return { filesWithSignatures, buckets };
+}
+
 /**
  * `egr blindspots` (XSPEC-334 R2b) — a VIEW over the parse-health manifest
  * (R1b), listing every file that parsed partially or failed. The manifest is

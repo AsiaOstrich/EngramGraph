@@ -50,6 +50,7 @@ import { tagsQuerySourceFor } from "./queries/index.js";
 import { toPosixPath } from "./path-utils.js";
 import { collectComments, findEnclosingFunction, qualifyFunctions, runTagQuery } from "./tag-query-engine.js";
 import { measureErrorSpan, type FileParseHealth } from "./parse-health.js";
+import { errorSignatures } from "./error-signature.js";
 
 /**
  * Provenance stamp for every node this extractor produces (XSPEC-333 R1).
@@ -317,6 +318,8 @@ export interface Extraction {
   errorNodes: number;
   errorExtent: number;
   sourceExtent: number;
+  /** Parse-failure signatures for this file (XSPEC-334 R3a); `[]` when clean. */
+  signatures: string[];
 }
 
 /**
@@ -353,9 +356,12 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   // source — it recovers with ERROR/MISSING nodes and parses the rest — so
   // this is the one place that can see whether the parse was partial. Guarded
   // by `hasError` so a clean tree (the overwhelming majority) pays nothing.
-  const { errorNodes, errorExtent } = tree.rootNode.hasError
+  const hasError = tree.rootNode.hasError;
+  const { errorNodes, errorExtent } = hasError
     ? measureErrorSpan(tree.rootNode)
     : { errorNodes: 0, errorExtent: 0 };
+  // Parse-failure signatures (R3a) — bucket keys for `egr signatures`.
+  const signatures = hasError ? errorSignatures(tree.rootNode, language) : [];
 
   const moduleId = filePath;
 
@@ -479,7 +485,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     });
   }
 
-  return { nodes, defines, implementsEdges, rawCalls, names, errorNodes, errorExtent, sourceExtent: source.length };
+  return { nodes, defines, implementsEdges, rawCalls, names, errorNodes, errorExtent, sourceExtent: source.length, signatures };
 }
 
 /**
@@ -588,6 +594,9 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
         sourceExtent: ex.sourceExtent,
         functions: ex.nodes.reduce((n, node) => n + (node.label === "Function" ? 1 : 0), 0),
         classes: ex.nodes.reduce((n, node) => n + (node.label === "Class" ? 1 : 0), 0),
+        // Signatures only on a partial parse (R3a) — omitted on clean files to
+        // keep the manifest lean.
+        ...(ex.signatures.length > 0 ? { signatures: ex.signatures } : {}),
       });
     } catch (err) {
       // `failed` is best-effort truncated (not source text by design, but
