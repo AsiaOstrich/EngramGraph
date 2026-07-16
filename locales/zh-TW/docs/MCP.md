@@ -1,8 +1,8 @@
 ---
 source: docs/MCP.md
-source_version: 0.1.0
-translation_version: 0.1.0
-last_synced: 2026-05-30
+source_version: 0.7.0
+translation_version: 0.7.0
+last_synced: 2026-07-16
 status: complete
 ---
 
@@ -65,6 +65,9 @@ command/args/env 都一樣：
 | `call_chain` | `symbol`、`direction?`（`callers`\|`callees`\|`both`）、`depth?` | 誰呼叫某函式符號 / 被它呼叫。「改 X 會壞掉什麼？」 |
 | `impact_analysis` | `nodeId`、`maxHops?` | 某 spec 影響鏈中的決策（`IMPACTS` + 多跳 `SUPERSEDES`）。 |
 | `ingest_feedback` | `nodeId`、`type`、`nodeLabel?`（`Function`\|`Spec`\|`Decision`\|`Doc`）、`weight?` | 依回饋事件（`test_fail`/`test_pass`/`human_fix`）演化節點的 SAGE 信心度。 |
+| `implementers` | `specId` | 宣告 `// implements <specId>` 的檔案及其定義的函式。「哪些程式碼實作了這個 spec？」讀取 `IMPLEMENTS(Module→Spec)` + `DEFINES`。 |
+| `implemented_specs` | `moduleId` | 一個檔案宣告自己實作了哪些 spec。「這段程式碼受哪個 spec 規範？」`moduleId` 是該檔案被索引時的路徑。讀取 `IMPLEMENTS(Module→Spec)`。 |
+| `related` | `seedId`、`depth?`、`limit?` | 從某個種子 id 出發、結構上重要的節點（對所有邊型跑 seeded PageRank，橫跨 `Function`/`Spec`/`Module`/`Decision`）。「有什麼跟 X 相關？」 |
 
 每個工具都回傳一個 JSON 文字內容區塊；失敗時回傳 `error: <message>` 並帶 `isError: true`。
 

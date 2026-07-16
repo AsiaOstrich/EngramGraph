@@ -1,20 +1,25 @@
 #!/bin/sh
-# Pre-commit: catch root README.md gaining/losing a section without the
-# locale READMEs (locales/zh-TW, zh-CN) being kept in sync.
+# Pre-commit: catch a root doc gaining/losing a section without the
+# corresponding locale doc (locales/zh-TW, zh-CN) being kept in sync.
 #
 # 2026-07-16: both locale READMEs sat 7 minor versions and 3 root commits
 # stale (frontmatter last_synced 2026-05-30, source_version 0.1.0, vs
 # package.json 0.7.0) before anyone noticed — an entire "platform support
 # matrix" + "native-binary troubleshooting" section existed only in English
 # for months. The frontmatter sync-tracking fields already existed; nothing
-# ever checked them. This hook is that check.
+# ever checked them. Same audit also found docs/API.md's DDL summary (and
+# hence both its locale copies) had drifted from the real schema.ts — missing
+# the RELATES rel table and the Function/Class provider columns — and
+# docs/MCP.md was missing 3 of 8 real MCP tools in all three languages. This
+# hook only catches the cross-locale header-count symptom, not doc-vs-code
+# drift like that; see test/docs-sync.test.ts for the latter.
 #
-# Heuristic, not exhaustive: compares "#"/"##"/"###" header COUNT between the
-# staged root README.md and each locale README.md. Catches "root gained/lost
-# a whole section" (the actual failure mode above); does not catch in-place
-# section rewrites that keep the same header count. Deliberately not stricter
-# than that — this only fires when a real structural gap is introduced, not
-# on every prose-only edit to README.md.
+# Heuristic, not exhaustive: compares "#"/"##"/"###" header COUNT between each
+# staged root doc and its locale copy. Catches "root gained/lost a whole
+# section"; does not catch in-place content rewrites (e.g. a changed DDL
+# line) that keep the same header count. Deliberately not stricter than that
+# — this only fires when a real structural gap is introduced, not on every
+# prose-only edit.
 #
 # POSIX sh, not bash — this ecosystem has already been bitten once by a
 # pre-commit hook using a bash-4-only construct (mapfile) that silently
@@ -23,24 +28,27 @@
 # Bypass once (e.g. translation is coming in a follow-up commit):
 # `git commit --no-verify`.
 
-# Root README.md not staged this commit — nothing to check.
-if ! git diff --cached --name-only | grep -qx "README.md"; then
-  exit 0
-fi
-
-root_headers=$(git show :README.md | grep -c '^#')
-
 status=0
-for locale in locales/zh-TW/README.md locales/zh-CN/README.md; do
-  if ! git cat-file -e ":$locale" 2>/dev/null; then
-    continue # locale file doesn't exist in the index; not this hook's concern
+
+for doc in README.md CONTRIBUTING.md docs/API.md docs/CLI.md docs/MCP.md; do
+  # This root doc isn't staged this commit — nothing to check for it.
+  if ! git diff --cached --name-only | grep -qx "$doc"; then
+    continue
   fi
-  locale_headers=$(git show ":$locale" | grep -c '^#')
-  if [ "$locale_headers" != "$root_headers" ]; then
-    echo "README-SYNC: README.md has $root_headers section headers but $locale has $locale_headers." >&2
-    echo "  root gained/lost a section — please sync $locale in this commit (or a prompt follow-up)." >&2
-    status=1
-  fi
+
+  root_headers=$(git show ":$doc" | grep -c '^#')
+
+  for locale in "locales/zh-TW/$doc" "locales/zh-CN/$doc"; do
+    if ! git cat-file -e ":$locale" 2>/dev/null; then
+      continue # locale file doesn't exist in the index; not this hook's concern
+    fi
+    locale_headers=$(git show ":$locale" | grep -c '^#')
+    if [ "$locale_headers" != "$root_headers" ]; then
+      echo "DOC-SYNC: $doc has $root_headers section headers but $locale has $locale_headers." >&2
+      echo "  root gained/lost a section — please sync $locale in this commit (or a prompt follow-up)." >&2
+      status=1
+    fi
+  done
 done
 
 if [ "$status" != 0 ]; then

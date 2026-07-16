@@ -1,8 +1,8 @@
 ---
 source: docs/API.md
-source_version: 0.2.0
-translation_version: 0.2.0
-last_synced: 2026-05-30
+source_version: 0.7.0
+translation_version: 0.7.0
+last_synced: 2026-07-16
 status: complete
 ---
 
@@ -29,7 +29,7 @@ import { /* ... */ } from "engramgraph";
 
 ### `initSchema(conn): Promise<void>`
 
-冪等建立 6 個節點表 + 7 個關係表。另外匯出：`NODE_TABLE_DDL`、`REL_TABLE_DDL`、
+冪等建立 6 個節點表 + 8 個關係表。另外匯出：`NODE_TABLE_DDL`、`REL_TABLE_DDL`、
 `NODE_TABLES`、`REL_TABLES`。
 
 ### `clearGraph(conn): Promise<void>`
@@ -52,19 +52,20 @@ import { /* ... */ } from "engramgraph";
 ### Schema（DDL）
 
 ```
-NODE Function(id, name, file, start_line, confidence)   PK id
-NODE Class(id, name, file)                               PK id
-NODE Module(id, path)                                    PK id
-NODE Spec(id, title, status, confidence)                PK id
-NODE Decision(id, title, date, confidence)              PK id
-NODE Doc(id, title, status, confidence)                 PK id
+NODE Function(id, name, file, start_line, confidence, provider)   PK id
+NODE Class(id, name, file, provider)                              PK id
+NODE Module(id, path)                                             PK id
+NODE Spec(id, title, status, confidence)                          PK id
+NODE Decision(id, title, date, confidence)                        PK id
+NODE Doc(id, title, status, confidence)                           PK id
 
-REL CALLS(Function → Function, call_count)
+REL CALLS(Function → Function, call_count, confidence, provider)
 REL IMPORTS(Module → Module)
 REL DEFINES(Module → Function)
-REL IMPLEMENTS(Function → Spec)
+REL IMPLEMENTS(Module → Spec)
 REL IMPACTS(Decision → Spec)
 REL SUPERSEDES(Decision → Decision)
+REL RELATES(Spec → Spec)
 REL REFERENCES(Doc → Doc)
 ```
 
@@ -170,9 +171,10 @@ tree-sitter 將 `.ts` / `.tsx` / `.js` 解析為 `Function` / `Class` / `Module`
 
 ## mcp — Model Context Protocol
 
-- `createMcpServer(conn: GraphConnection): McpServer` — 註冊 5 個工具
+- `createMcpServer(conn: GraphConnection): McpServer` — 註冊 8 個工具
   （`index_code`、`index_docs`、`call_chain`、`impact_analysis`、
-  `ingest_feedback`）。見 [MCP.md](./MCP.md)。
+  `ingest_feedback`、`implementers`、`implemented_specs`、`related`）。
+  見 [MCP.md](./MCP.md)。
 
 ## embedded — 同行程用戶端
 

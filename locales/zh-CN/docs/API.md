@@ -1,8 +1,8 @@
 ---
 source: docs/API.md
-source_version: 0.2.0
-translation_version: 0.2.0
-last_synced: 2026-05-30
+source_version: 0.7.0
+translation_version: 0.7.0
+last_synced: 2026-07-16
 status: complete
 ---
 
@@ -29,7 +29,7 @@ import { /* ... */ } from "engramgraph";
 
 ### `initSchema(conn): Promise<void>`
 
-幂等创建 6 个节点表 + 7 个关系表。另外导出：`NODE_TABLE_DDL`、`REL_TABLE_DDL`、
+幂等创建 6 个节点表 + 8 个关系表。另外导出：`NODE_TABLE_DDL`、`REL_TABLE_DDL`、
 `NODE_TABLES`、`REL_TABLES`。
 
 ### `clearGraph(conn): Promise<void>`
@@ -52,19 +52,20 @@ import { /* ... */ } from "engramgraph";
 ### Schema（DDL）
 
 ```
-NODE Function(id, name, file, start_line, confidence)   PK id
-NODE Class(id, name, file)                               PK id
-NODE Module(id, path)                                    PK id
-NODE Spec(id, title, status, confidence)                PK id
-NODE Decision(id, title, date, confidence)              PK id
-NODE Doc(id, title, status, confidence)                 PK id
+NODE Function(id, name, file, start_line, confidence, provider)   PK id
+NODE Class(id, name, file, provider)                              PK id
+NODE Module(id, path)                                             PK id
+NODE Spec(id, title, status, confidence)                          PK id
+NODE Decision(id, title, date, confidence)                        PK id
+NODE Doc(id, title, status, confidence)                           PK id
 
-REL CALLS(Function → Function, call_count)
+REL CALLS(Function → Function, call_count, confidence, provider)
 REL IMPORTS(Module → Module)
 REL DEFINES(Module → Function)
-REL IMPLEMENTS(Function → Spec)
+REL IMPLEMENTS(Module → Spec)
 REL IMPACTS(Decision → Spec)
 REL SUPERSEDES(Decision → Decision)
+REL RELATES(Spec → Spec)
 REL REFERENCES(Doc → Doc)
 ```
 
@@ -170,9 +171,10 @@ tree-sitter 将 `.ts` / `.tsx` / `.js` 解析为 `Function` / `Class` / `Module`
 
 ## mcp — Model Context Protocol
 
-- `createMcpServer(conn: GraphConnection): McpServer` — 注册 5 个工具
+- `createMcpServer(conn: GraphConnection): McpServer` — 注册 8 个工具
   （`index_code`、`index_docs`、`call_chain`、`impact_analysis`、
-  `ingest_feedback`）。见 [MCP.md](./MCP.md)。
+  `ingest_feedback`、`implementers`、`implemented_specs`、`related`）。
+  见 [MCP.md](./MCP.md)。
 
 ## embedded — 同进程客户端
 

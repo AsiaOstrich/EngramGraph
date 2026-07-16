@@ -203,17 +203,17 @@ Or just `egr serve --port 3000`. API reference: **[docs/API.md](./docs/API.md)**
 
 ## MCP — use EngramGraph from a coding assistant
 
-EngramGraph ships an MCP server (stdio) exposing 5 tools — `index_code`,
-`index_docs`, `call_chain`, `impact_analysis`, `ingest_feedback` — so any
-MCP-capable assistant can use it as a code + knowledge graph. Zero LLM,
-deterministic, **no Docker**.
+EngramGraph ships an MCP server (stdio) exposing 8 tools — `index_code`,
+`index_docs`, `call_chain`, `impact_analysis`, `ingest_feedback`, `implementers`,
+`implemented_specs`, `related` — so any MCP-capable assistant can use it as a
+code + knowledge graph. Zero LLM, deterministic, **no Docker**.
 
 ```bash
 # Claude Code, from an installed package:
 claude mcp add egr -- npx egr-mcp
 ```
 
-Full setup (Claude Code / Codex / Cursor / Windsurf), the 5 tools, and an
+Full setup (Claude Code / Codex / Cursor / Windsurf), all 8 tools, and an
 example flow: **[docs/MCP.md](./docs/MCP.md)**.
 
 ## Core vs Adapter boundary
@@ -237,9 +237,9 @@ example flow: **[docs/MCP.md](./docs/MCP.md)**.
 ## Graph schema
 
 6 node tables — `Function`, `Class`, `Module`, `Spec`, `Decision`, `Doc`.
-7 relationship tables — `CALLS`, `IMPORTS`, `DEFINES`, `IMPLEMENTS`, `IMPACTS`,
-`SUPERSEDES`, `REFERENCES`. See **[docs/API.md](./docs/API.md)** for the full DDL
-and the front-matter schema that drives knowledge ingestion.
+8 relationship tables — `CALLS`, `IMPORTS`, `DEFINES`, `IMPLEMENTS`, `IMPACTS`,
+`SUPERSEDES`, `RELATES`, `REFERENCES`. See **[docs/API.md](./docs/API.md)** for the
+full DDL and the front-matter schema that drives knowledge ingestion.
 
 ## Status
 

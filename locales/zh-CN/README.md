@@ -186,16 +186,16 @@ const app = createServer({ connection: conn });   // Hono app；路由在 /graph
 
 ## MCP — 在编程助手中使用 EngramGraph
 
-EngramGraph 内置一个 MCP server（stdio），暴露 5 个工具——`index_code`、`index_docs`、
-`call_chain`、`impact_analysis`、`ingest_feedback`——让任何支持 MCP 的助手都能把它当成
-代码 + 知识图谱使用。无 LLM、确定性、**免 Docker**。
+EngramGraph 内置一个 MCP server（stdio），暴露 8 个工具——`index_code`、`index_docs`、
+`call_chain`、`impact_analysis`、`ingest_feedback`、`implementers`、`implemented_specs`、
+`related`——让任何支持 MCP 的助手都能把它当成代码 + 知识图谱使用。无 LLM、确定性、**免 Docker**。
 
 ```bash
 # Claude Code，使用已安装的包：
 claude mcp add egr -- npx egr-mcp
 ```
 
-完整配置（Claude Code / Codex / Cursor / Windsurf）、5 个工具与示例流程：
+完整配置（Claude Code / Codex / Cursor / Windsurf）、全部 8 个工具与示例流程：
 **[docs/MCP.md](./docs/MCP.md)**。
 
 ## Core 与 Adapter 边界
@@ -219,8 +219,8 @@ claude mcp add egr -- npx egr-mcp
 ## 图谱 schema
 
 6 个节点表——`Function`、`Class`、`Module`、`Spec`、`Decision`、`Doc`。
-7 个关系表——`CALLS`、`IMPORTS`、`DEFINES`、`IMPLEMENTS`、`IMPACTS`、`SUPERSEDES`、
-`REFERENCES`。完整 DDL 与驱动知识导入的 front-matter schema 见 **[docs/API.md](./docs/API.md)**。
+8 个关系表——`CALLS`、`IMPORTS`、`DEFINES`、`IMPLEMENTS`、`IMPACTS`、`SUPERSEDES`、
+`RELATES`、`REFERENCES`。完整 DDL 与驱动知识导入的 front-matter schema 见 **[docs/API.md](./docs/API.md)**。
 
 ## 状态
 

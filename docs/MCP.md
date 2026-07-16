@@ -59,6 +59,9 @@ the command/args/env are the same:
 | `call_chain` | `symbol`, `direction?` (`callers`\|`callees`\|`both`), `depth?` | Who calls / is called by a function symbol. "What breaks if I change X?" |
 | `impact_analysis` | `nodeId`, `maxHops?` | Decisions in a spec's impact chain (`IMPACTS` + multi-hop `SUPERSEDES`). |
 | `ingest_feedback` | `nodeId`, `type`, `nodeLabel?` (`Function`\|`Spec`\|`Decision`\|`Doc`), `weight?` | Evolve a node's SAGE confidence from a feedback event (`test_fail`/`test_pass`/`human_fix`). |
+| `implementers` | `specId` | Files declaring `// implements <specId>` and the functions they define. "Which code implements this spec?" Reads `IMPLEMENTS(Module→Spec)` + `DEFINES`. |
+| `implemented_specs` | `moduleId` | Specs a file declares it implements. "Which spec governs this code?" `moduleId` is the file's indexed path. Reads `IMPLEMENTS(Module→Spec)`. |
+| `related` | `seedId`, `depth?`, `limit?` | Structurally important nodes around a seed id (seeded PageRank over all edge types, crosses `Function`/`Spec`/`Module`/`Decision`). "What's connected to X?" |
 
 Every tool returns a text content block of JSON; on failure it returns
 `error: <message>` with `isError: true`.

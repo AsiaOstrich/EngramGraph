@@ -23,7 +23,7 @@ The package is ESM-first with a CJS build; types are bundled. Runtime: Node ≥ 
 
 ### `initSchema(conn): Promise<void>`
 
-Idempotently creates the 6 node + 7 relationship tables. Also exported:
+Idempotently creates the 6 node + 8 relationship tables. Also exported:
 `NODE_TABLE_DDL`, `REL_TABLE_DDL`, `NODE_TABLES`, `REL_TABLES`.
 
 ### `clearGraph(conn): Promise<void>`
@@ -46,19 +46,20 @@ Persist a provider-agnostic `{ nodes, edges }` fragment.
 ### Schema (DDL)
 
 ```
-NODE Function(id, name, file, start_line, confidence)   PK id
-NODE Class(id, name, file)                               PK id
-NODE Module(id, path)                                    PK id
-NODE Spec(id, title, status, confidence)                PK id
-NODE Decision(id, title, date, confidence)              PK id
-NODE Doc(id, title, status, confidence)                 PK id
+NODE Function(id, name, file, start_line, confidence, provider)   PK id
+NODE Class(id, name, file, provider)                              PK id
+NODE Module(id, path)                                             PK id
+NODE Spec(id, title, status, confidence)                          PK id
+NODE Decision(id, title, date, confidence)                        PK id
+NODE Doc(id, title, status, confidence)                           PK id
 
 REL CALLS(Function → Function, call_count, confidence, provider)
 REL IMPORTS(Module → Module)
 REL DEFINES(Module → Function)
-REL IMPLEMENTS(Function → Spec)
+REL IMPLEMENTS(Module → Spec)
 REL IMPACTS(Decision → Spec)
 REL SUPERSEDES(Decision → Decision)
+REL RELATES(Spec → Spec)
 REL REFERENCES(Doc → Doc)
 ```
 
@@ -170,9 +171,10 @@ Constants `STEP`, `MIN_CONFIDENCE`, `MAX_CONFIDENCE` are exported.
 
 ## mcp — Model Context Protocol
 
-- `createMcpServer(conn: GraphConnection): McpServer` — registers the 5 tools
+- `createMcpServer(conn: GraphConnection): McpServer` — registers 8 tools
   (`index_code`, `index_docs`, `call_chain`, `impact_analysis`,
-  `ingest_feedback`). See [MCP.md](./MCP.md).
+  `ingest_feedback`, `implementers`, `implemented_specs`, `related`). See
+  [MCP.md](./MCP.md).
 
 ## embedded — in-process client
 
