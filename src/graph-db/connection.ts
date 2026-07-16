@@ -3,9 +3,9 @@ import type { RyuValue, QueryResult } from "ryugraph";
 
 import type { GraphRow } from "./types.js";
 
-/** Normalise the `QueryResult | QueryResult[]` shape to the last result. */
-function lastResult(result: QueryResult | QueryResult[]): QueryResult {
-  return Array.isArray(result) ? result[result.length - 1]! : result;
+/** Normalise the `QueryResult | QueryResult[]` shape to a plain array (a single multi-statement `query`/`execute` call can return either). */
+function asResultArray(result: QueryResult | QueryResult[]): QueryResult[] {
+  return Array.isArray(result) ? result : [result];
 }
 
 /**
@@ -48,14 +48,33 @@ export class GraphConnection {
       throw new Error("GraphConnection is closed");
     }
 
-    if (params && Object.keys(params).length > 0) {
-      const prepared = await this.conn.prepare(cypher);
-      const result = await this.conn.execute(prepared, params);
-      return lastResult(result).getAll();
-    }
+    const result =
+      params && Object.keys(params).length > 0
+        ? await this.conn.execute(await this.conn.prepare(cypher), params)
+        : await this.conn.query(cypher);
 
-    const result = await this.conn.query(cypher);
-    return lastResult(result).getAll();
+    // Every `QueryResult` (there can be more than one for a multi-statement
+    // call) holds native-side cursor resources that are NOT freed by GC in
+    // any bounded way — `ryugraph`'s own `QueryResult.close()` exists
+    // specifically to release them promptly. Leaving this uncalled (as an
+    // earlier version of this method did) leaks a native handle on every
+    // single query; harmless in small numbers, but this project's native
+    // binding has an empirically-observed finite budget of such
+    // handles/cycles per process before an unrelated crash at worker
+    // teardown (see `test/structural-memory.test.ts`'s and
+    // `test/schema-migration.test.ts`'s module docs) — calling `close()`
+    // here, unconditionally and for every result (not just the one whose
+    // rows we return), is real, verified insurance against exhausting that
+    // budget faster than necessary in any code path that issues many
+    // queries against one long-lived connection.
+    const results = asResultArray(result);
+    try {
+      return await results[results.length - 1]!.getAll();
+    } finally {
+      for (const r of results) {
+        r.close();
+      }
+    }
   }
 
   /** Run a statement when the result set is irrelevant (DDL, writes). */
