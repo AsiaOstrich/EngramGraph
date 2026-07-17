@@ -1,0 +1,186 @@
+# Documentation Structure Standard - AI Optimized
+# Source: core/documentation-structure.md
+
+id: documentation-structure
+meta:
+  version: "1.4.0"
+  updated: "2026-03-17"
+  source: core/documentation-structure.md
+  description: Consistent documentation structure for software projects (Diátaxis classification, LLM discovery, doc testing)
+
+options:
+  documentation_style:
+    description: Select documentation approach
+    multiSelect: true
+    choices:
+      - id: markdown-docs
+        file: options/documentation/markdown-docs.ai.yaml
+        best_for: Open source, developer-focused docs
+      - id: api-docs
+        file: options/documentation/api-docs.ai.yaml
+        best_for: REST/GraphQL API documentation
+      - id: wiki-style
+        file: options/documentation/wiki-style.ai.yaml
+        best_for: Large teams, internal knowledge bases
+
+structure:
+  root:
+    - file: README.md
+      required: true
+      naming: UPPERCASE
+      purpose: Project overview
+
+    - file: CONTRIBUTING.md
+      required: false
+      naming: UPPERCASE
+      purpose: Contribution guidelines
+
+    - file: CHANGELOG.md
+      required: false
+      naming: UPPERCASE
+      purpose: Version history
+
+    - file: LICENSE
+      required: true
+      naming: UPPERCASE (no extension)
+      purpose: License file
+
+  docs:
+    naming: lowercase-kebab-case
+    files:
+      - index.md (documentation index)
+      - getting-started.md (quick start)
+      - architecture.md (system architecture)
+      - api-reference.md (API docs)
+      - deployment.md (deployment guide)
+      - troubleshooting.md (common issues)
+
+    subdirectories:
+      - name: flows/
+        purpose: Flow documentation
+        index_required: "when >5 flows"
+
+      - name: ADR/
+        purpose: Architecture Decision Records
+        naming: "NNN-title.md"
+
+      - name: diagrams/
+        purpose: Architecture diagrams
+        formats: [".mmd", ".puml", ".drawio"]
+
+diataxis_classification:
+  types:
+    - id: tutorial
+      purpose: Learning-oriented
+      user_need: "I want to learn"
+      examples: [getting-started.md, first-project-walkthrough.md]
+    - id: how-to
+      purpose: Task-oriented
+      user_need: "I want to accomplish X"
+      examples: [deployment.md, migration.md, troubleshooting.md]
+    - id: reference
+      purpose: Information-oriented
+      user_need: "I need to look up Y"
+      examples: [api-reference.md, CHANGELOG.md, configuration.md]
+    - id: explanation
+      purpose: Understanding-oriented
+      user_need: "I want to understand why"
+      examples: [architecture.md, ADR/, design-rationale.md]
+
+llm_discovery:
+  files:
+    - name: llms.txt
+      location: project root
+      purpose: Structured index for LLM retrieval systems
+      when: Public projects or projects using AI tools
+    - name: llms-full.txt
+      location: project root
+      purpose: Full concatenated docs for complete context
+      when: Optional
+
+doc_testing:
+  layers:
+    - name: Link Validation
+      tools: [markdown-link-check, lychee]
+      ci_stage: pre-commit
+    - name: Code Sample Testing
+      tools: [doctest, custom scripts]
+      ci_stage: PR check
+    - name: Structure Validation
+      tools: [remark-lint, custom linter]
+      ci_stage: pre-commit
+    - name: Content Freshness
+      tools: [custom date-check script]
+      ci_stage: release
+    - name: Traceability
+      tools: [traceability matrix]
+      ci_stage: release
+
+rules:
+  - id: diataxis-classify
+    trigger: creating new documentation
+    instruction: Classify document as Tutorial, How-to, Reference, or Explanation and add Document Type header
+    priority: recommended
+
+  - id: llm-discovery
+    trigger: creating public project documentation
+    instruction: Consider adding llms.txt for LLM discoverability
+    priority: recommended
+
+  - id: doc-testing-links
+    trigger: adding documentation
+    instruction: Validate all links before committing
+    priority: required
+
+  - id: root-uppercase
+    trigger: creating root documentation
+    instruction: Use UPPERCASE for root-level docs (README, CONTRIBUTING, CHANGELOG)
+    priority: required
+
+  - id: docs-lowercase-kebab
+    trigger: creating docs/ files
+    instruction: Use lowercase-kebab-case for all docs/ files
+    validator: "^[a-z][a-z0-9-]*\\.md$"
+    priority: required
+    examples:
+      good:
+        - getting-started.md
+        - api-reference.md
+      bad:
+        - GettingStarted.md
+        - API_Reference.md
+        - "User Guide.md"
+
+  - id: readme-required
+    trigger: creating new project
+    instruction: README.md is required for every project
+    priority: required
+
+  - id: flow-index
+    trigger: creating flow documentation
+    instruction: Create flows/README.md when there are more than 5 flows
+    priority: required
+
+  - id: adr-numbering
+    trigger: creating ADR
+    instruction: Use format NNN-title.md (e.g., 001-use-postgres.md)
+    validator: "^\\d{3}-[a-z][a-z0-9-]+\\.md$"
+    priority: required
+
+quick_reference:
+  root_files:
+    columns: [File, Naming, Purpose]
+    rows:
+      - [README.md, UPPERCASE, Project overview]
+      - [CONTRIBUTING.md, UPPERCASE, Contribution guidelines]
+      - [CHANGELOG.md, UPPERCASE, Version history]
+      - [LICENSE, UPPERCASE (no ext), License file]
+      - [SECURITY.md, UPPERCASE, Security advisory]
+
+  docs_structure:
+    columns: [Directory, Purpose, Naming]
+    rows:
+      - [docs/, Main documentation, lowercase-kebab-case]
+      - [docs/flows/, Flow documentation, "{module}-flow.md"]
+      - [docs/ADR/, Architecture decisions, "NNN-title.md"]
+      - [docs/diagrams/, Architecture diagrams, descriptive names]

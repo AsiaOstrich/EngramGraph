@@ -1,0 +1,142 @@
+# Testing Standards - AI Optimized (v2 Dual-Layer)
+# Source: core/testing-standards.md
+
+standard:
+  id: testing
+  name: Testing Standards
+  description: Testing structure, FIRST principles, AAA pattern, and framework options. For coverage policy, see full-coverage-testing (XSPEC-178).
+  guidelines:
+    - "Use FIRST principles for unit tests"
+    - "Structure tests with Arrange-Act-Assert"
+    - "Use meaningful test names"
+    - "See full-coverage-testing.ai.yaml for coverage policy (XSPEC-178)"
+
+  meta:
+    version: "2.1.0"
+    updated: "2026-05-06"
+    source: core/testing-standards.md
+    guide: skills/testing-guide/testing-theory.md
+    description: Testing structure and principles. Coverage policy moved to full-coverage-testing (XSPEC-178).
+
+  deprecated_rules:
+    - id: pyramid-thresholds
+      description: "70/20/7/3 pyramid ratio and UT≥80%/IT≥70%/E2E happy-path-only thresholds"
+      reason: "AI-era paradigm shift: test generation cost equals code generation cost, so no layer should have a lower threshold. Replaced by behavior-completeness ratchet model."
+      since: "5.5.0"
+      replaced_by: "full-coverage-testing.ai.yaml (XSPEC-178)"
+
+  framework_options:
+    decision_point: Select testing framework based on project type
+    choices:
+      - id: istqb-framework
+        file: options/testing/istqb-framework.ai.yaml
+        best_for: Enterprise projects, certification needs, formal QA processes
+      - id: industry-pyramid
+        file: options/testing/industry-pyramid.ai.yaml
+        best_for: Agile development, CI/CD optimization, rapid iteration
+
+  pyramid:
+    ratio: "DEPRECATED — see full-coverage-testing.ai.yaml"
+    note: "The 70/20/7/3 ratio is deprecated as of v5.5.0 (XSPEC-178). Coverage is now governed by behavior-completeness ratchet, not per-layer percentages. Layer names remain valid as organizational categories, not threshold buckets."
+    levels:
+      - name: Unit Tests (UT)
+        scope: Single function/method
+        speed: Very fast (<100ms)
+        coverage_policy: "See full-coverage-testing.ai.yaml — ratchet model, no fixed % floor"
+      - name: Integration Tests (IT)
+        scope: Multiple components interacting
+        speed: Fast (<1s)
+        coverage_policy: "See full-coverage-testing.ai.yaml — ratchet model, no fixed % floor"
+      - name: System Tests (ST)
+        scope: Complete subsystem with stubbed external dependencies
+        speed: Medium (<10s)
+        coverage_policy: "See full-coverage-testing.ai.yaml — ratchet model, no fixed % floor"
+      - name: E2E Tests
+        scope: Full user flows across entire system
+        speed: Slow (>10s)
+        coverage_policy: "All AC must have E2E coverage — not just happy path"
+
+  options:
+    testing_framework:
+      description: Choose testing framework approach
+      multiSelect: false
+      choices:
+        - id: istqb-framework
+          file: options/testing/istqb-framework.ai.yaml
+        - id: industry-pyramid
+          file: options/testing/industry-pyramid.ai.yaml
+    test_level:
+      description: Choose test levels to implement
+      multiSelect: true
+      choices:
+        - id: unit-testing
+          file: options/testing/unit-testing.ai.yaml
+        - id: integration-testing
+          file: options/testing/integration-testing.ai.yaml
+        - id: system-testing
+          file: options/testing/system-testing.ai.yaml
+        - id: e2e-testing
+          file: options/testing/e2e-testing.ai.yaml
+        - id: security-testing
+          file: options/testing/security-testing.ai.yaml
+          best_for: Applications handling sensitive data, security-critical systems
+        - id: performance-testing
+          file: options/testing/performance-testing.ai.yaml
+          best_for: High-traffic applications, real-time systems, APIs
+        - id: contract-testing
+          file: options/testing/contract-testing.ai.yaml
+          best_for: Microservices, API integrations, distributed systems
+
+  rules:
+    - id: follow-full-coverage
+      trigger: planning test strategy
+      instruction: Follow behavior-completeness model — every public function needs happy/edge/error path tests. Ratchet CI ensures coverage never decreases. See full-coverage-testing.ai.yaml (XSPEC-178).
+      priority: required
+    - id: first-principles
+      trigger: writing tests
+      instruction: Follow FIRST principles (Fast, Independent, Repeatable, Self-validating, Timely)
+      priority: required
+    - id: arrange-act-assert
+      trigger: structuring test
+      instruction: Use Arrange-Act-Assert pattern
+      priority: required
+    - id: meaningful-names
+      trigger: naming tests
+      instruction: Use descriptive test names that explain what is being tested
+      priority: required
+      examples:
+        good:
+          - "should_return_user_when_valid_id_provided"
+          - "test_login_fails_with_invalid_credentials"
+        bad:
+          - "test1"
+          - "testLogin"
+    - id: test-boundaries
+      trigger: choosing what to test
+      instruction: Focus on boundary conditions and edge cases
+      priority: recommended
+    - id: avoid-test-doubles-overuse
+      trigger: using mocks/stubs
+      instruction: Use test doubles sparingly; prefer real implementations when fast enough
+      priority: recommended
+
+    - id: e2e-precondition-scope
+      trigger: writing E2E globalSetup or environment pre-checks
+      instruction: >
+        E2E environment pre-checks must verify the health of ALL pages and endpoints
+        under test, not just the authentication entry point. A smoke check that only
+        validates the login page will silently pass even when feature pages return
+        HTTP 500. Maintain an explicit list of pages covered by the suite and verify
+        each returns a non-5xx response before running tests.
+      priority: recommended
+      evidence: >
+        Real incident (2026-04): E2E globalSetup only checked Login.aspx health;
+        feature page returned 500 silently — full E2E suite passed with false
+        confidence, masking a production crash.
+
+physical_spec:
+  type: custom_script
+  validator:
+    command: >
+      test -f vitest.config.ts || test -f vitest.config.js || test -f jest.config.js || grep -q '"test":' package.json
+    rule: "test_runner_configured"

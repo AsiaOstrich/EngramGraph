@@ -1,0 +1,481 @@
+{
+  "version": "3.3.0",
+  "upstream": {
+    "repo": "AsiaOstrich/universal-dev-standards",
+    "version": "6.0.0",
+    "installed": "2026-07-17"
+  },
+  "format": "ai",
+  "contentMode": "minimal",
+  "contentLayout": "flat",
+  "standards": [
+    "ai/standards/anti-hallucination.ai.yaml",
+    "ai/standards/ai-friendly-architecture.ai.yaml",
+    "ai/standards/commit-message.ai.yaml",
+    "ai/options/commit-message/english.ai.yaml",
+    "ai/standards/checkin-standards.ai.yaml",
+    "ai/standards/deployment-standards.ai.yaml",
+    "ai/standards/packaging-standards.ai.yaml",
+    "ai/standards/api-design-standards.ai.yaml",
+    "ai/standards/database-standards.ai.yaml",
+    "ai/standards/spec-driven-development.ai.yaml",
+    "ai/standards/code-review.ai.yaml",
+    "ai/standards/git-workflow.ai.yaml",
+    "ai/options/git-workflow/github-flow.ai.yaml",
+    "ai/options/git-workflow/squash-merge.ai.yaml",
+    "ai/standards/versioning.ai.yaml",
+    "ai/standards/changelog.ai.yaml",
+    "ai/standards/test-governance.ai.yaml",
+    "ai/standards/structured-task-definition.ai.yaml",
+    "ai/standards/testing.ai.yaml",
+    "ai/options/testing/unit-testing.ai.yaml",
+    "ai/options/testing/integration-testing.ai.yaml",
+    "ai/options/testing/system-testing.ai.yaml",
+    "ai/options/testing/e2e-testing.ai.yaml",
+    "ai/standards/full-coverage-testing.ai.yaml",
+    "ai/standards/documentation-structure.ai.yaml",
+    "ai/standards/documentation-lifecycle.ai.yaml",
+    "ai/standards/documentation-writing-standards.ai.yaml",
+    "ai/standards/self-review-protocol.ai.yaml",
+    "ai/standards/ai-instruction-standards.ai.yaml",
+    "ai/standards/project-structure.ai.yaml",
+    "ai/standards/error-codes.ai.yaml",
+    "ai/standards/logging.ai.yaml",
+    "ai/standards/test-completeness-dimensions.ai.yaml",
+    "ai/standards/flow-based-testing.ai.yaml",
+    "ai/standards/mock-boundary.ai.yaml",
+    "ai/standards/security-testing.ai.yaml",
+    "ai/standards/mutation-testing.ai.yaml",
+    "ai/standards/test-driven-development.ai.yaml",
+    "ai/standards/behavior-driven-development.ai.yaml",
+    "ai/standards/acceptance-test-driven-development.ai.yaml",
+    "ai/standards/reverse-engineering-standards.ai.yaml",
+    "ai/standards/forward-derivation-standards.ai.yaml",
+    "ai/standards/ai-agreement-standards.ai.yaml",
+    "ai/standards/ai-command-behavior.ai.yaml",
+    "ai/standards/ai-response-navigation.ai.yaml",
+    "ai/standards/virtual-organization-standards.ai.yaml",
+    "ai/standards/refactoring-standards.ai.yaml",
+    "ai/standards/requirement-engineering.ai.yaml",
+    "ai/standards/security-standards.ai.yaml",
+    "ai/standards/performance-standards.ai.yaml",
+    "ai/standards/accessibility-standards.ai.yaml",
+    "ai/standards/developer-memory.ai.yaml",
+    "ai/standards/project-context-memory.ai.yaml",
+    "ai/standards/knowledge-graph-memory.ai.yaml",
+    "ai/standards/context-aware-loading.ai.yaml",
+    "templates/requirement-checklist.md",
+    "templates/requirement-template.md",
+    "templates/requirement-document-template.md",
+    "ai/standards/acceptance-criteria-traceability.ai.yaml",
+    "ai/standards/feature-manifest-standard.ai.yaml",
+    "ai/standards/behavior-snapshot.ai.yaml",
+    "ai/standards/user-journey-testing.ai.yaml",
+    "ai/standards/feature-discovery-standards.ai.yaml",
+    "ai/standards/systematic-debugging.ai.yaml",
+    "ai/standards/model-selection.ai.yaml",
+    "ai/standards/git-worktree.ai.yaml",
+    "ai/standards/verification-evidence.ai.yaml",
+    "ai/standards/adr-standards.ai.yaml",
+    "ai/standards/retrospective-standards.ai.yaml",
+    "ai/standards/push-standards.ai.yaml"
+  ],
+  "extensions": [],
+  "integrations": [
+    "AGENTS.md"
+  ],
+  "integrationConfigs": {},
+  "options": {
+    "display_language": "en",
+    "workflow": "github-flow",
+    "merge_strategy": "squash",
+    "output_language": "english",
+    "test_levels": [
+      "unit-testing",
+      "integration-testing",
+      "system-testing",
+      "e2e-testing"
+    ],
+    "release_mode": "ci-cd"
+  },
+  "generateAgentsMd": true,
+  "aiTools": [],
+  "skills": {
+    "installed": false,
+    "location": null,
+    "locale": "en",
+    "names": [],
+    "version": null,
+    "installations": []
+  },
+  "commands": {
+    "installed": false,
+    "names": [],
+    "version": null,
+    "installations": []
+  },
+  "methodology": null,
+  "fileHashes": {
+    ".standards/anti-hallucination.ai.yaml": {
+      "hash": "sha256:c529d8c21f0157eab6af951e371e965073d46a26b5cc99e2a29b6747f376e54b",
+      "size": 9513,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/ai-friendly-architecture.ai.yaml": {
+      "hash": "sha256:43b8a7eccc5ae3026aa27d601bd0018142ffcde34130ab81175e5e28b6d2fe6a",
+      "size": 5872,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/commit-message.ai.yaml": {
+      "hash": "sha256:b99015bae7b0dd13c5a1478564ec775f90c05e1f675987a7c5a480ed341a6d7b",
+      "size": 3861,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/options/english.ai.yaml": {
+      "hash": "sha256:2c1f53cf847a8b874efa95e678a61744e25491cc491108e40ad2898dd9074ce8",
+      "size": 2204,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/checkin-standards.ai.yaml": {
+      "hash": "sha256:145bfe9b20c8568d71d9d4ee34710f799c6ad38f668203c72cf8600dd99d0a25",
+      "size": 6279,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/deployment-standards.ai.yaml": {
+      "hash": "sha256:23634a0097fc190413a1e9ddfb34c071f4f29d003ec34c294c6f977ebdd24e63",
+      "size": 14227,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/packaging-standards.ai.yaml": {
+      "hash": "sha256:d3436a4bfbc826e96ad77cb701b9866a7d4b16cdc521b8b1ba5cb7ec8ac54326",
+      "size": 6784,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/api-design-standards.ai.yaml": {
+      "hash": "sha256:5479101c54412b7ec6a1f7154b8bbc07923162e1eb1187d315fd602a15eb94a3",
+      "size": 8603,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/database-standards.ai.yaml": {
+      "hash": "sha256:4b693b07c45a15042789e895a1542a3a75a389d5832126c18221323b1af47ef2",
+      "size": 9152,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/spec-driven-development.ai.yaml": {
+      "hash": "sha256:f2f6c6f57f58894ac03888d436ab493bfa71122d310202c41d0232709e79bca0",
+      "size": 4995,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/code-review.ai.yaml": {
+      "hash": "sha256:35ab2486a6ecf63581281f84611d508edadfb3f86e698af7ce84d9dc6dc9afd4",
+      "size": 4663,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/git-workflow.ai.yaml": {
+      "hash": "sha256:a8587127cf1e4be81a165642edb79770cec1f83a02adc2fd4f16441a47bd7b2f",
+      "size": 2878,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/options/github-flow.ai.yaml": {
+      "hash": "sha256:2f50bfa98b8ca76d6153de32a00a15a52c4160a67cadcad9bc106ebc72134f30",
+      "size": 2286,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/options/squash-merge.ai.yaml": {
+      "hash": "sha256:61861d34c9148fe1eac2927d9354bbdc9622daa3658eeafb20889d0c970cac84",
+      "size": 1361,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/versioning.ai.yaml": {
+      "hash": "sha256:db9ef5751417cbf0bb044b6718988c6684f30ec681ac61f699cdb0ca56d446c0",
+      "size": 6288,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/changelog.ai.yaml": {
+      "hash": "sha256:5e0165d3b916452694d208b43e5b87bea0e85b128959a3f057e04caa19d9fe9d",
+      "size": 3311,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/test-governance.ai.yaml": {
+      "hash": "sha256:e15aec3181ee97d0652ec802f6a519678f41a19167214f260ae55b078d5f14a9",
+      "size": 7034,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/structured-task-definition.ai.yaml": {
+      "hash": "sha256:d0b34c199b45528307e03a96563815060f00180b07eb766b89f9ec5ec11ed247",
+      "size": 4091,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/testing.ai.yaml": {
+      "hash": "sha256:380740413be9e974ebb672d1e91e2d2bbce285efd5868cb7c2b45fea7fc648e0",
+      "size": 6295,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/options/unit-testing.ai.yaml": {
+      "hash": "sha256:32b2b32cf2eaceb66beb282de332babac08b7dc9636292e76521b174a2920203",
+      "size": 2183,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/options/integration-testing.ai.yaml": {
+      "hash": "sha256:c9138ce93557fccc06dd4ae8ff053f362bf3ae90b5f517f0ec3c58931849bb22",
+      "size": 2721,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/options/system-testing.ai.yaml": {
+      "hash": "sha256:7936b27ad5137ac9c9ea643c8a8ccea1f414c7bd81c7c16f32117ed9e5df35c7",
+      "size": 2364,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/options/e2e-testing.ai.yaml": {
+      "hash": "sha256:7b62a78eb569f9a094d3331a985c18fa53e1e478efcc6b2626fdb9c21e14ba10",
+      "size": 3104,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/full-coverage-testing.ai.yaml": {
+      "hash": "sha256:8b71145923d8f08bd15684d6bb352bafda5895d18189117a05e0f92f8db1ca72",
+      "size": 11787,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/documentation-structure.ai.yaml": {
+      "hash": "sha256:b698b62ecc67a62b246ffc65a2ed5d39571042a252a41c095f001e607c1086b4",
+      "size": 5608,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/documentation-lifecycle.ai.yaml": {
+      "hash": "sha256:43e7044723c99d92523380e53d2bde18aa43f48f7412db035bab64674a561e94",
+      "size": 5689,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/documentation-writing-standards.ai.yaml": {
+      "hash": "sha256:b0da9cdea77b27711412d46fae1c361d5e8e226d0555030c88f08a5d222985b2",
+      "size": 8076,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/self-review-protocol.ai.yaml": {
+      "hash": "sha256:6db92f10e4ea9860c27eab4da8eda8122ec14cee8414736285a90e72ed022f9b",
+      "size": 5995,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/ai-instruction-standards.ai.yaml": {
+      "hash": "sha256:4ea934428138aa7b7ea3109f49739e0e8800623b941d6dde09b642f7f5c5a01e",
+      "size": 11493,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/project-structure.ai.yaml": {
+      "hash": "sha256:f5c8119cfb4b9a6ac95207179d94ff974bbadc72376e4a2ffa4e886e11cfe97e",
+      "size": 3536,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/error-codes.ai.yaml": {
+      "hash": "sha256:5265ab6cff3e101e187f3a177d21a1513e344a006fa0a1ee768ecf79191d6275",
+      "size": 4733,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/logging.ai.yaml": {
+      "hash": "sha256:e2988886f16165ed97128f9d12c5ac633e3c7a0307491b0c1eebb1761aff155f",
+      "size": 10057,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/test-completeness-dimensions.ai.yaml": {
+      "hash": "sha256:7b513c2030a9421ed7d4902fcac4ea6adb61f62907d5dc5d6aa67fe0cc07dfbc",
+      "size": 12519,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/flow-based-testing.ai.yaml": {
+      "hash": "sha256:ddab1fd4958798d1e7d8b8a410348c1f740004fdcd6a6424f7b56e7124f1782e",
+      "size": 12481,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/mock-boundary.ai.yaml": {
+      "hash": "sha256:faf664f1fdac8577c0ac0671434f65dcf62fc46c53caae8ad1f591297ce9bf3f",
+      "size": 20644,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/security-testing.ai.yaml": {
+      "hash": "sha256:c08bf6bd96fe152042b2529353b26e559517653837fb4bfaf35cc3e0a9012baf",
+      "size": 8108,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/mutation-testing.ai.yaml": {
+      "hash": "sha256:2c20094debe847b7b1090b38f63f7ee69888703f10d47b9da71fd766baf67c3c",
+      "size": 8560,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/test-driven-development.ai.yaml": {
+      "hash": "sha256:f09a8980cfbe669cd1dbfe684150af46f412c97ddbcad03db2bb2ed6686b655f",
+      "size": 9558,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/behavior-driven-development.ai.yaml": {
+      "hash": "sha256:a094a6ee31110ef4ae5030c94a7aeb701d9433fe1c1b1d1d26e9962550489711",
+      "size": 9654,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/acceptance-test-driven-development.ai.yaml": {
+      "hash": "sha256:dfdcd28c987fcd9edaaec96f6859522e2216638fb951b19b10b0633e696e2b12",
+      "size": 10106,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/reverse-engineering-standards.ai.yaml": {
+      "hash": "sha256:317ddb7a27834a03a34cfb0ef0f5fb0fabf574b3028eeaf2fbe405f17eb9e381",
+      "size": 13390,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/forward-derivation-standards.ai.yaml": {
+      "hash": "sha256:e58eb9f02ed9e4eddf96e3e2a28c56fe2167701e18911662471b85799649ccf5",
+      "size": 9330,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/ai-agreement-standards.ai.yaml": {
+      "hash": "sha256:6e5ed7f22f7267098ae1ff7dd236c7aa4bcc41a59d6bd4e58f150ac9fc25a048",
+      "size": 620,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/ai-command-behavior.ai.yaml": {
+      "hash": "sha256:7535e209d8deb08ebd6b1131c530b029feab80ddeed1130c2da172ff5a5f9f79",
+      "size": 1872,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/ai-response-navigation.ai.yaml": {
+      "hash": "sha256:bd07e2641f8dfbddacd3a0e80064d5b1d4aaca7628204818b236c2df8e0fc91f",
+      "size": 4130,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/virtual-organization-standards.ai.yaml": {
+      "hash": "sha256:2f634b60db4ffe62a77b374d07bd788785cada6333ce2b6332409734fe073214",
+      "size": 642,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/refactoring-standards.ai.yaml": {
+      "hash": "sha256:b389c420e0b2faef8a6f6258e907023789124463d21007feff04166cccf1b1ec",
+      "size": 20023,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/requirement-engineering.ai.yaml": {
+      "hash": "sha256:3e0bdba2b78a9a39bf2cd77fe55b1204a8b880d1b65d404542c1e80676486367",
+      "size": 6524,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/security-standards.ai.yaml": {
+      "hash": "sha256:520a060074faf7f6fe6d0b8c4c9712972132095b3309ffb1d62a3183bb8f8ce1",
+      "size": 4414,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/performance-standards.ai.yaml": {
+      "hash": "sha256:878cd7894ab01e42dee04ea3d6118d008497f07a1f8a6e07bdabd5235a788987",
+      "size": 7555,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/accessibility-standards.ai.yaml": {
+      "hash": "sha256:f973a8ca57c9264dcdbf5da976c78378061a822418d658b21ce1a1aae377bf76",
+      "size": 4310,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/developer-memory.ai.yaml": {
+      "hash": "sha256:ca7c22dcbe004b5bc0c746d1d736bbfe9648ce636672352ceaacafe524a04d5b",
+      "size": 9003,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/project-context-memory.ai.yaml": {
+      "hash": "sha256:3002ef8bb21b8e5342b834c4b5ba2387e2b54f91e24c402b06f7522849590422",
+      "size": 4405,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/knowledge-graph-memory.ai.yaml": {
+      "hash": "sha256:3ef5e3d6833aea169ca4f132827b6be0f620def06667525c97ab17f9592e3def",
+      "size": 3708,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/context-aware-loading.ai.yaml": {
+      "hash": "sha256:8830e5baa50d43041e21dcae65bc31b15191297a01f15a89c5501a7ad934f559",
+      "size": 5977,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/requirement-checklist.md": {
+      "hash": "sha256:ce4263622590c79a4121a9c6c295db599ee1f5dc43c8cd40ebb2804704a0b750",
+      "size": 11176,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/requirement-template.md": {
+      "hash": "sha256:6a4ad5e045466c1fee4e4947382212117fcff81ac89882e4ba5e693f524bf9e4",
+      "size": 18993,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/requirement-document-template.md": {
+      "hash": "sha256:7de0f7326335a0554e579f33d82a633e2ad931185a340634a524924499f65aa4",
+      "size": 12752,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/acceptance-criteria-traceability.ai.yaml": {
+      "hash": "sha256:47c35486797a36b6344e2d1d13b520d5dc42ee8aa266c1cb418c68166048f654",
+      "size": 11285,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/feature-manifest-standard.ai.yaml": {
+      "hash": "sha256:5ef21f24a37dc59dc6e482d884a87a62f6765594767bbaaf5ab2569e03a7a6f1",
+      "size": 7275,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/behavior-snapshot.ai.yaml": {
+      "hash": "sha256:3daf292aad419db1bf51d4921175a36556a395759dab6135a09a7fd3e04db60f",
+      "size": 17038,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/user-journey-testing.ai.yaml": {
+      "hash": "sha256:bfd8802f78630264dae17e22ba5378f74d0c809a2fd6d6df50a1069a0b1f4080",
+      "size": 4377,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/feature-discovery-standards.ai.yaml": {
+      "hash": "sha256:d82b428a3e77a1e539d1c54d4eb17ba04181c06c7b4427b00938cee6952e032c",
+      "size": 23572,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/systematic-debugging.ai.yaml": {
+      "hash": "sha256:2584b82b62c4d8f18c8fa19eb109b146dcf095eeca9862e210305e9a6a47a98b",
+      "size": 2712,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/model-selection.ai.yaml": {
+      "hash": "sha256:0dd40469cc03284735041b3f3d589b782c0f2f0cd8d2ed98ea45d6366ff8075f",
+      "size": 7581,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/git-worktree.ai.yaml": {
+      "hash": "sha256:49303af5a966962d5ae88e5b939010b95e77d066b7fba2ca7397ceaf1a59151b",
+      "size": 2549,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/verification-evidence.ai.yaml": {
+      "hash": "sha256:0e530b937d1afdb5e9e2f530c017c8d0276eb32319f64ee177c34325c59d2ad2",
+      "size": 4193,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/adr-standards.ai.yaml": {
+      "hash": "sha256:fdf2ada3dd8779f2af38805f5c487199d6398032d0c102058f1157a201e1de64",
+      "size": 3606,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/retrospective-standards.ai.yaml": {
+      "hash": "sha256:cdc8fd831050f50a6cc3031cf83b61d02d2c7abc7c3bb53fbefbc504f41f14e2",
+      "size": 1471,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    },
+    ".standards/push-standards.ai.yaml": {
+      "hash": "sha256:6ef904a785d367cb3c53e6727ac5c7eb186af16ca5b5577e94c51cbab20fe064",
+      "size": 3691,
+      "installedAt": "2026-07-17T08:04:51.351Z"
+    }
+  },
+  "skillHashes": {},
+  "commandHashes": {},
+  "integrationBlockHashes": {
+    "AGENTS.md": {
+      "blockHash": "sha256:b448d11dce95ea771ab34724e255dfa2278323f7060b8ad59d249b37b1114d00",
+      "blockSize": 4578,
+      "fullHash": "sha256:69e60f28d0e3e17ee4488b39e98b412008ee05c86c3a2de3515fef90895f51fa",
+      "fullSize": 5604,
+      "installedAt": "2026-07-17T08:04:51.357Z"
+    }
+  }
+}

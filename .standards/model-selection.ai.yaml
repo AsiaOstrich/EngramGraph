@@ -1,0 +1,198 @@
+# AI Model Selection Strategy - AI Optimized
+# Source: core/model-selection.md
+# Inspired by Superpowers subagent-driven-development model selection (MIT)
+
+standard:
+  id: model-selection
+  name: AI Model Selection Strategy
+  description: AI 模型分級選擇策略
+
+  meta:
+    version: "2.0.1"
+    updated: "2026-06-10"
+    source: core/model-selection.md
+    description: "三層模型分級選擇策略 + 多模型池能力管理（XSPEC-027）"
+    inspired_by: superpowers/subagent-driven-development
+
+  guidelines:
+    - "使用最便宜能勝任的模型（成本效益原則）"
+    - "根據任務複雜度信號選擇模型等級"
+    - "BLOCKED 狀態時考慮升級模型再試"
+
+  tiers:
+    - id: fast
+      description: "機械性實作 — 單一檔案、明確 spec、無需判斷"
+      signals:
+        - "修改單一檔案"
+        - "spec 完全明確，無歧義"
+        - "不需要設計判斷"
+        - "模式化的重複工作"
+      examples:
+        - "更新 package.json 版本號"
+        - "新增一個 export"
+        - "修正 typo"
+    - id: standard
+      description: "整合性實作 — 多檔案、需要判斷力"
+      signals:
+        - "修改 2-5 個檔案"
+        - "需要理解模組間關係"
+        - "需要一定設計判斷"
+      examples:
+        - "新增一個 API endpoint（含 route + handler + test）"
+        - "重構一個模組的內部結構"
+    - id: capable
+      description: "架構性工作 — 設計、審查、除錯"
+      signals:
+        - "修改 5+ 個檔案"
+        - "需要架構決策"
+        - "跨模組協調"
+        - "除錯複雜問題"
+      examples:
+        - "設計新的子系統架構"
+        - "審查大型 PR"
+        - "診斷跨服務的效能問題"
+
+  rules:
+    - id: MS-001
+      trigger: "BLOCKED 狀態且當前為 fast"
+      action: "升級至 standard 再試"
+      priority: high
+    - id: MS-002
+      trigger: "BLOCKED 狀態且當前為 standard"
+      action: "升級至 capable 再試"
+      priority: high
+    - id: MS-003
+      trigger: "BLOCKED 狀態且當前為 capable"
+      action: "標記為需要人工介入"
+      priority: critical
+    - id: MS-004
+      trigger: "任務需求不明確"
+      action: "從 standard 或更高層級開始"
+      priority: medium
+
+  capability_dimensions:
+    description: "能力維度分類與評分說明（XSPEC-027, DEC-031, DEC-032）"
+    scoring_scale:
+      5: "生產就緒 — 高準確率，可直接使用"
+      4: "良好 — 偶有遺漏，可接受"
+      3: "基本可用 — 需人工補充"
+      2: "部分可用 — 僅供參考"
+      1: "不可靠 — 不建議使用"
+    dimensions:
+      modality:
+        vision:
+          description: "圖片/截圖理解能力（UI 分析、圖表解讀）"
+          benchmark: "internal-vision-bench"
+          scoring_guide:
+            5: "≥ 90% 準確，可萃取完整 DESIGN.md"
+            4: "75-89%，偶有遺漏但可用"
+            3: "60-74%，需人工補充"
+            2: "40-59%，僅供參考"
+            1: "< 40%，不可靠"
+        audio:
+          description: "語音理解能力"
+          benchmark: "future-audio-bench"
+        image_generation:
+          description: "圖片生成能力"
+          benchmark: "provider-specific"
+      reasoning:
+        code_reasoning:
+          description: "程式碼理解與生成品質"
+          benchmark: "humaneval-plus"
+        math_reasoning:
+          description: "數學推理準確率"
+          benchmark: "gsm8k"
+        instruction_following:
+          description: "複雜多步驟指令遵循率（多 Agent pipeline 場景最重視）"
+          benchmark: "internal-instruction-bench"
+        long_context_quality:
+          description: "長文件中間段資訊存取（Lost-in-the-Middle）"
+          benchmark: "needle-in-haystack"
+      output:
+        structured_output:
+          description: "JSON mode / Schema 格式輸出成功率"
+          benchmark: "internal-json-bench"
+        tool_use:
+          description: "Function Calling 正確率"
+          benchmark: "internal-tool-bench"
+      language:
+        multilingual_zh_tw:
+          description: "繁體中文品質（本系統優先語言）"
+          benchmark: "internal-zh-tw-bench"
+
+  capability_registry:
+    description: "模型能力登記表（DEC-031 D1）。各子專案依實際測試維護分數。"
+    format:
+      model_id: "provider/model-name"
+      version_pinned: "版本鎖定識別（SHA、日期戳或 model_version）"
+      pin_date: "鎖定日期（YYYY-MM-DD）"
+      eol_date: "預期淘汰日期（可選，YYYY-MM-DD）"
+      capabilities:
+        "<dimension>.<subdimension>": "<1-5 整數分>"
+    examples:
+      - model_id: "anthropic/claude-sonnet-4-6"
+        version_pinned: "claude-sonnet-4-6"
+        pin_date: "2026-04-13"
+        capabilities:
+          "modality.vision": 4
+          "reasoning.instruction_following": 5
+          "reasoning.code_reasoning": 5
+          "output.structured_output": 5
+          "output.tool_use": 5
+          "language.multilingual_zh_tw": 5
+      - model_id: "anthropic/claude-haiku-4-5"
+        version_pinned: "claude-haiku-4-5-20251001"
+        pin_date: "2026-04-13"
+        capabilities:
+          "modality.vision": 3
+          "reasoning.instruction_following": 4
+          "reasoning.code_reasoning": 4
+          "output.structured_output": 4
+          "output.tool_use": 4
+          "language.multilingual_zh_tw": 4
+
+  routing_rules:
+    description: "能力路由決策規則（DEC-031 D2, DEC-032 D3）"
+    selection_strategy: "pareto_weighted"
+    rules:
+      - id: CAP-001
+        condition: "任務需要 capability X，模型得分 ≥ min_score"
+        action: "SUPPORTED — 正常執行"
+        priority: high
+      - id: CAP-002
+        condition: "任務需要 capability X，模型得分 2-3（min_score 未達但 ≥ 2）"
+        action: "DEGRADED — 降級流程執行，產出標記 [DEGRADED]"
+        priority: medium
+      - id: CAP-003
+        condition: "任務需要 capability X，模型得分 ≤ 1 或未登記"
+        action: "UNSUPPORTED — 使用替代流程或提示用戶"
+        priority: high
+      - id: CAP-004
+        condition: "模型降智偵測（DEC-033）觸發 moderate 信號"
+        action: "啟動金絲雀測試，同時記錄降智警告"
+        priority: high
+      - id: CAP-005
+        condition: "模型降智偵測觸發 critical 信號"
+        action: "自動切換備用模型，上報 P1 Issue"
+        priority: critical
+
+  navigation_integration:
+    description: >
+      The ai-response-navigation standard (Rule R6, optional) allows next-step suggestion
+      options to carry a Tier annotation (〔model: Fast〕 / 〔model: Standard〕 / 〔model: Capable〕).
+      The complexity signals in this standard serve as the judgment basis for those annotations.
+    vendor_neutral_principle: >
+      Tier names (Fast / Standard / Capable) are vendor-agnostic labels.
+      Each platform independently maps these tiers to its available models.
+
+physical_spec:
+  type: checklist
+  validator:
+    type: ai_review
+    rule: "檢查模型選擇是否基於任務複雜度信號，而非固定使用最高等級"
+  checks:
+    - "是否根據複雜度信號選擇模型等級"
+    - "BLOCKED 時是否嘗試升級而非直接失敗"
+    - "簡單任務是否避免使用過高等級模型"
+    - "能力登記表是否包含 version_pinned 與 pin_date"
+    - "路由決策是否依 SUPPORTED/DEGRADED/UNSUPPORTED 三態處理"
