@@ -79,7 +79,13 @@ jobs:
       # Build + verify before publishing (native: kuzu + tree-sitter compile here).
       - run: npm run build
       - run: npm run typecheck
-      - run: npm test
+      # XSPEC-073 G2 — test:coverage rather than test.
+      # The thresholds added to vitest.config.ts only apply when coverage is
+      # collected, so plain `vitest run` would leave them as decoration — the
+      # state UDS cli's thresholds sat in for months. This is also the only
+      # workflow in the repo that runs tests at all (both workflows here trigger
+      # on `release` only, so there is no push/PR CI to attach a gate to).
+      - run: npm run test:coverage
 
       - name: Determine npm dist-tag
         id: tag

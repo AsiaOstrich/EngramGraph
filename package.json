@@ -44,7 +44,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "dev": "node --experimental-strip-types --watch src/api/dev-server.ts"
+    "dev": "node --experimental-strip-types --watch src/api/dev-server.ts",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [
     "engram",
@@ -81,6 +82,7 @@
   "devDependencies": {
     "@bufbuild/protobuf": "2.12.1",
     "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.10",
     "husky": "^9.1.7",
     "tsup": "^8.0.0",
     "typescript": "^5.6.0",
