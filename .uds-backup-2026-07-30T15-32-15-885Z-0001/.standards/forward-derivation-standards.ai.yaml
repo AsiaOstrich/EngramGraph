@@ -1,0 +1,228 @@
+# Forward Derivation Standards - AI Optimized
+# Source: core/forward-derivation-standards.md
+
+id: forward-derivation
+meta:
+  version: "1.3.0"
+  updated: "2026-06-18"
+  source: core/forward-derivation-standards.md
+  description: Standards for deriving BDD, TDD, IT, E2E, ATDD, and Contract tests from approved SDD specifications
+
+# Core Workflow
+workflow:
+  name: Forward Derivation Pipeline
+  stages:
+    - stage: SPEC_PARSING
+      description: Parse approved specification and extract Acceptance Criteria
+      output: Structured AC list
+      certainty: "[Source]"
+
+    - stage: BDD_DERIVATION
+      description: Transform AC to Gherkin scenarios
+      output: Feature file (.feature)
+      certainty: "[Derived]/[Generated]"
+
+    - stage: TDD_DERIVATION
+      description: Generate unit test skeleton from AC
+      output: Test file (.test.*)
+      certainty: "[Generated]"
+
+    - stage: IT_DERIVATION
+      description: Generate integration test skeleton from AC or .feature
+      output: Integration test file (.it.test.*)
+      certainty: "[Generated]"
+
+    - stage: E2E_DERIVATION
+      description: Generate E2E test skeleton from AC or .feature
+      output: E2E test file (.e2e.test.*)
+      certainty: "[Generated]"
+
+    - stage: ATDD_DERIVATION
+      description: Create acceptance test tables from AC
+      output: Acceptance test document (.md)
+      certainty: "[Generated]"
+
+    - stage: HUMAN_REVIEW
+      description: Review and refine generated outputs
+      output: Validated test structures
+      certainty: "[Confirmed]"
+
+# Test Level Decision Tree
+test_level_decision_tree:
+  question_1: "AC involves UI operations (click, navigate, redirect, form)?"
+  yes_1: "E2E Test"
+  no_1_question: "AC involves multi-service interaction (API, DB, Queue)?"
+  yes_2: "Integration Test"
+  no_2: "Unit Test (already covered by /derive-tdd)"
+  external_api: "Integration Test"
+
+# Test Level Configuration Awareness
+test_levels_config:
+  description: "/derive SHOULD check project test_levels before generating"
+  sources:
+    - ".standards/.uds.manifest.json → options.test_levels"
+    - "uds-manifest.json → test_levels"
+    - "Default: all levels"
+  mapping:
+    unit-testing: "/derive-tdd (always included)"
+    integration-testing: "/derive-it"
+    system-testing: "/derive-it (broader integration)"
+    e2e-testing: "/derive-e2e"
+  always_generated: "BDD (.feature), ATDD (acceptance.md), Contracts (contract.json)"
+  skip_message: "Skipping {level} derivation — not in project test_levels configuration"
+
+# Integration Test Templates
+it_templates:
+  http_api:
+    sections: [Setup, Request, Assert, Teardown]
+    description: "REST/GraphQL endpoint testing"
+  database:
+    sections: [Seed, Execute, Assert State, Cleanup]
+    description: "Data layer operation testing"
+  message_queue:
+    sections: [Publish, Consume, Assert Processing, Cleanup]
+    description: "Event-driven system testing"
+  service_to_service:
+    sections: [Setup, Call, Mock Dependencies, Assert]
+    description: "Microservice interaction testing"
+
+# E2E Test Template
+e2e_template:
+  sections: [Environment, Navigation, Interaction, Assertion, Cleanup]
+  gherkin_mapping:
+    Given: "Setup + Navigation"
+    When: "Interaction"
+    Then: "Assertion"
+
+# AC Level Summary
+ac_level_summary:
+  description: "Output AC Level Summary at end of /derive all"
+  format: "| AC | Suggested Level | Rationale |"
+
+# Terminal Projection: User Guide (extends the chain past tests)
+terminal_projection:
+  description: "The user guide is the terminal projection of the derivation chain — the human-readable view of the same workflow E2E/journey tests verify by machine"
+  single_source_of_truth: "AC spine — BDD, TDD/IT/E2E, ATDD, contracts, and the user guide are all projections of the same AC"
+  user_facing_filter:
+    rule: "A user-guide step is required only for an AC an end user can directly observe or operate (UI flow, CLI command, user-facing API semantics)"
+    excluded: "Purely internal AC (refactor, internal module contracts, performance thresholds, security controls) carry no user-guide obligation"
+    default: "When in doubt, treat the AC as user-facing; explicit marking is required to exclude"
+  shared_numbering:
+    rule: "Each user-guide step is tagged T-NNN, and that T-NNN MUST be the id of a real journey/E2E test"
+    ambiguous: "Ambiguous or missing tags are reported as uncovered (prefer redundancy over omission)"
+    violation: "Minting a parallel T-NNN-style series detached from the AC spine"
+  single_spine_principle: "Test and documentation sources are layered projections of one AC spine (N×1), not independent sources cross-checking one another pairwise (N×N); TDD/IT/E2E are pyramid layers of the same spine, not rival sources"
+
+# Certainty Framework
+certainty_framework:
+  tags:
+    - tag: "[Source]"
+      definition: Directly from specification content
+    - tag: "[Derived]"
+      definition: Transformed from SPEC content
+    - tag: "[Generated]"
+      definition: AI-generated structure
+    - tag: "[TODO]"
+      definition: Placeholder requiring human implementation
+
+# Anti-Hallucination Rules
+anti_hallucination:
+  fundamental_rule: Only derive what exists in specification
+  1_to_1_mapping: "N AC → exactly N scenarios/test groups per level"
+  forbidden:
+    - Adding scenarios not in AC
+    - Inventing test cases beyond AC scope
+    - Fabricating edge cases not specified
+
+# Failure handling (failure -> rollback -> retry/escalate -> re-verify)
+failure_handling:
+  description: What happens when a derivation gate fails; recovery always ends by re-verifying the failed gate
+  matrix:
+    - failure: AC parse error (unsupported format)
+      action: Abort that AC, report file:line + expected GWT/bullet format, emit no skeleton, re-queue after SPEC fix
+    - failure: AC count mismatch (tests != ACs)
+      action: "[anti-hallucination] hard rollback + regenerate strict 1:1; never add/delete tests to match the count"
+    - failure: Skeleton does not parse/compile
+      action: Roll back the file and regenerate with the correct template; on a 2nd failure mark the AC [BLOCKED] and escalate
+    - failure: Human review rejection
+      action: Record the reason and regenerate only the rejected items with that feedback; never auto-approve
+    - failure: Missing @SPEC/@AC attribution
+      action: Block the transition into TDD RED and re-emit with attribution
+
+# Commands
+commands:
+  - command: "/derive-bdd"
+    input: SPEC-XXX.md
+    output: .feature
+    purpose: AC to Gherkin scenarios
+  - command: "/derive-tdd"
+    input: SPEC-XXX.md
+    output: .test.*
+    purpose: AC to Unit test skeletons
+  - command: "/derive-it"
+    input: "SPEC-XXX.md or .feature"
+    output: .it.test.*
+    purpose: AC to Integration test skeletons
+  - command: "/derive-e2e"
+    input: "SPEC-XXX.md or .feature"
+    output: .e2e.test.*
+    purpose: AC to E2E test skeletons
+  - command: "/derive-atdd"
+    input: SPEC-XXX.md
+    output: acceptance.md
+    purpose: AC to acceptance test tables
+  - command: "/derive-contracts"
+    input: SPEC-XXX.md
+    output: contract.json
+    purpose: AC to contract definitions
+  - command: "/derive-all"
+    input: SPEC-XXX.md
+    output: All above
+    purpose: "Full pipeline (BDD + TDD + IT + E2E + ATDD + Contracts)"
+
+# Rules for AI
+rules:
+  - id: fd-fail-gate-halts
+    instruction: A gate failure must halt progression; never enter TDD RED with an unresolved failure
+    priority: required
+  - id: fd-fail-count-hard-rollback
+    instruction: A test/AC count mismatch is a hard rollback, not a reconciliation; never add or delete tests to match the count
+    priority: required
+  - id: fd-fail-bounded-retry-escalate
+    instruction: Bound automated retries (max 2 for transient/template errors); on exhaustion mark the AC [BLOCKED] and escalate to a human
+    priority: required
+  - id: approved-spec-only
+    instruction: Only derive from approved specifications
+    priority: required
+  - id: read-before-derive
+    instruction: Read entire specification before generating
+    priority: required
+  - id: strict-1-to-1
+    instruction: One scenario/test group per AC
+    priority: required
+  - id: source-attribution
+    instruction: Include source reference on every item
+    priority: required
+  - id: check-test-levels
+    instruction: Check project test_levels config before deriving; skip unconfigured levels
+    priority: recommended
+  - id: ac-level-summary
+    instruction: Output AC Level Summary table at end of /derive all
+    priority: recommended
+  - id: single-spine-no-parallel-numbering
+    instruction: Every test/doc artifact must trace back to the AC spine; never mint a parallel T-NNN-style series detached from it
+    priority: required
+  - id: user-guide-shared-tnnn
+    instruction: A user-guide step's T-NNN must equal a real journey/E2E test id; ambiguous or missing tags are reported as uncovered
+    priority: required
+  - id: user-facing-ac-conservative-default
+    instruction: User-guide obligation applies to user-facing AC only; when in doubt treat as user-facing, explicit marking to exclude
+    priority: recommended
+
+related_standards:
+  - reverse-engineering-standards.md
+  - spec-driven-development.md
+  - behavior-driven-development.md
+  - test-driven-development.md
+  - testing-standards.md
+  - test-data-standards.md

@@ -1,0 +1,93 @@
+# ADR Standards - AI Optimized
+# Source: core/adr-standards.md
+
+id: adr-standards
+meta:
+  version: "1.0.0"
+  updated: "2026-03-26"
+  source: core/adr-standards.md
+  guide: skills/adr-assistant/guide.md
+  description: Architecture Decision Records for tracking significant technical decisions
+
+# When to write an ADR
+trigger_conditions:
+  write_adr:
+    - "Choosing a framework, library, or platform"
+    - "Defining API contracts or data formats"
+    - "Changing deployment strategy"
+    - "Establishing coding patterns or conventions"
+    - "Making trade-offs with long-term consequences"
+    - "Deviating from established patterns"
+  skip_adr:
+    - "Routine dependency updates"
+    - "Bug fixes within existing architecture"
+    - "Code style or formatting decisions"
+    - "Trivial implementation choices"
+
+# ADR template structure
+template:
+  required_sections:
+    - "Status (Proposed | Accepted | Deprecated | Superseded)"
+    - "Date (YYYY-MM-DD)"
+    - "Context"
+    - "Considered Options (minimum 2)"
+    - "Decision Outcome with justification"
+    - "Consequences (Good / Bad)"
+  optional_sections:
+    - "Deciders"
+    - "Technical Story"
+    - "Decision Drivers"
+    - "Neutral consequences"
+    - "Links"
+
+# Status transitions
+status_lifecycle:
+  flow: "Proposed → Accepted → Deprecated | Superseded"
+  rule: "Never revert Accepted to Proposed; supersede instead"
+
+# Storage
+storage:
+  directory: "docs/adr/"
+  naming: "ADR-NNN-short-description.md"
+
+# Key rules
+rules:
+  - "Write ADR at decision time, not weeks later"
+  - "Include at least 2 considered options"
+  - "Never edit accepted ADRs; supersede instead"
+  - "Link bidirectionally to SPECs, code, and PRs"
+  - "Six-month rule: if someone might ask 'why?' later, write an ADR"
+
+# DEC borrowing extension rules
+dec_borrowing_rules:
+  dec_tech_radar_default_trial:
+    description: "All new borrowing DECs must start with Technology Radar state = Trial"
+    apply_when: "Creating a new DEC that documents borrowing from a paper/repo/external source"
+    action: "Set 技術雷達狀態.狀態 to Trial and fill 下次評估日期"
+
+  dec_missing_hypothesis_warning:
+    description: "When referencing a DEC that lacks a 借鑲假設 block, annotate with warning"
+    apply_when: "AI references a DEC during planning or analysis"
+    action: "Annotate with [假設未定義] and remind to fill the hypothesis block; do NOT block the workflow"
+
+  dec_tech_radar_states:
+    Adopt: "Validated effective; maintain as standard practice"
+    Trial: "Under evaluation; requires 下次評估日期 (mandatory)"
+    Assess: "Effective only under limited conditions; record applicability boundary"
+    Hold: "Ineffective or harmful; stop new adoption; plan removal"
+
+  dec_status_transitions:
+    Trial_to_Adopt: "Success criteria met; record verification date and evidence"
+    Trial_to_Hold: "Exceeded deadline without meeting target; trigger reversal protocol"
+    Trial_to_Assess: "Correct implementation but mismatched context; narrow scope"
+    any_to_Hold_emergency: "Harmful side effects; immediately disable via Feature Flag"
+
+  reversal_dec_rules:
+    create_when: "Method itself is ineffective (after confirming correct implementation and matching context)"
+    do_not_create_when: "Implementation error — fix and restart hypothesis timer instead"
+    filename_pattern: "DEC-NNN-reversal.md"
+    original_dec_update: "Set original DEC status to 'Superseded by DEC-NNN-reversal'"
+
+  tech_radar_index:
+    location: "cross-project/decisions/TECH-RADAR.md"
+    sync_rule: "Update TECH-RADAR.md whenever a DEC's radar state changes"

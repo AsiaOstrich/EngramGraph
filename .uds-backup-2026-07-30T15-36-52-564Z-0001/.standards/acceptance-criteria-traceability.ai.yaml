@@ -1,0 +1,270 @@
+# Acceptance Criteria Traceability Standards - AI Optimized
+# Source: core/acceptance-criteria-traceability.md
+
+standard:
+  id: acceptance-criteria-traceability
+  name: Acceptance Criteria Traceability
+  description: AC-to-test traceability matrix, coverage calculation, and spec generation quality rules
+
+  meta:
+    version: "1.1.0"
+    updated: "2026-03-18"
+    source: core/acceptance-criteria-traceability.md
+    references:
+      - "ISO/IEC/IEEE 29119-3 (Test Documentation — Traceability Matrix)"
+      - "IEEE 830 (Software Requirements Specification — Traceability)"
+      - "ISTQB Foundation (Requirements-based testing)"
+      - "INVEST Principles (Acceptance criteria quality)"
+
+  # XSPEC-070 Phase 2 — skill↔standard content-coverage audit.
+  # Consumed by scripts/check-skill-content-coverage.ts. v1.1.0 mandates the
+  # combined "canonical annotation" `@SPEC-<id> @AC-<n>`; the anchor skill
+  # (ac-coverage) MUST teach that term, or CONTENT-002 fires.
+  audit:
+    mandatory_keywords:
+      - canonical annotation
+
+  traceability_matrix:
+    description: Standard format for tracking AC to test relationships
+    fields:
+      - name: AC-ID
+        required: true
+        description: Unique identifier from specification (e.g., AC-1)
+      - name: Test File
+        required: conditionally
+        description: Path to test file (required if covered)
+      - name: Test Name
+        required: conditionally
+        description: Name of test case or describe block (required if covered)
+      - name: Status
+        required: true
+        description: "Coverage status: covered, partial, uncovered"
+      - name: Notes
+        required: false
+        description: Additional context (blockers, dependencies)
+
+    linking_convention:
+      description: Tests must reference source AC using the canonical combined annotation
+      canonical: "@SPEC-<id> @AC-<n> — single combined tag on one line, e.g. @SPEC-001 @AC-1"
+      note: "Do not split into separate @AC / @SPEC lines; forward-derivation and tag filters consume the combined form"
+      annotations:
+        - "@SPEC-001 @AC-1 — in test name or comment (canonical, parallel)"
+        - "describe('AC-N: description') — in test structure"
+
+  coverage_status:
+    definitions:
+      - status: covered
+        symbol: "✅"
+        definition: AC is fully tested
+        criteria: All conditions in AC have corresponding test assertions
+
+      - status: partial
+        symbol: "⚠️"
+        definition: AC is partially tested
+        criteria: Some conditions tested, but edge cases or paths missing
+
+      - status: uncovered
+        symbol: "❌"
+        definition: AC has no tests
+        criteria: No test case references this AC
+
+      - status: not_implemented
+        symbol: "🚫"
+        definition: AC has no corresponding implementation or test verification (feature code or test body does not exist)
+        criteria: |
+          No business logic in src/ corresponds to this AC, OR the only test mapped
+          to this AC is an it.todo() placeholder (test body not implemented).
+          Distinct from uncovered: uncovered = code exists but test was forgotten;
+          not_implemented = explicitly marked as pending implementation.
+          Typical signals:
+            - throw NotImplementedException(), empty stub body, FEATURE_STUB: marker
+            - it.todo("AC-XXX: ...") — test slot reserved but verification not written
+          XSPEC-220: it.todo() tests map to not_implemented, NOT to uncovered.
+          Rationale: it.todo() is a deliberate placeholder, not an oversight.
+        decision_tree: |
+          Q1: Does the corresponding code exist in src/?
+            No → not_implemented
+            Yes → Q2: Does any test reference this AC?
+              No → uncovered
+              Yes → Q3: Are all conditions in the AC tested?
+                Yes → covered
+                No → partial
+
+    calculation:
+      formula: "AC Coverage % = (covered_count + partial_count × 0.5) / (total_ac_count - not_implemented_count) × 100"
+      note: |
+        not_implemented ACs are excluded from the coverage denominator (separate dimension).
+        Partial counts as 0.5 for coverage calculation.
+        Example: 20 ACs total, 3 not_implemented, 15 covered, 2 uncovered →
+          coverage = (15 + 0) / (20 - 3) × 100 = 88.2%
+
+    ci_gate:
+      not_implemented_blocking: true
+      rule: "not_implemented_count > 0 → CI fails with [AC-NOT-IMPL] before UAT gate"
+      report_format: |
+        AC Traceability Report
+        ──────────────────────
+        🚫 NOT IMPLEMENTED (<count>) — BLOCKING
+          AC-007  OrderCancellation        src/orders/ 無對應實作
+          AC-012  RefundCalculation        src/payments/ 無對應實作
+
+        ❌ UNCOVERED (<count>) — WARNING
+          AC-003  BulkImport               test/import/ 缺測試
+
+        ✅ COVERED (<count>)
+        ⚠️  PARTIAL (<count>)
+
+        AC Coverage: <pct>% (<covered>/<implemented_total> implemented ACs)
+        Status: BLOCKED by <not_impl_count> not_implemented AC(s)
+
+  user_doc_coverage:
+    description: "Second dimension: are user-facing AC also documented in the user guide? Extends the traceability spine past tests to the user guide (Forward Derivation Standards -> Terminal Projection: User Guide)"
+    user_facing_filter:
+      rule: "Apply only to user-facing AC — those an end user can directly observe or operate (UI flow, CLI command, user-facing API semantics)"
+      excluded: "Internal refactor/module contracts, performance thresholds, security/internal guardrails"
+      conservative_default: "When in doubt treat AC as user-facing; excluding requires explicit 'user_facing: false', never silent omission"
+    status:
+      - status: documented
+        symbol: "✅"
+        definition: "A user-guide step covers this AC, tagged with the AC's shared T-NNN"
+      - status: partial
+        symbol: "⚠️"
+        definition: "A user-guide step exists but is incomplete or ambiguously tagged"
+      - status: undocumented
+        symbol: "❌"
+        definition: "No user-guide step references this user-facing AC"
+    calculation: |
+      user_doc_coverage = (documented + partial × 0.5) / (user_facing_ac_count - not_implemented_count) × 100
+      non-user-facing AC counted in neither numerator nor denominator; partial = 0.5; not_implemented excluded from denominator
+    shared_ruler: "A user-guide step's T-NNN MUST equal a real journey/E2E test id (single spine: test + journey + user guide). A parallel id with no matching test is reported undocumented, never covered"
+
+  quality_thresholds:
+    defaults:
+      - name: Minimum AC Coverage
+        value: 100
+        enforcement: Required for production release
+      - name: Minimum for Check-in
+        value: 80
+        enforcement: Required for feature branch merge
+      - name: Warning Level
+        value: 60
+        enforcement: Triggers coverage warning
+
+    configurable: true
+    config_example:
+      acCoverage:
+        minimum: 100
+        checkinMinimum: 80
+        warningLevel: 60
+        partialWeight: 0.5
+
+  spec_generation_quality:
+    description: Rules for automatically generating specifications from PRD/user stories
+    ac_quality_criteria:
+      - criterion: Specific
+        description: AC describes concrete, observable behavior
+        validation: No vague terms like "should work well"
+
+      - criterion: Measurable
+        description: AC has quantifiable or verifiable outcome
+        validation: Contains expected values, states, or behaviors
+
+      - criterion: Achievable
+        description: AC is technically feasible
+        validation: References known APIs, data, or capabilities
+
+      - criterion: Relevant
+        description: AC relates to feature purpose
+        validation: Maps to user need or business requirement
+
+      - criterion: Testable
+        description: AC can be verified by a test
+        validation: Can be expressed as Given-When-Then
+
+    io_contract:
+      input_types:
+        - type: PRD
+          required_fields: Title, Description, User Stories
+        - type: User Story
+          required_fields: As a / I want / So that
+        - type: Feature Brief
+          required_fields: Feature name, Goals, Constraints
+
+      output_requirements:
+        - section: SPEC ID
+          required: true
+        - section: Title
+          required: true
+        - section: Description
+          required: true
+        - section: Acceptance Criteria
+          required: true
+          format: Numbered list (AC-1, AC-2, ...)
+        - section: AC Format
+          required: true
+          format: Given-When-Then or structured bullet
+        - section: Testability Flag
+          required: true
+          format: Each AC marked as testable/not-testable
+
+      validation_rules:
+        - "AC count >= 1"
+        - "No duplicate AC descriptions"
+        - "Happy path + at least 1 error/edge case"
+        - "100% of AC must be testable"
+        - "Each AC links back to source requirement"
+
+  rules:
+    - id: annotate-tests
+      trigger: writing tests for a specification
+      instruction: Always annotate tests with AC-ID and SPEC-ID using standard annotations
+      priority: required
+
+    - id: honest-status
+      trigger: reporting AC coverage
+      instruction: "Use honest status classification (covered/partial/uncovered/not_implemented); never inflate coverage"
+      priority: required
+
+    - id: not-implemented-gate
+      trigger: AC traceability matrix contains not_implemented status
+      instruction: |
+        Flag CI as BLOCKED with [AC-NOT-IMPL] message. List all not_implemented ACs.
+        not_implemented must be resolved before UAT. Exclude not_implemented from coverage denominator.
+      priority: required
+
+    - id: track-all-ac
+      trigger: creating traceability matrix
+      instruction: Include ALL AC from specification, even uncovered ones
+      priority: required
+
+    - id: testable-ac
+      trigger: generating or reviewing specifications
+      instruction: Ensure all AC are testable; flag non-testable AC for revision
+      priority: required
+
+    - id: coverage-gate
+      trigger: before check-in or merge
+      instruction: Verify AC coverage meets project threshold before allowing commit
+      priority: recommended
+
+    - id: spec-quality
+      trigger: generating specifications automatically
+      instruction: Validate generated AC against SMART criteria and testability
+      priority: required
+
+    - id: user-doc-user-facing-only
+      trigger: computing the user-doc coverage dimension
+      instruction: "Apply user-doc coverage only to user-facing AC; when in doubt treat as user-facing, exclude only with an explicit 'user_facing: false' marking"
+      priority: recommended
+
+    - id: user-doc-shared-tnnn
+      trigger: linking a user-guide step to an AC
+      instruction: "A user-guide step's T-NNN must equal a real journey/E2E test id; a parallel id with no matching test is reported undocumented, never covered"
+      priority: required
+
+related_standards:
+  - forward-derivation-standards.md
+  - spec-driven-development.md
+  - testing-standards.md
+  - checkin-standards.md
+  - test-governance.md

@@ -1,0 +1,516 @@
+{
+  "backupId": ".uds-backup-2026-07-30T15-57-38-055Z-0001",
+  "createdAt": "2026-07-30T15:57:38.063Z",
+  "plan": {
+    "summary": {
+      "create": 0,
+      "update": 70,
+      "delete": 0,
+      "unchanged": 0,
+      "migrate_block": 1
+    },
+    "actionCount": 71,
+    "actions": [
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/acceptance-criteria-traceability.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/acceptance-test-driven-development.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/accessibility-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/adr-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/ai-agreement-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/ai-command-behavior.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/ai-friendly-architecture.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/ai-instruction-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/ai-response-navigation.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/anti-hallucination.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/api-design-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/behavior-driven-development.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/behavior-snapshot.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/changelog.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/checkin-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/code-review.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/commit-message.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/context-aware-loading.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/database-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/deployment-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/developer-memory.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/documentation-lifecycle.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/documentation-structure.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/documentation-writing-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/error-codes.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/feature-discovery-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/feature-manifest-standard.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/flow-based-testing.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/forward-derivation-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/full-coverage-testing.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/git-workflow.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/git-worktree.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/knowledge-graph-memory.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/logging.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/mock-boundary.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/model-selection.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/mutation-testing.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/packaging-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/performance-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/project-context-memory.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/project-structure.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/push-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/refactoring-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/requirement-checklist.md",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/requirement-document-template.md",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/requirement-engineering.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/requirement-template.md",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/retrospective-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/reverse-engineering-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/security-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/security-testing.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/self-review-protocol.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/spec-driven-development.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/structured-task-definition.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/systematic-debugging.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/test-completeness-dimensions.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/test-driven-development.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/test-governance.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/testing.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/user-journey-testing.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/verification-evidence.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/versioning.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "standard",
+        "path": ".standards/virtual-organization-standards.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "option",
+        "path": ".standards/options/github-flow.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "option",
+        "path": ".standards/options/squash-merge.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "option",
+        "path": ".standards/options/english.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "option",
+        "path": ".standards/options/unit-testing.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "option",
+        "path": ".standards/options/integration-testing.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "option",
+        "path": ".standards/options/system-testing.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "update",
+        "category": "option",
+        "path": ".standards/options/e2e-testing.ai.yaml",
+        "reason": "forced update (--force)"
+      },
+      {
+        "type": "migrate_block",
+        "category": "integration",
+        "path": "AGENTS.md",
+        "reason": "forced integration update (--force)"
+      }
+    ]
+  },
+  "backedUpFiles": [
+    ".standards/acceptance-criteria-traceability.ai.yaml",
+    ".standards/acceptance-test-driven-development.ai.yaml",
+    ".standards/accessibility-standards.ai.yaml",
+    ".standards/adr-standards.ai.yaml",
+    ".standards/ai-agreement-standards.ai.yaml",
+    ".standards/ai-command-behavior.ai.yaml",
+    ".standards/ai-friendly-architecture.ai.yaml",
+    ".standards/ai-instruction-standards.ai.yaml",
+    ".standards/ai-response-navigation.ai.yaml",
+    ".standards/anti-hallucination.ai.yaml",
+    ".standards/api-design-standards.ai.yaml",
+    ".standards/behavior-driven-development.ai.yaml",
+    ".standards/behavior-snapshot.ai.yaml",
+    ".standards/changelog.ai.yaml",
+    ".standards/checkin-standards.ai.yaml",
+    ".standards/code-review.ai.yaml",
+    ".standards/commit-message.ai.yaml",
+    ".standards/context-aware-loading.ai.yaml",
+    ".standards/database-standards.ai.yaml",
+    ".standards/deployment-standards.ai.yaml",
+    ".standards/developer-memory.ai.yaml",
+    ".standards/documentation-lifecycle.ai.yaml",
+    ".standards/documentation-structure.ai.yaml",
+    ".standards/documentation-writing-standards.ai.yaml",
+    ".standards/error-codes.ai.yaml",
+    ".standards/feature-discovery-standards.ai.yaml",
+    ".standards/feature-manifest-standard.ai.yaml",
+    ".standards/flow-based-testing.ai.yaml",
+    ".standards/forward-derivation-standards.ai.yaml",
+    ".standards/full-coverage-testing.ai.yaml",
+    ".standards/git-workflow.ai.yaml",
+    ".standards/git-worktree.ai.yaml",
+    ".standards/knowledge-graph-memory.ai.yaml",
+    ".standards/logging.ai.yaml",
+    ".standards/mock-boundary.ai.yaml",
+    ".standards/model-selection.ai.yaml",
+    ".standards/mutation-testing.ai.yaml",
+    ".standards/packaging-standards.ai.yaml",
+    ".standards/performance-standards.ai.yaml",
+    ".standards/project-context-memory.ai.yaml",
+    ".standards/project-structure.ai.yaml",
+    ".standards/push-standards.ai.yaml",
+    ".standards/refactoring-standards.ai.yaml",
+    ".standards/requirement-checklist.md",
+    ".standards/requirement-document-template.md",
+    ".standards/requirement-engineering.ai.yaml",
+    ".standards/requirement-template.md",
+    ".standards/retrospective-standards.ai.yaml",
+    ".standards/reverse-engineering-standards.ai.yaml",
+    ".standards/security-standards.ai.yaml",
+    ".standards/security-testing.ai.yaml",
+    ".standards/self-review-protocol.ai.yaml",
+    ".standards/spec-driven-development.ai.yaml",
+    ".standards/structured-task-definition.ai.yaml",
+    ".standards/systematic-debugging.ai.yaml",
+    ".standards/test-completeness-dimensions.ai.yaml",
+    ".standards/test-driven-development.ai.yaml",
+    ".standards/test-governance.ai.yaml",
+    ".standards/testing.ai.yaml",
+    ".standards/user-journey-testing.ai.yaml",
+    ".standards/verification-evidence.ai.yaml",
+    ".standards/versioning.ai.yaml",
+    ".standards/virtual-organization-standards.ai.yaml",
+    ".standards/options/github-flow.ai.yaml",
+    ".standards/options/squash-merge.ai.yaml",
+    ".standards/options/english.ai.yaml",
+    ".standards/options/unit-testing.ai.yaml",
+    ".standards/options/integration-testing.ai.yaml",
+    ".standards/options/system-testing.ai.yaml",
+    ".standards/options/e2e-testing.ai.yaml",
+    "AGENTS.md"
+  ],
+  "projectPath": "/Users/alberthsu/Documents/GitHub/AsiaOstrich/EngramGraph"
+}

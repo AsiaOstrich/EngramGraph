@@ -1,0 +1,387 @@
+# Mock Boundary Standards - AI Optimized
+# Source: core/mock-boundary.md
+
+id: mock-boundary
+meta:
+  version: "1.2.0"
+  updated: "2026-07-01"
+  source: core/mock-boundary.md
+  description: >
+    Rules defining what can and cannot be mocked to prevent hollow tests —
+    tests that pass while the real system is broken.
+    v1.1.0: Added Level 1/Level 2 mock layer distinction and external
+    dependency testability matrix template (XSPEC-204).
+    v1.2.0: Added injectable background execution as a seam (parallel to clock
+    injection) — allowed background-runner seam, no-poll/sleep rule, and the
+    poll/sleep-for-background-result anti-pattern (issue #143).
+
+# ─────────────────────────────────────────────────────────
+# Mock Levels (v1.1.0)
+# ─────────────────────────────────────────────────────────
+mock_levels:
+  description: >
+    Two distinct levels of test doubles with separate governance rules.
+    Conflating them leads to the "STUB blocked ∩ real service unavailable = untestable"
+    deadlock in UAT environments.
+
+  level_1:
+    name: Code-level Mock
+    description: >
+      Test doubles within test code — jest.mock(), Moq.Mock<T>(), vi.fn(), etc.
+    governance: "Regulated by STUB marker rules (full-coverage-testing)"
+    examples:
+      - "vi.mock('../../src/services/sms-service.js')"
+      - "new Mock<ISmsService>()"
+      - "httpClient.Setup(x => x.PostAsync(...)).ReturnsAsync(...)"
+    rules:
+      - "Subject to // WARNING: STUB deployment-blocking rules"
+      - "Not allowed in flow/integration/E2E tests (see forbidden section)"
+      - "STUB marker must be placed at usage site"
+
+  level_2:
+    name: Infrastructure-level Stub Server
+    description: >
+      Independently running test-double services — WireMock, MockSoap, stub-server, json-server, etc.
+      These run as separate processes alongside the application under test.
+    governance: "Regulated by environment stratification rules (multi-environment-e2e-testing)"
+    examples:
+      - "WireMock running on port 9999, app configured via env var to hit it"
+      - "MockSoap sidecar for SOAP gateway simulation"
+      - "json-server for external REST API simulation"
+    rules:
+      - "NOT subject to STUB deployment-blocking rules (they are infrastructure, not code)"
+      - "MAY be used in UAT environment when real external service is unavailable"
+      - "MUST be documented in the external-dependency-testability-matrix as ⚠️"
+      - "MUST list dimensions NOT verifiable through the stub"
+      - "MUST NOT be deployed to or accessible from PRD environment"
+      - "MUST be deployed as sidecar (not bundled in production artifact)"
+
+  level_2_rationale: >
+    When full-coverage-testing blocks STUB markers AND the real external service
+    is unavailable in UAT (e.g., SMS gateway requires billing setup), Level 2
+    stub servers are the correct solution. They allow the flow to execute in UAT
+    while clearly documenting which verification dimensions are deferred to PRD.
+
+# ─────────────────────────────────────────────────────────
+# External Dependency Testability Matrix Template
+# ─────────────────────────────────────────────────────────
+external_dependency_testability_matrix:
+  rule: >
+    Projects with external service dependencies MUST maintain this matrix.
+    It answers: "In this environment, can we fully verify this service integration?"
+  location: "docs/testing/dependency-testability-matrix.md"
+  when_required: "Any project with SMS, payment, IdP, messaging, or external SOAP/REST dependencies"
+
+  template: |
+    ## External Dependency Testability Matrix
+
+    | External Service | local-dev | UAT | PRD | Unverifiable Dimensions in UAT |
+    |-----------------|:---------:|:---:|:---:|-------------------------------|
+    | SMS Gateway     | ⚠️ L2-stub | ⚠️ L2-stub / ❌ | ✅ | Billing correctness, DR reporting, carrier delivery |
+    | Payment SOAP    | ⚠️ L2-stub | ⚠️/❌ | ✅ | Real debit/credit, bank reconciliation, card validation |
+    | LDAP / AD       | ⚠️ container | ⚠️ AD LDS | ✅ | Enterprise AD tree, group sync, GPO policies |
+    | Push Notification | ⚠️ mock | ⚠️ sandbox | ✅ | Production delivery rates, carrier-specific behavior |
+
+    Legend:
+    ✅ Full verification | ⚠️ Flow passes via stub (real-world dimensions deferred) | ❌ Cannot test
+
+  note: "L2-stub = Level 2 infrastructure stub server. Refer to mock-boundary Level 2 rules."
+
+# ─────────────────────────────────────────────────────────
+# Core Problem
+# ─────────────────────────────────────────────────────────
+core_problem:
+  name: Hollow Test Anti-Pattern
+  description: >
+    Over-mocking replaces real business logic with test doubles, making the test suite
+    a specification of mock behavior rather than system behavior.
+    The tests pass in CI while the real system silently fails.
+  real_world_example: |
+    // SPEC-002.test.ts (multi-agent pipeline project) — hollow test example
+    vi.mock('../../src/runner/agent-runner.js')      // Core dependency mocked
+    vi.mock('../../src/runner/guardian-hooks.js')     // Core dependency mocked
+    vi.mock('../../src/runner/prototyper.js')         // Core dependency mocked
+    vi.mock('../../src/runner/iteration-report.js')   // Core dependency mocked
+    vi.mock('../../src/memory/memory-store.js')       // Core dependency mocked
+    vi.mock('node:fs/promises', ...)                  // I/O mocked
+
+    // Result: runPipeline() runs but touches ZERO real code.
+    // All 8 agent calls are faked. The test proves nothing about pipeline logic.
+
+# ─────────────────────────────────────────────────────────
+# Allowed Mocks
+# ─────────────────────────────────────────────────────────
+allowed:
+  - category: External HTTP Services
+    description: Third-party APIs, LLM providers, payment gateways, email services
+    reason: Prevents flaky tests from external dependencies; enables response scenario control
+    examples:
+      - OpenAI / Anthropic / Grok API
+      - Stripe / payment processors
+      - SendGrid / email providers
+      - External OAuth providers
+    implementation: Mock the HTTP client or provider factory; never mock the internal caller
+
+  - category: Time Functions
+    description: Date.now(), new Date(), setTimeout, setInterval
+    reason: Makes tests deterministic and enables time-travel scenarios
+    examples:
+      - "vi.useFakeTimers()"
+      - "vi.setSystemTime(new Date('2026-01-01'))"
+    note: Always restore real timers after test with vi.useRealTimers()
+
+  - category: Environment Variables
+    description: process.env values
+    reason: Tests need different configurations without changing system state
+    implementation: Use vi.stubEnv() or process.env assignment in beforeEach/afterEach
+
+  - category: File System (unit tests only)
+    description: fs.readFile, fs.writeFile, fs.stat in UNIT tests
+    reason: Avoids slow I/O in fast unit tests
+    constraint: >
+      Integration tests, flow tests, and E2E tests MUST use real filesystem
+      or in-memory FS (memfs) — never vi.mock('node:fs/promises') at those levels
+
+  - category: Cross-Module Boundaries (with counterpart)
+    description: Calls to OTHER modules when testing THIS module's own logic
+    reason: Isolates the unit under test from its collaborators
+    constraint: >
+      A corresponding integration test MUST exist that exercises the real interaction.
+      Mock only when the real collaborator has its own test coverage.
+    example: |
+      // Mocking the DB layer in a service unit test is OK IF:
+      // 1. The DB layer has its own integration tests
+      // 2. The service test focuses on service logic (not DB behavior)
+
+  - category: In-Process Background Execution (via injectable runner)
+    description: >
+      Fire-and-forget dispatch — Task.Run, unawaited promises, setTimeout,
+      goroutines, thread-pool/executor submission, asyncio.create_task
+    reason: >
+      Background dispatch is a seam, exactly like the system clock. Inject a
+      runner so the test can drive the work to deterministic, awaited completion
+      and assert on success/exception/retry — instead of polling or sleeping.
+    implementation: >
+      Abstract dispatch behind a small interface (e.g. IBackgroundTaskRunner /
+      BackgroundDispatcher). Production keeps true fire-and-forget semantics;
+      the test double runs the work inline and tracks the Task/promise, exposing
+      a handle the test can await before asserting.
+    example: |
+      // Production: real fire-and-forget — returns immediately, work runs detached
+      class FireAndForgetDispatcher implements BackgroundDispatcher {
+        dispatch(work: () => Promise<void>): void { void work() }
+      }
+      // Test: inline + tracked so the test can await deterministic completion
+      class DeterministicDispatcher implements BackgroundDispatcher {
+        private tasks: Promise<void>[] = []
+        dispatch(work: () => Promise<void>): void { this.tasks.push(work()) }
+        async settle(): Promise<void> { await Promise.all(this.tasks) }
+      }
+
+# ─────────────────────────────────────────────────────────
+# Forbidden Mocks
+# ─────────────────────────────────────────────────────────
+forbidden:
+  - category: Own Module Core Logic
+    description: Mocking the module's OWN functions in the file that tests it
+    example: |
+      // ❌ Testing pipeline-runner.ts but mocking pipeline-runner itself
+      vi.mock('../../src/runner/pipeline-runner.js')
+      import { runPipeline } from '../../src/runner/pipeline-runner.js'
+      // runPipeline is now a no-op stub — the test proves nothing
+    violation_indicator: >
+      The mock import path resolves to the same directory as the test file,
+      or the mock replaces the primary export being tested.
+    fix: Remove the mock and let the real code run; mock only its external dependencies
+
+  - category: Database Layer in Integration/Flow Tests
+    description: Replacing DB calls with in-memory return values in integration or flow tests
+    reason: Masks query bugs, schema constraint violations, index issues, and migration errors
+    alternative: >
+      Use in-memory SQLite (better-sqlite3 / sql.js), test containers,
+      or a dedicated test schema — a real database with controlled data
+    example: |
+      // ❌ Forbidden in integration/flow tests
+      vi.mock('../../src/db/client.js', () => ({ query: vi.fn().mockResolvedValue([]) }))
+
+      // ✅ Correct: use real in-memory DB
+      import Database from 'better-sqlite3'
+      const testDb = new Database(':memory:')
+
+  - category: Core Framework Internals
+    description: Express/Fastify routing, ORM core (Drizzle/Prisma internals), auth middleware core
+    reason: Tests pass while real routing, query building, or auth enforcement is broken
+    example: |
+      // ❌ Forbidden
+      vi.mock('express', () => ({ Router: () => ({ get: vi.fn(), post: vi.fn() }) }))
+
+  - category: Security Controls
+    description: Auth token validators, permission checks, rate limiters, input sanitizers
+    reason: Mocking security controls makes tests useless for security validation
+    example: |
+      // ❌ Forbidden — this test proves nothing about auth
+      vi.mock('../../src/auth/middleware.js', () => ({
+        requireAuth: (req, res, next) => next()  // always passes
+      }))
+    fix: Use a real test user with a real valid token; test with real auth logic
+
+# ─────────────────────────────────────────────────────────
+# Hollow Test Detection Patterns
+# ─────────────────────────────────────────────────────────
+detection_patterns:
+  hollow_test_indicators:
+    - name: Mock Count Exceeds Import Count
+      check: "vi.mock() call count >= number of non-type imports in the test file"
+      severity: high
+      action: Review all assertions; verify at least one assertion is on actual output
+
+    - name: Assertions Only on Mock Calls
+      check: "All expect() statements use .toHaveBeenCalled() or .toHaveBeenCalledWith()"
+      severity: high
+      action: Add assertions on actual return values and system state changes
+
+    - name: More Mock Setup Than Assertions
+      check: "Lines of mock setup > lines of expect() assertions"
+      severity: medium
+      action: Consider if the test is testing behavior or just mock wiring
+
+    - name: Self-Referential Mock
+      check: "A vi.mock() path resolves to the same module being imported as the subject under test"
+      severity: critical
+      action: Remove the self-mock immediately; it makes the test a no-op
+
+  ai_generation_warning: >
+    AI tools (including this assistant) tend to generate hollow tests because:
+    1. Mocking makes tests compile and pass without requiring real infrastructure
+    2. AI cannot know the full dependency graph at generation time
+    When reviewing AI-generated tests, always apply the hollow test indicators above.
+
+# ─────────────────────────────────────────────────────────
+# Anti-Patterns
+# ─────────────────────────────────────────────────────────
+anti_patterns:
+  - name: Total Mock Isolation
+    description: Every import is mocked; test verifies only mock interaction counts
+    problem: Tests pass regardless of actual logic correctness
+    symptom: Deleting the implementation file doesn't break the test
+
+  - name: Mock the World
+    description: External + internal + database + filesystem all mocked in one test
+    problem: Test becomes a specification of mock behavior, not system behavior
+
+  - name: Mock Without Integration Counterpart
+    description: Cross-module mock with no corresponding integration test
+    problem: The interaction between modules is never actually exercised
+
+  - name: Security Mock Bypass
+    description: Auth/permission middleware replaced with always-pass stub
+    problem: Security regression cannot be detected
+
+  - name: Database Mock Cascade
+    description: DB mock returns hardcoded data, hiding query logic errors
+    problem: Schema migrations, wrong predicates, missing joins — all invisible
+
+  - name: Poll/Sleep for Background Result
+    description: >
+      Sleeping or polling to wait for in-process fire-and-forget work
+      (Task.Run, unawaited promise, setTimeout, goroutine) to finish
+    problem: >
+      The race is still there — the timeout only hides it most of the time while
+      slowing the whole suite; on a shared runner it leaks flakiness into other
+      MRs' CI. Same class of anti-pattern as depending on wall-clock time.
+
+# ─────────────────────────────────────────────────────────
+# Rules
+# ─────────────────────────────────────────────────────────
+rules:
+  - id: no-own-module-mock
+    trigger: writing any test for a module
+    instruction: Never vi.mock() a path that resolves to the module being tested
+    priority: required
+
+  - id: real-db-in-flow-tests
+    trigger: writing flow test, integration test, or E2E test
+    instruction: >
+      Use a real database (in-memory SQLite, test container, or test schema).
+      Never mock the DB layer in these test levels.
+    priority: required
+
+  - id: mock-needs-integration-counterpart
+    trigger: adding a vi.mock() for a cross-module dependency in a unit test
+    instruction: >
+      Ensure a corresponding integration test exercises the real interaction.
+      Note the counterpart test in a comment: "// integration: see src/__tests__/integration/..."
+    priority: required
+
+  - id: security-no-mock
+    trigger: test involves authentication, authorization, or rate limiting
+    instruction: >
+      Never mock security controls.
+      Create a real test user with a real token; exercise the real auth logic.
+    priority: required
+
+  - id: hollow-test-review
+    trigger: mock count in test file equals or exceeds non-type import count
+    instruction: >
+      Apply hollow test indicators checklist before submitting.
+      At least one assertion must verify an actual output value (not a mock call).
+    priority: required
+
+  - id: ai-generated-test-mock-review
+    trigger: tests are AI-generated
+    instruction: >
+      AI-generated tests frequently over-mock. Apply all detection_patterns checks.
+      If any hollow test indicator triggers, rewrite the mocking strategy.
+    priority: required
+
+  - id: no-poll-sleep-for-background-work
+    trigger: test asserts a fire-and-forget side effect (Task.Run, unawaited promise, setTimeout, goroutine, executor)
+    instruction: >
+      Never poll or sleep to wait for in-process background work. Inject a
+      deterministic runner (e.g. IBackgroundTaskRunner / BackgroundDispatcher)
+      whose test double runs the work inline and tracks the Task/promise; await
+      the tracked task, then assert on success, exception, or retry.
+    priority: required
+
+  - id: level-2-stub-server-rules
+    trigger: UAT environment lacks a real external service (SMS, payment, IdP)
+    instruction: >
+      Use a Level 2 infrastructure stub server (WireMock, MockSoap, etc.) deployed
+      as a sidecar — not Level 1 code mocks, which are blocked in UAT by STUB rules.
+      Document the stub server in the external-dependency-testability-matrix as ⚠️
+      and list which verification dimensions are deferred to PRD.
+    priority: required
+
+  - id: no-stub-server-in-prd
+    trigger: deploying to production
+    instruction: >
+      Production artifact MUST NOT include stub server code.
+      Stub servers MUST NOT be running or accessible in PRD environment.
+      See deployment-standards for CI/CD exclusion rules.
+    priority: required
+
+# ─────────────────────────────────────────────────────────
+# Quick Reference
+# ─────────────────────────────────────────────────────────
+quick_reference:
+  allowed_mock_summary:
+    - "✅ External HTTP/LLM/payment APIs"
+    - "✅ Time functions (Date.now, setTimeout)"
+    - "✅ Environment variables"
+    - "✅ File system — in unit tests only"
+    - "✅ Cross-module boundaries — with integration test counterpart"
+
+  forbidden_mock_summary:
+    - "❌ Own module's core logic (self-referential mock)"
+    - "❌ Database layer in integration/flow/E2E tests"
+    - "❌ HTTP framework internals (Express router, etc.)"
+    - "❌ Security controls (auth middleware, permission checks)"
+
+  checklist: |
+    Before submitting test with mocks:
+    □ No vi.mock() path matches the module under test
+    □ DB layer not mocked in integration/flow tests
+    □ Security controls not mocked
+    □ Mock count < import count (or justified with comment)
+    □ At least one assertion on actual output value (not mock call)
+    □ Integration counterpart exists for each cross-module mock

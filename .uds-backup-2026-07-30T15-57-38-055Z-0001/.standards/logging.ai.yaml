@@ -1,0 +1,287 @@
+# Logging Standards - AI Optimized
+# Source: core/logging-standards.md
+
+id: logging
+meta:
+  version: "1.4.0"
+  updated: "2026-06-17"
+  source: core/logging-standards.md
+  description: Logging levels, structured logging, mandatory events catalog, file rotation policy, and best practices
+
+# XSPEC-070 Phase 2 — skill↔standard content-coverage audit.
+# Consumed by scripts/check-skill-content-coverage.ts: the anchor skill
+# (logging-guide) MUST mention each mandatory event id below, or CONTENT-002 fires.
+# Source of truth: core/logging-standards.md "Mandatory Events" catalog (9 canonical events).
+audit:
+  mandatory_keywords:
+    - application_startup
+    - request_received
+    - validation_failure
+    - authentication_failure
+    - outbound_call_start
+    - outbound_call_complete
+    - business_event
+    - heartbeat
+    - shutdown
+
+log_levels:
+  ordered:
+    - name: TRACE
+      code: 10
+      use_for: Very detailed debugging
+      production: false
+    - name: DEBUG
+      code: 20
+      use_for: Diagnostic information
+      production: false
+    - name: INFO
+      code: 30
+      use_for: Normal operations
+      production: true
+    - name: WARN
+      code: 40
+      use_for: Potential issues
+      production: true
+    - name: ERROR
+      code: 50
+      use_for: Errors needing attention
+      production: true
+    - name: FATAL
+      code: 60
+      use_for: Critical failures
+      production: true
+
+structured_logging:
+  required_fields:
+    - timestamp
+    - level
+    - message
+    - service
+    - environment
+  recommended_fields:
+    - trace_id
+    - span_id
+    - request_id
+    - user_id
+    - duration_ms
+  field_naming: snake_case
+  format: JSON in production
+
+# When you MUST write a log entry (XSPEC-234 / closes #108).
+# Compliant formatting but silent-at-the-critical-moment logging is excluded.
+mandatory_events:
+  - id: application_startup
+    when: After process boot, before accepting requests
+    level: INFO
+    must_log: [app_name, version, git_sha, environment, hostname, pid, listening_endpoints]
+    must_not_log: [secrets, full_connection_strings]
+    rationale: Lifecycle blind spot; confirms which build/config is actually live
+  - id: request_received
+    when: First time HTTP middleware sees a request
+    level: INFO/DEBUG
+    must_log: [method, path, source_ip, request_id]
+    must_not_log: [request_body, auth_headers]
+    rationale: Establishes request_id correlation from the edge inward
+  - id: validation_failure
+    when: schema / ModelState / DTO validation rejects
+    level: WARN
+    must_log: [request_id, path, missing_fields, payload_shape]
+    must_not_log: [field_values, pii]
+    rationale: Framework rejects before handler; payload otherwise never logged (incident #2)
+  - id: authentication_failure
+    when: login / token verification fails
+    level: WARN
+    must_log: [uid_attempted, source_ip, failure_reason]
+    must_not_log: [password, token_value]
+    rationale: 'Account or password error alone is un-investigable without uid/IP (incident #3)'
+  - id: outbound_call_start
+    when: An outbound HTTP/RPC call is initiated
+    level: INFO
+    must_log: [target_url_host_path, request_id_propagated, timeout_ms]
+    must_not_log: [credentials, bearer_tokens]
+    rationale: A send-failed error must leave a trace that the call was even attempted
+  - id: outbound_call_complete
+    when: An external call returns or fails
+    level: INFO/WARN/ERROR
+    must_log: [status_code_or_failure_phase, elapsed_ms, retries]
+    must_not_log: [response_body_with_pii]
+    rationale: Distinguish dns/tcp/tls/http failure phase for diagnosis
+  - id: business_event
+    when: A state-changing business operation completes
+    level: INFO
+    must_log: [operation_name, actor, target_ids, outcome]
+    must_not_log: [full_record_payload, pii]
+    rationale: Audit trail of what changed and by whom
+  - id: heartbeat
+    when: Long-running background service, at least once per 60 seconds
+    level: INFO
+    must_log: [service_name, queue_depth, items_processed_since_last_heartbeat]
+    must_not_log: []
+    rationale: Detect silent/0-byte background worker; enables silence detection (incident #4)
+  - id: shutdown
+    when: Process exits (graceful or fatal)
+    level: INFO/ERROR
+    must_log: [app_name, signal_or_reason, uptime_seconds, pending_work_count]
+    must_not_log: []
+    rationale: Lifecycle blind spot; reveals crash vs graceful and lost in-flight work
+
+mandatory_events_follow_on_rules:
+  access_log_separation: Health-probe/liveness traffic MUST NOT pollute business-event log (separate sink)
+  silence_detection_sla: Alert after N minutes with no events, N <= 2x heartbeat interval
+  request_id_discoverability: Error responses to client SHOULD carry request_id for support correlation
+
+sensitive_data:
+  never_log:
+    - passwords
+    - api_keys
+    - tokens_full
+    - credit_cards
+    - ssn
+  mask_patterns:
+    - "password: '***REDACTED***'"
+    - "token: 'tok_...abc'"
+    - "card: '****4242'"
+
+rules:
+  - id: select-level
+    trigger: adding log statement
+    instruction: |
+      Select appropriate level:
+      - DEBUG: Diagnostic only, off in prod
+      - INFO: Normal operation completed
+      - WARN: Unexpected but recoverable
+      - ERROR: Failed operation
+      - FATAL: Cannot continue
+    priority: required
+
+  - id: structured-format
+    trigger: writing logs
+    instruction: Use structured JSON logging with required fields
+    priority: required
+
+  - id: mandatory-events
+    trigger: implementing startup/shutdown, request handling, validation, auth, outbound calls, background services
+    instruction: |
+      Emit the mandatory events catalog entries (see mandatory_events):
+      application_startup, request_received, validation_failure,
+      authentication_failure, outbound_call_start, outbound_call_complete,
+      business_event, heartbeat, shutdown. A log that follows every formatting
+      rule but never fires at the critical moment is excluded. Validation rejects
+      MUST log payload_shape (keys only, not values); auth failures MUST log
+      uid+source_ip (never password/token); background services MUST heartbeat
+      so silence is detectable.
+    priority: required
+
+  - id: include-context
+    trigger: logging operations
+    instruction: Include request_id or trace_id for correlation
+    priority: required
+
+  - id: no-sensitive-data
+    trigger: logging data
+    instruction: Never log passwords, secrets, tokens, or PII
+    priority: required
+
+  - id: error-context
+    trigger: logging errors
+    instruction: Include error_type, error_message, stack, and relevant IDs
+    priority: required
+
+  - id: async-logging
+    trigger: production deployment
+    instruction: Use async/buffered logging for performance
+    priority: recommended
+
+  - id: distributed-tracing
+    trigger: logging in distributed systems
+    instruction: |
+      Include OpenTelemetry trace context:
+      - trace_id and span_id in every log entry
+      - W3C Trace Context propagation (traceparent header)
+      - Correlate logs with metrics and traces
+    priority: recommended
+
+  - id: observability-pillars
+    trigger: designing observability strategy
+    instruction: |
+      Three pillars: Logs, Metrics, Traces
+      - Logs: Discrete events with context
+      - Metrics: Aggregated measurements (counters, gauges, histograms)
+      - Traces: Request flow across services
+      Correlate all three via trace_id/span_id
+    priority: recommended
+
+  - id: rotation-dual-trigger
+    trigger: configuring file-based log sink
+    instruction: |
+      File-based log sinks MUST set both rotation triggers:
+        1. Time-based: rollingInterval=Day (or equivalent)
+        2. Size-based: fileSizeLimitBytes explicit AND rollOnFileSizeLimit=true
+      Default size caps are hostile in production — Serilog silently drops at 1 GB
+      if rollOnFileSizeLimit is left at default false; log4j / Winston / Python
+      RotatingFileHandler likewise drop or grow unbounded without explicit config.
+      Recommended starting value: fileSizeLimitBytes=104857600 (100 MB),
+      retainedFileCountLimit >= N*7 where N = max expected rolls per day.
+    priority: required
+
+  - id: rotation-ops-sop
+    trigger: log file size approaching cap
+    instruction: |
+      If a log file size reaches >= 90% of fileSizeLimitBytes at expected end-of-day,
+      INVESTIGATE the cause (noisy retry loop, unbounded debug logging, stack-trace
+      flood) BEFORE raising the cap. Raising the cap masks the noise problem.
+    priority: required
+
+rotation_policy:
+  must_set_both:
+    time_based: rollingInterval=Day (or equivalent)
+    size_based:
+      fileSizeLimitBytes: explicit (100 MB recommended)
+      rollOnFileSizeLimit: true
+  hostile_defaults:
+    serilog: silently stops at 1 GB if rollOnFileSizeLimit=false
+    log4j: drops if no SizeBasedTriggeringPolicy
+    python_rotatingfilehandler: grows unbounded if maxBytes unset
+    winston: drops if maxSize unset
+  recommended:
+    fileSizeLimitBytes: 104857600
+    retainedFileCountLimit_formula: "N * 7 (N = max rolls/day)"
+  ops_sop: investigate noise root cause at >= 90% size before raising cap
+
+quick_reference:
+  level_selection:
+    columns: [Question, Level]
+    rows:
+      - [Debugging only?, DEBUG]
+      - [Normal operation?, INFO]
+      - [Unexpected but OK?, WARN]
+      - [Operation failed?, ERROR]
+      - [Cannot continue?, FATAL]
+
+  required_fields:
+    columns: [Field, Format, Required]
+    rows:
+      - [timestamp, "ISO 8601", Yes]
+      - [level, "INFO/ERROR/etc", Yes]
+      - [message, String, Yes]
+      - [service, String, Yes]
+      - [request_id, UUID, Recommended]
+
+  retention:
+    columns: [Level, Retention]
+    rows:
+      - [DEBUG, 7 days]
+      - [INFO, 30 days]
+      - [WARN, 90 days]
+      - [ERROR/FATAL, 1 year]
+
+enforcement:
+  hook_type: PostToolUse
+  trigger: PostToolUse
+  matcher:
+    tool: Write
+    path: "src/**/*.ts"
+  script_ref: "scripts/hooks/check-logging-standard.js"
+  hook_script: "scripts/hooks/check-logging-standard.js"
+  severity: warning
+  timeout_ms: 500

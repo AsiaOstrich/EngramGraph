@@ -4,6 +4,43 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-07-31
+
+Two themes, both about the same thing: **the index used to be confidently wrong, and nothing said so.** A hand-written AST walker silently dropped what it could not parse, and a parse failure looked exactly like a file with nothing in it.
+
+### Added
+
+#### Language coverage — tag-query engine replaces the hand-written walker (XSPEC-333 R2)
+
+- The AST walker is gone. Symbol extraction now runs on tree-sitter **tag queries**, so a new language is a query file rather than a new hand-written traversal.
+- Languages added on that engine: **C#, Python, Go, Java, Kotlin, Rust, C++, Ruby, PHP, Dart**.
+
+#### Semantic resolution — SCIP ingest (XSPEC-333 R3)
+
+- `egr index --scip <path>` overlays a SCIP index on the tree-sitter graph. Where tree-sitter can only guess a call target, a real compiler-backed index resolves it: **SCIP upgrades existing edges rather than only filling gaps**, because tree-sitter now stamps an honest confidence on every CALLS edge it writes.
+- Verified on two languages with different toolchains — C# (Roslyn) and Java (scip-java) — to show the design is not shaped around one of them.
+- `Function` / `Class` gain a `provider` column; `CALLS` gains nullable `provider` / `confidence`. The writer applies a provenance-aware overwrite policy, so a lower-confidence edge never overwrites a higher-confidence one.
+
+#### Parse-failure observability — you can now see what the index missed (XSPEC-334)
+
+- **`egr blindspots`** — which files the parser failed on, and therefore which parts of your codebase the graph cannot answer questions about. Exposed to queriers as `indexHealth`, not buried in a log.
+- **`egr signatures`** — groups parse failures by structural signature, so 200 failures that share one cause read as one problem rather than 200.
+- **Per-file tolerance, a health manifest, and a healing diff** — an index run reports what it could not read and what recovered since last time.
+- A Tier 1 parse-conformance corpus covering **all 13 grammars**.
+
+### Changed
+
+- **Schema changes now auto-migrate.** Missing columns are added via `ALTER TABLE` on open. 0.7.0 required deleting `.engram/graph.db*` and re-indexing to pick up a schema change; that is no longer necessary. The migration backs up the pre-migration database first, checkpoints before the backup, and is resumable.
+- CI gains a coverage gate. The number it enforces is 9 points below the first figure measured — the first measurement was wrong, and the gate is set to the honest one.
+
+### Fixed
+
+- `QueryResult` handles are now closed, releasing native cursor resources.
+- C#: `nameof` and named arguments no longer produce false CALLS edges; overload ids no longer collide; `bin/`/`obj/` no longer scanned.
+- `walkFiles` paths are normalised to POSIX separators, so the SCIP overlay matches on Windows.
+- Several fixes from adversarial review passes on the SCIP and graph-db work — including a stray NUL byte in extracted names, an unreachable schema error, and documentation claims that overstated what was verified.
+- `docs/API.md` and `docs/MCP.md` had drifted from the real schema and tool list (a missing rel table, missing provider columns, 3 of 8 MCP tools undocumented in all three languages). Corrected, and the sync guards extended.
+
 ## [0.7.0] — 2026-07-13
 
 ### Added

@@ -1,7 +1,7 @@
 ---
 source: README.md
-source_version: 0.7.0
-translation_version: 0.7.0
+source_version: 0.8.0
+translation_version: 0.8.0
 last_synced: 2026-07-16
 status: complete
 ---
