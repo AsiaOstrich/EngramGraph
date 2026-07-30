@@ -31,83 +31,17 @@ See `.standards/` for detailed coding standards.
 
 <!-- UDS:STANDARDS:START -->
 <!-- WARNING: This block is managed by UDS (universal-dev-standards). DO NOT manually edit. Use 'npx uds install' or 'npx uds update' to modify. -->
-## Standards Reference
+## Installed Standards
 
-**IMPORTANT**: When performing related tasks, you MUST read and follow the standards in `.standards/`:
+All standards are in `.standards/`. Installed standards:
 
-**Core Standards:**
-- `.standards/acceptance-criteria-traceability`
-- `.standards/acceptance-test-driven-development`
-- `.standards/accessibility-standards`
-- `.standards/adr-standards`
-- `.standards/ai-agreement`
-- `.standards/ai-command-behavior`
-- `.standards/ai-friendly-architecture`
-- `.standards/ai-instruction-standards`
-- `.standards/ai-response-navigation`
-- `.standards/anti-hallucination`
-- `.standards/api-design-standards`
-- `.standards/behavior-driven-development`
-- `.standards/behavior-snapshot`
-- `.standards/changelog`
-- `.standards/checkin-standards`
-- `.standards/code-review`
-- `.standards/commit-message`
-- `.standards/context-aware-loading`
-- `.standards/database-standards`
-- `.standards/deployment-standards`
-- `.standards/developer-memory`
-- `.standards/documentation-lifecycle`
-- `.standards/documentation-structure`
-- `.standards/documentation-writing`
-- `.standards/error-code-standards`
-- `.standards/feature-discovery-standards`
-- `.standards/feature-manifest-standard`
-- `.standards/flow-based-testing`
-- `.standards/forward-derivation`
-- `.standards/full-coverage-testing`
-- `.standards/git-workflow`
-- `.standards/git-worktree`
-- `.standards/knowledge-graph-memory`
-- `.standards/logging-standards`
-- `.standards/mock-boundary`
-- `.standards/model-selection`
-- `.standards/mutation-testing`
-- `.standards/packaging-standards`
-- `.standards/performance-standards`
-- `.standards/project-context-memory`
-- `.standards/project-structure`
-- `.standards/push-standards`
-- `.standards/refactoring-standards`
-- `.standards/requirement-checklist`
-- `.standards/requirement-document-template`
-- `.standards/requirement-engineering`
-- `.standards/requirement-template`
-- `.standards/retrospective-standards`
-- `.standards/reverse-engineering`
-- `.standards/security-standards`
-- `.standards/security-testing`
-- `.standards/self-review-protocol`
-- `.standards/spec-driven-development`
-- `.standards/structured-task-definition`
-- `.standards/systematic-debugging`
-- `.standards/test-completeness-dimensions`
-- `.standards/test-driven-development`
-- `.standards/test-governance`
-- `.standards/testing`
-- `.standards/user-journey-testing`
-- `.standards/verification-evidence`
-- `.standards/versioning`
-- `.standards/virtual-organization`
-
-**Options:**
-- `.standards/options/english.ai.yaml`
-- `.standards/options/github-flow.ai.yaml`
-- `.standards/options/squash-merge.ai.yaml`
-- `.standards/options/unit-testing.ai.yaml`
-- `.standards/options/integration-testing.ai.yaml`
-- `.standards/options/system-testing.ai.yaml`
-- `.standards/options/e2e-testing.ai.yaml`
+- `.standards/english.ai.yaml` — english
+- `.standards/github-flow.ai.yaml` — github-flow
+- `.standards/squash-merge.ai.yaml` — squash-merge
+- `.standards/unit-testing.ai.yaml` — unit-testing
+- `.standards/integration-testing.ai.yaml` — integration-testing
+- `.standards/system-testing.ai.yaml` — system-testing
+- `.standards/e2e-testing.ai.yaml` — e2e-testing
 <!-- UDS:STANDARDS:END -->
 
 ## Important Notes
