@@ -18,3 +18,8 @@ coverage/
 # MCP server local graph DB
 .engram/
 .codesage/
+
+# UDS reconcile backups — regenerable, never version-controlled.
+# Two repos had them swept in by `git add -A` before this rule existed
+# (dev-platform 4289d91: 3 files; EngramGraph 0a8e789: 360 files).
+.uds-backup-*/
