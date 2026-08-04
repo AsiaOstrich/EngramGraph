@@ -93,8 +93,99 @@ describe("cmdSignatures (R3a)", () => {
     }
   });
 
+  /**
+   * The case a user hit on 2026-08-04: a C# repository where 584 .cs files
+   * failed to parse outright while two jQuery files parsed partially.
+   * `egr signatures` reported the two jQuery signatures and said nothing at
+   * all about the 584 — the hard-failure message existed but fired only when
+   * there were NO partial signatures, so one partial file hid any number of
+   * failures behind it.
+   */
+  it("surfaces hard failures even when partial signatures are also present", () => {
+    const dir = mkdtempSync(join(tmpdir(), "engram-sigs-failed-"));
+    try {
+      const path = join(dir, "graph.parse-manifest.json");
+      const csFail = (n: number): FileParseHealth =>
+        fph(`src/Entity${n}.cs`, {
+          language: "csharp",
+          errorNodes: 0,
+          signatures: undefined,
+          failed: "TypeError: Cannot read properties of undefined (reading 'length')",
+        });
+      writeManifest(
+        path,
+        upsertRun(null, "/root", "t", [
+          fph("vendor/jquery/intro.js", { language: "javascript", signatures: ["js@1:aaa"] }),
+          fph("vendor/jquery/outro.js", { language: "javascript", signatures: ["js@1:bbb"] }),
+          csFail(1), csFail(2), csFail(3), csFail(4),
+        ], "1.0.0"),
+      );
+      const r = cmdSignatures(path);
+
+      // The partial signatures still report as before...
+      expect(r.filesWithSignatures).toBe(2);
+      expect(r.buckets).toHaveLength(2);
+
+      // ...and the failures are no longer invisible.
+      expect(r.filesFailed).toBe(4);
+      expect(r.failureBuckets).toHaveLength(1);
+      expect(r.failureBuckets[0]!.fileCount).toBe(4);
+      expect(r.failureBuckets[0]!.languages).toEqual(["csharp"]);
+      expect(r.failureBuckets[0]!.reason).toContain("TypeError");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("collapses failures that differ only by filename into one bucket", () => {
+    // The whole point of grouping: N files sharing a cause must read as one
+    // problem. Messages carrying their own path would otherwise produce N
+    // buckets and reproduce the wall of lines this replaces.
+    const dir = mkdtempSync(join(tmpdir(), "engram-sigs-collapse-"));
+    try {
+      const path = join(dir, "graph.parse-manifest.json");
+      writeManifest(
+        path,
+        upsertRun(null, "/root", "t", [
+          fph("a.cs", { language: "csharp", failed: "ENOENT: no such file, open 'src/a.cs'" }),
+          fph("b.cs", { language: "csharp", failed: "ENOENT: no such file, open 'src/b.cs'" }),
+          fph("c.cs", { language: "csharp", failed: "ENOENT: no such file, open 'src/c.cs'" }),
+        ], "1.0.0"),
+      );
+      const r = cmdSignatures(path);
+      expect(r.failureBuckets).toHaveLength(1);
+      expect(r.failureBuckets[0]!.fileCount).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps genuinely different causes in different buckets", () => {
+    // Control for the test above: normalisation must not merge everything.
+    const dir = mkdtempSync(join(tmpdir(), "engram-sigs-distinct-"));
+    try {
+      const path = join(dir, "graph.parse-manifest.json");
+      writeManifest(
+        path,
+        upsertRun(null, "/root", "t", [
+          fph("a.cs", { language: "csharp", failed: "TypeError: Cannot read properties of undefined" }),
+          fph("b.rb", { language: "ruby", failed: "RangeError: Maximum call stack size exceeded" }),
+        ], "1.0.0"),
+      );
+      const r = cmdSignatures(path);
+      expect(r.failureBuckets).toHaveLength(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("returns empty for a missing manifest", () => {
-    expect(cmdSignatures(join(tmpdir(), "nope-r3a.json"))).toEqual({ filesWithSignatures: 0, buckets: [] });
+    expect(cmdSignatures(join(tmpdir(), "nope-r3a.json"))).toEqual({
+      filesWithSignatures: 0,
+      buckets: [],
+      failureBuckets: [],
+      filesFailed: 0,
+    });
   });
 
   it("returns empty buckets for a pre-R3a manifest (partial files, no signatures field)", () => {
@@ -104,7 +195,12 @@ describe("cmdSignatures (R3a)", () => {
     try {
       const path = join(dir, "graph.parse-manifest.json");
       writeManifest(path, upsertRun(null, "/root", "t", [fph("partial.ts", { signatures: undefined })], "1.0.0"));
-      expect(cmdSignatures(path)).toEqual({ filesWithSignatures: 0, buckets: [] });
+      expect(cmdSignatures(path)).toEqual({
+        filesWithSignatures: 0,
+        buckets: [],
+        failureBuckets: [],
+        filesFailed: 0,
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -55,9 +55,10 @@ Commands:
   blindspots                      Files that parsed partially or failed (from
                                   the parse-health manifest) — where the graph
                                   may be missing nodes/edges
-  signatures                      Partial-parse files grouped by failure
-                                  signature — one grammar gap = one bucket
-                                  (turns "48 files" into "2 failure types")
+  signatures                      Unparsed files grouped by cause — hard
+                                  failures by error, partial parses by
+                                  structural signature (turns "584 files" into
+                                  "1 root cause")
   serve [--port 3000]             Run the REST server (routes under /graph/*)
   mcp                             Run the MCP server over stdio (for coding assistants)
 
@@ -183,22 +184,41 @@ async function main(): Promise<void> {
     const r = cmdSignatures(mp);
     out(r, values.json, (d) => {
       const s = d as SignaturesResult;
-      if (s.buckets.length === 0) {
-        // Empty buckets does NOT mean "all clean" — differentiate the cases so
-        // the message never contradicts `egr blindspots` (an older-egr manifest
-        // has partial files but no recorded signatures; a failed-only graph has
-        // blindspots but no signatures).
+      if (s.buckets.length === 0 && s.failureBuckets.length === 0) {
+        // Nothing to group does NOT mean "all clean" — differentiate the cases
+        // so the message never contradicts `egr blindspots` (an older-egr
+        // manifest has partial files but no recorded signatures).
         const b = cmdBlindspots(mp);
         if (b.filesIndexed === 0) return "signatures: no parse-health manifest yet (run `egr index <dir>` first)";
         if (b.partial > 0) return `signatures: ${b.partial} partial file(s) but no signatures recorded — this manifest predates signature support; re-run \`egr index\` to populate them`;
-        if (b.failed > 0) return `signatures: no partial-parse signatures; ${b.failed} file(s) failed to parse entirely (see \`egr blindspots\`)`;
         return `signatures: none — all ${b.filesIndexed} indexed files parsed cleanly`;
       }
-      const head = `signatures: ${s.buckets.length} distinct failure type(s) across ${s.filesWithSignatures} partial-parse file(s):`;
-      const body = s.buckets
-        .map((b) => `  [${b.fileCount}x] ${b.signature}\n${b.sampleFiles.map((f) => `      ${f}`).join("\n")}`)
-        .join("\n");
-      return `${head}\n${body}`;
+      const sections: string[] = [];
+      // Hard failures first, and unconditionally. They used to appear only
+      // when there were no partial signatures at all, so one partial file was
+      // enough to hide any number of outright failures — which is how 584
+      // unparsed C# files sat behind a report about two jQuery files.
+      if (s.failureBuckets.length > 0) {
+        const head =
+          `signatures: ${s.filesFailed} file(s) failed to parse entirely, ` +
+          `in ${s.failureBuckets.length} distinct cause(s):`;
+        const body = s.failureBuckets
+          .map(
+            (b) =>
+              `  [${b.fileCount}x] ${b.languages.join(", ")}: ${b.reason}\n` +
+              b.sampleFiles.map((f) => `      ${f}`).join("\n"),
+          )
+          .join("\n");
+        sections.push(`${head}\n${body}`);
+      }
+      if (s.buckets.length > 0) {
+        const head = `partial parses: ${s.buckets.length} distinct signature(s) across ${s.filesWithSignatures} file(s):`;
+        const body = s.buckets
+          .map((b) => `  [${b.fileCount}x] ${b.signature}\n${b.sampleFiles.map((f) => `      ${f}`).join("\n")}`)
+          .join("\n");
+        sections.push(`${head}\n${body}`);
+      }
+      return sections.join("\n\n");
     });
     return;
   }

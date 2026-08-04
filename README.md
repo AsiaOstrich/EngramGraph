@@ -218,6 +218,7 @@ text doesn't always describe the real cause:
 | `gyp ERR! find VS unknown version "undefined" found at ...\18\BuildTools` | **node-gyp 11.x** doesn't recognise Visual Studio 2026. Install the C++ workload into **Build Tools 2022**, or upgrade node-gyp to 12.x |
 | A wall of `node-gyp` output ending in `npm error code 1`, on Windows/macOS | The Dart grammar failed to compile. Expected without a C/C++ toolchain, and survivable — every other language still works |
 | `Dart support is not enabled in this installation` (at index time) | The above, seen from the other end. `egr` is working; the Dart grammar isn't built here |
+| `IO exception: Failed to download extension: algo` | `god-nodes`, `communities` and `related` need ryugraph's ALGO extension, which `INSTALL ALGO` fetches from `extension.ryugraph.io` on first use. **This is the only part of egr that reaches the network** — every other command works offline. The error now prints the offline build steps; see also `docs/CLI.md` |
 
 If you hit something not covered here, please check
 [predictable-labs/ryugraph's issues](https://github.com/predictable-labs/ryugraph/issues)

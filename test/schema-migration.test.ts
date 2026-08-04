@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, openSync, closeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -141,6 +141,50 @@ describe("backupDbFile", () => {
 
   it("returns null when the source file doesn't exist (nothing to protect)", () => {
     expect(backupDbFile(join(dir, "does-not-exist.db"))).toBeNull();
+  });
+
+  it("copies while the source is held open by another handle", () => {
+    // The Windows regression this guards. `cpSync`/`copyFileSync` go through
+    // CopyFileEx, which opens the source without FILE_SHARE_READ, so the copy
+    // failed with EBUSY when the graph database was still open — which it
+    // always is here, because the caller checkpoints a live connection
+    // immediately before backing up. A user upgrading 0.7.0 → 0.8.0 on
+    // Windows 11 could only proceed by moving the database aside and
+    // rebuilding, discarding the data this backup exists to protect.
+    //
+    // On POSIX this passes with either implementation — an open handle never
+    // blocked a copy here, which is why the bug was invisible on Linux and
+    // macOS for as long as it existed. It is the Windows run of this test
+    // that carries the proof.
+    const src = join(dir, "graph.db");
+    writeFileSync(src, "held-open-contents");
+
+    const heldOpen = openSync(src, "r+");
+    try {
+      const backupPath = backupDbFile(src);
+      expect(backupPath).not.toBeNull();
+      expect(readFileSync(backupPath!, "utf8")).toBe("held-open-contents");
+    } finally {
+      closeSync(heldOpen);
+    }
+  });
+
+  it("copies a file larger than one read chunk", () => {
+    // The copy is chunked so a large graph is not read into memory whole;
+    // this exercises more than one iteration of that loop. A copy that
+    // silently stopped at the first chunk would produce a truncated backup
+    // that looks like a file — the worst possible failure for a backup, since
+    // nothing about it reads as broken until you need it.
+    const src = join(dir, "graph.db");
+    const big = Buffer.alloc(1024 * 1024 * 2 + 12345, 7);
+    // Make the tail distinguishable so truncation cannot pass.
+    big.write("TAIL-MARKER", big.length - "TAIL-MARKER".length);
+    writeFileSync(src, big);
+
+    const backupPath = backupDbFile(src);
+    const copied = readFileSync(backupPath!);
+    expect(copied.length).toBe(big.length);
+    expect(copied.equals(big)).toBe(true);
   });
 
   it("copies the file byte-for-byte to a .pre-migration-backup sibling", () => {

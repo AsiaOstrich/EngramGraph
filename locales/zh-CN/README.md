@@ -156,6 +156,7 @@ Linux 上的原生二进制文件加载失败，会通过 Node 的 `dlopen` 呈�
 | `gyp ERR! find VS unknown version "undefined" found at ...\18\BuildTools` | **node-gyp 11.x** 不认识 Visual Studio 2026。请改把 C++ 工作负载装进 **Build Tools 2022**，或把 node-gyp 升到 12.x |
 | Windows/macOS 上一整屏 `node-gyp` 输出、最后是 `npm error code 1` | Dart 语法编译失败。没有 C/C++ 工具链时这是预期结果，而且可以承受——其他语言全部照常运行 |
 | 索引时出现 `Dart support is not enabled in this installation` | 同一件事的另一端。`egr` 是正常的，只是这台机器没有构建 Dart 语法 |
+| `IO exception: Failed to download extension: algo` | `god-nodes`、`communities`、`related` 需要 ryugraph 的 ALGO 扩展，`INSTALL ALGO` 会在首次使用时从 `extension.ryugraph.io` 下载。**这是 egr 唯一会联网的部分**——其余命令全部可离线运行。该错误现在会打印离线构建步骤；另见 `docs/CLI.md` |
 
 如果你遇到的问题不在上表范围内，请先查看
 [predictable-labs/ryugraph 的 issues](https://github.com/predictable-labs/ryugraph/issues)，

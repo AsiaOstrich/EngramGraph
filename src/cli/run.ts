@@ -435,11 +435,64 @@ export interface SignatureBucket {
   sampleFiles: string[];
 }
 
+/**
+ * Hard parse failures grouped by what went wrong, rather than by structural
+ * signature — a file that threw never produced a tree to fingerprint.
+ */
+export interface FailureBucket {
+  /** Normalised error text: the shared shape, with paths and numbers removed. */
+  reason: string;
+  /** The languages this failure hit, so "all C#" is visible at a glance. */
+  languages: string[];
+  fileCount: number;
+  sampleFiles: string[];
+}
+
 export interface SignaturesResult {
   /** Files that carry ≥1 signature (i.e. partial parses; failed files have none). */
   filesWithSignatures: number;
   /** Buckets, most-files-first — a single grammar gap collapses many files here. */
   buckets: SignatureBucket[];
+  /**
+   * Files that failed outright, grouped by normalised error message.
+   *
+   * These used to be invisible here. Signatures are computed from a parse
+   * tree, and a file that threw has no tree, so hard failures carried none —
+   * the command reported only partial parses. There was a fallback message for
+   * them, but it fired only when there were *no* partial signatures at all, so
+   * a single partial file was enough to hide any number of failures behind it.
+   * A user indexing a C# repository saw "2 distinct failure types across 2
+   * partial-parse files" while 584 .cs files had failed to parse entirely.
+   *
+   * Grouping matters most for exactly this case: 584 files sharing one cause
+   * should read as one problem, not as 584 lines in `egr blindspots`.
+   */
+  failureBuckets: FailureBucket[];
+  /** Files that failed outright (the sum over `failureBuckets`). */
+  filesFailed: number;
+}
+
+/**
+ * Reduce an error message to the part that is common across files hitting the
+ * same cause: drop absolute/relative paths, quoted fragments and numbers, so
+ * 584 messages differing only by filename collapse to one bucket.
+ *
+ * Deliberately crude. Over-merging two distinct causes costs a reader one
+ * extra look at `egr blindspots`; under-merging reproduces the wall of
+ * near-identical lines this exists to replace.
+ */
+export function normaliseFailureReason(message: string): string {
+  return message
+    // Windows and POSIX paths, including the bare filenames that follow them.
+    .replace(/[A-Za-z]:\\[^\s'"]+/g, "<path>")
+    .replace(/(?:\.{0,2}\/)?(?:[\w.@-]+\/)+[\w.@-]+/g, "<path>")
+    // Anything quoted — usually a symbol or file that varies per occurrence.
+    .replace(/'[^']*'/g, "'<x>'")
+    .replace(/"[^"]*"/g, '"<x>"')
+    .replace(/\d+/g, "<n>")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
 }
 
 const SIGNATURE_SAMPLE_LIMIT = 5;
@@ -453,10 +506,29 @@ const SIGNATURE_SAMPLE_LIMIT = 5;
  */
 export function cmdSignatures(manifestPath: string): SignaturesResult {
   const manifest = readManifest(manifestPath);
-  if (!manifest) return { filesWithSignatures: 0, buckets: [] };
+  if (!manifest) {
+    return { filesWithSignatures: 0, buckets: [], failureBuckets: [], filesFailed: 0 };
+  }
   const bySig = new Map<string, { language: string; files: string[] }>();
+  const byFailure = new Map<string, { languages: Set<string>; files: string[] }>();
   let filesWithSignatures = 0;
+  let filesFailed = 0;
   for (const f of allFiles(manifest)) {
+    if (f.failed !== undefined) {
+      // A file that threw has no tree and therefore no structural signature.
+      // Group it by what it threw instead, so a single shared cause reads as
+      // one bucket rather than disappearing.
+      filesFailed += 1;
+      const reason = normaliseFailureReason(f.failed);
+      let entry = byFailure.get(reason);
+      if (!entry) {
+        entry = { languages: new Set(), files: [] };
+        byFailure.set(reason, entry);
+      }
+      entry.languages.add(f.language);
+      entry.files.push(f.path);
+      continue;
+    }
     if (!f.signatures || f.signatures.length === 0) continue;
     filesWithSignatures += 1;
     for (const sig of f.signatures) {
@@ -468,6 +540,14 @@ export function cmdSignatures(manifestPath: string): SignaturesResult {
       entry.files.push(f.path);
     }
   }
+  const failureBuckets: FailureBucket[] = [...byFailure.entries()]
+    .map(([reason, e]) => ({
+      reason,
+      languages: [...e.languages].sort(),
+      fileCount: e.files.length,
+      sampleFiles: e.files.slice(0, SIGNATURE_SAMPLE_LIMIT),
+    }))
+    .sort((a, b) => b.fileCount - a.fileCount || a.reason.localeCompare(b.reason));
   const buckets: SignatureBucket[] = [...bySig.entries()]
     .map(([signature, e]) => ({
       signature,
@@ -476,7 +556,7 @@ export function cmdSignatures(manifestPath: string): SignaturesResult {
       sampleFiles: e.files.slice(0, SIGNATURE_SAMPLE_LIMIT),
     }))
     .sort((a, b) => b.fileCount - a.fileCount || a.signature.localeCompare(b.signature));
-  return { filesWithSignatures, buckets };
+  return { filesWithSignatures, buckets, failureBuckets, filesFailed };
 }
 
 /**

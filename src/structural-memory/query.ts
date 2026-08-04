@@ -94,10 +94,55 @@ function cypherString(value: string): string {
 // it is connection-scoped and cheap.
 let algoInstalled = false;
 
-/** INSTALL (once per process) + LOAD (every call) the ryugraph ALGO extension. */
+/**
+ * The three commands that need this extension, named so the error below can
+ * tell the reader which part of `egr` just became unavailable rather than
+ * leaving them to work it out from a stack trace.
+ */
+const ALGO_BACKED_COMMANDS = "god-nodes, communities, related";
+
+const ALGO_OFFLINE_HELP = [
+  `This is the only part of egr that reaches the network. INSTALL ALGO downloads`,
+  `ryugraph's graph-algorithm extension from extension.ryugraph.io on first use;`,
+  `every other command (index, callers, callees, top, impact, implementers,`,
+  `implemented-by, blindspots, signatures) works fully offline.`,
+  ``,
+  `If this machine cannot reach that host, build the extension from the source`,
+  `that ships inside ryugraph and drop it where ryugraph looks for it:`,
+  ``,
+  `  cd node_modules/ryugraph/ryu-source`,
+  `  make extension-release EXTENSION_LIST=algo`,
+  `  mkdir -p ~/.ryu/extension/<ryugraph-version>/<platform>/algo`,
+  `  cp extension/algo/build/libalgo.ryu_extension ~/.ryu/extension/<ryugraph-version>/<platform>/algo/`,
+  ``,
+  `<platform> is e.g. linux_amd64, win_amd64, osx_arm64 — the error above names`,
+  `the exact path this install expected. Building needs cmake and a C++ compiler.`,
+].join("\n");
+
+/**
+ * INSTALL (once per process) + LOAD (every call) the ryugraph ALGO extension.
+ *
+ * `INSTALL ALGO` fetches the extension over the network the first time it runs
+ * on a machine. That is ryugraph's design, not a choice this project makes,
+ * but until now the failure surfaced as a bare `IO exception: Failed to
+ * download extension` with no indication that (a) only three commands are
+ * affected, (b) everything else works offline, or (c) there is a supported way
+ * to supply the extension locally. This repo's own release workflow has built
+ * it from source since the download host proved unreliable — that knowledge
+ * lived in CI and never reached anyone running the tool.
+ */
 async function ensureAlgoExtension(conn: GraphConnection): Promise<void> {
   if (!algoInstalled) {
-    await conn.execute(`INSTALL ALGO;`);
+    try {
+      await conn.execute(`INSTALL ALGO;`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `${ALGO_BACKED_COMMANDS} need ryugraph's ALGO extension, and installing it failed:\n` +
+          `  ${message}\n\n${ALGO_OFFLINE_HELP}`,
+        { cause: err },
+      );
+    }
     algoInstalled = true;
   }
   await conn.execute(`LOAD EXTENSION ALGO;`);

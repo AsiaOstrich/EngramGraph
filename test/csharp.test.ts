@@ -279,3 +279,93 @@ describe("CodeGraph cross-file resolution — C#", () => {
     expect(edges.filter((e) => e.label === "CALLS")).toHaveLength(1);
   });
 });
+
+/**
+ * Regression guards for GitHub issue #2, reported against 0.7.0.
+ *
+ * Both shapes below returned `functions: 0, classes: 0` for the *whole file*
+ * on 0.7.0 — no error, no partial result, indistinguishable from a file that
+ * genuinely declares nothing. That is worse than an outright failure: the
+ * caller has no signal that anything was lost.
+ *
+ * Neither reproduces now. 0.8.0 replaced the hand-written AST walker with the
+ * tag-query engine (XSPEC-333 R2), and these shapes went with it. Verified on
+ * 2026-08-04 by running the issue's own repro against published 0.7.0 (0
+ * functions, 0 classes) and against this build (3 functions, 1 class) — the
+ * fix is real, not an artefact of a different test.
+ *
+ * Kept as tests rather than closed and forgotten: the bug was a silent zero,
+ * and a silent zero is exactly what nobody notices coming back.
+ */
+describe("C# — GitHub issue #2 regression guards", () => {
+  it("parses a class with a base-list clause AND range/index syntax in its methods", () => {
+    // Neither ingredient alone reproduced it on 0.7.0. Only the combination —
+    // `: SomeInterface` on the class plus `[..x]` / `[^1]` in a method body —
+    // zeroed the file, which is why it survived narrower testing.
+    const { nodes } = extractCodeGraph(
+      `namespace Test;
+
+public sealed class PiiHasherFullIface : ISomeUndeclaredInterface
+{
+    private readonly string _version;
+    private readonly int _tokenLength;
+
+    public PiiHasherFullIface(string pepper)
+    {
+        _version = "v1";
+        _tokenLength = 8;
+    }
+
+    public string HashPhone(string phone)
+    {
+        var hex = phone.Trim();
+        return $"{_version}:{hex[.._tokenLength]}";
+    }
+
+    public string MaskPhone(string phone)
+    {
+        var p = phone.Trim();
+        return $"{p[..4]}***{p[^3..]}";
+    }
+}
+`,
+      { filePath: "PiiHasher.cs" },
+    );
+
+    expect(nodes.filter((n) => n.label === "Class")).toHaveLength(1);
+    // Constructor + the two methods.
+    expect(nodes.filter((n) => n.label === "Function").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("parses an interface and its implementer in the same batch, without zeroing unrelated files", () => {
+    // The issue's second failure mode: indexing an interface together with a
+    // class implementing it zeroed the ENTIRE batch, including files that had
+    // nothing to do with either.
+    const result = extractProject([
+      {
+        path: "IMultiProbe.cs",
+        source: "public interface IMultiProbe {\n    string M1(string phone);\n}\n",
+      },
+      {
+        path: "MultiProbeIface.cs",
+        source:
+          "public sealed class MultiProbeIface : IMultiProbe {\n" +
+          "    private readonly string _a;\n" +
+          "    public MultiProbeIface(string a) { _a = a; }\n" +
+          "    public string M1(string phone) { return phone; }\n}\n",
+      },
+      { path: "unrelated.ts", source: "export function untouched(){ return 1; }\n" },
+    ]);
+
+    expect(result.functions).toBeGreaterThan(0);
+    expect(result.classes).toBeGreaterThan(0);
+    // Every input file produced something — the batch-wide zeroing is the bug.
+    for (const file of result.parseHealth) {
+      expect(
+        file.functions + file.classes,
+        `${file.path} produced nothing`,
+      ).toBeGreaterThan(0);
+      expect(file.failed, `${file.path} failed to parse`).toBeUndefined();
+    }
+  });
+});
