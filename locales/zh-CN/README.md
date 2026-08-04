@@ -42,6 +42,28 @@ npm install -g engramgraph
 npx engramgraph index ./src
 ```
 
+### 接上你的 coding assistant（MCP）
+
+`egr` 同时附带 MCP server，让助手可以查询图谱——也可以更新它——不必你手动运行任何东西。**它不会自动注册**，而且是刻意的：一个软件包若在 `npm install` 期间把自己写进你助手的工具配置，等于未经询问就自行获得了工具访问权。
+
+Claude Code 只需一条命令：
+
+```bash
+claude mcp add egr -- npx egr-mcp
+```
+
+确认它真的生效——安装本身不是证据，这个才是：
+
+```bash
+claude mcp list   # egr … ✓ Connected
+```
+
+若希望整个团队都能拿到，改用 `--scope project`：它会写出一份可以进版本控制的 `.mcp.json`，每个人首次使用时被提示批准一次。**配置内容要保持可移植**——把某台机器的 Node 绝对路径写死，正是一份进了版本控制的 `.mcp.json` 在别人电脑上静静失效的常见原因。`ENGRAM_DB` 默认是 `./.engram/graph.db`，通常可以整个省略。
+
+Codex／Cursor／Windsurf、8 个工具的完整清单与示例流程：**[docs/MCP.md](./docs/MCP.md)**。
+
+> **从助手端建索引有一个值得知道的限制。** `index_code` 工具收的是文件**内容**而非目录——它不会自己遍历文件系统。因此它适合更新助手刚刚改过的那几个文件，不适合索引整个 repo。整库索引请用 `egr index ./src`。
+
 ### 原生依赖与平台支持
 
 EngramGraph 有**两个**互相独立的原生依赖，而它们的失败方式不同。分清楚你撞到的是哪一个，就知道是整个安装坏了、还是只少了一种语言：

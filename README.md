@@ -37,6 +37,41 @@ any directory. Or run the CLI without a global install:
 npx engramgraph index ./src
 ```
 
+### Connect it to your coding assistant (MCP)
+
+`egr` also ships an MCP server, so an assistant can query the graph — and update
+it — without you running anything by hand. **This is not registered
+automatically**, and deliberately so: a package that writes itself into your
+assistant's tool configuration during `npm install` has granted itself tool
+access without being asked.
+
+One command for Claude Code:
+
+```bash
+claude mcp add egr -- npx egr-mcp
+```
+
+Confirm it took — the install is not the evidence, this is:
+
+```bash
+claude mcp list   # egr … ✓ Connected
+```
+
+For a project everyone on the team should get, use `--scope project` instead;
+that writes a `.mcp.json` you can commit, and each person is prompted to approve
+it once. Keep the entry portable — an absolute path to one machine's Node
+install is the usual reason a checked-in `.mcp.json` silently does nothing on
+someone else's laptop. `ENGRAM_DB` defaults to `./.engram/graph.db`, so it can
+usually be omitted.
+
+Codex / Cursor / Windsurf, all 8 tools, and an example flow:
+**[docs/MCP.md](./docs/MCP.md)**.
+
+> **Indexing from the assistant has one limit worth knowing.** The `index_code`
+> tool takes file *contents*, not a directory — it does not walk the filesystem.
+> That makes it a good fit for updating the files an assistant just edited, and
+> a poor one for indexing a whole repository. For that, run `egr index ./src`.
+
 ### Native dependencies and platform support
 
 EngramGraph has **two** independent native dependencies, and they fail in different

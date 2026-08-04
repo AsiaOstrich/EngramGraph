@@ -31,8 +31,8 @@
   "files": [
     "dist",
     "language-support.js",
-    "language-support.d.ts",
     "preinstall.js",
+    "postinstall.js",
     "README.md",
     "LICENSE"
   ],
@@ -41,6 +41,7 @@
   },
   "scripts": {
     "preinstall": "node preinstall.js",
+    "postinstall": "node postinstall.js",
     "build": "tsup",
     "prepare": "tsup && husky",
     "health": "node scripts/health-check.mjs",
