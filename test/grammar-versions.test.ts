@@ -62,17 +62,31 @@ const lock = JSON.parse(
   readFileSync(join(ROOT, "package-lock.json"), "utf8"),
 ) as LockFile;
 
+/**
+ * Every dependency that carries a native binding, not just the grammars.
+ *
+ * The first version of this file filtered on `"tree-sitter"` — the family that
+ * caused the incident — and therefore said nothing about `ryugraph`, which is
+ * the embedded graph database: an install script, cmake-js, node-addon-api,
+ * and the one dependency here that is not optional. It sat behind a caret for
+ * a week after the grammars were pinned, because the fix was shaped around
+ * where the problem had already appeared rather than where it could.
+ * `uds deps` (XSPEC-366 R1/R2) found it.
+ */
+const NATIVE_DEPENDENCIES = /tree-sitter|^ryugraph$/;
+
 const declared: Array<[string, string]> = Object.entries({
   ...(pkg.dependencies ?? {}),
   ...(pkg.optionalDependencies ?? {}),
-}).filter(([name]) => name.includes("tree-sitter"));
+}).filter(([name]) => NATIVE_DEPENDENCIES.test(name));
 
 describe("grammar versions are pinned to what this repo tests", () => {
   it("found the dependencies at all", () => {
     // Guard before trusting: if the filter stopped matching (a rename, a move
     // to another section), every assertion below would vacuously pass over an
     // empty list — green, and measuring nothing.
-    expect(declared.length).toBeGreaterThanOrEqual(13);
+    // 13 tree-sitter packages plus ryugraph.
+    expect(declared.length).toBeGreaterThanOrEqual(14);
   });
 
   for (const [name, range] of declared) {
@@ -93,7 +107,16 @@ describe("grammar versions are pinned to what this repo tests", () => {
       it("matches the version actually installed", () => {
         // The declaration and the lockfile can agree with each other and both
         // disagree with what is on disk.
-        const installed = require(`${name}/package.json`) as { version: string };
+        //
+        // Read off disk rather than through require(): `ryugraph` blocks
+        // '/package.json' in its `exports` map, so require() throws for a
+        // package that is installed and correct. Three separate checks were
+        // written with require() today and all three had to be changed —
+        // hono, @modelcontextprotocol/sdk and ryugraph all do this, and the
+        // failure looks like "not installed" rather than "cannot read".
+        const installed = JSON.parse(
+          readFileSync(join(ROOT, "node_modules", ...name.split("/"), "package.json"), "utf8"),
+        ) as { version: string };
         expect(installed.version).toBe(range);
       });
     });
