@@ -219,21 +219,31 @@ export const KNOWN_ISSUES = Object.freeze([
     id: "tree-sitter-c-sharp-dep0151",
     package: "tree-sitter-c-sharp",
     /**
-     * Running `egr` prints:
-     *   DeprecationWarning: DEP0151 — the package's `main` field is
-     *   "bindings/node" with no file extension, so Node has to guess.
-     * Cosmetic today; Node has escalated resolution deprecations to hard
-     * errors before.
+     * The package's `main` field is `"bindings/node"` with no extension, so
+     * Node has to guess — which is deprecated **for ES modules**. Up to and
+     * including 0.8.0 this printed on every `egr` command and on the MCP
+     * server's stderr, because the grammars were imported statically as ESM.
+     *
+     * It no longer appears: XSPEC-365 R2 moved grammar loading to
+     * `createRequire`, and DEP0151 is an ESM-resolution warning that CommonJS
+     * `require` does not trigger. Measured on 2026-08-04 by indexing the same
+     * file with both versions — 1 occurrence on 0.8.0, 0 after — rather than
+     * inferred from not having noticed it.
+     *
+     * Kept as an entry rather than deleted because the underlying package is
+     * unchanged. If grammar loading ever moves back to ESM `import`, the
+     * warning returns, and this is the note explaining why.
      */
-    symptom: 'DeprecationWarning DEP0151 — "main" resolves without an extension',
+    symptom:
+      'DEP0151 — "main" resolves without an extension. No longer surfaced (grammars load via createRequire since 0.9.0); would return if loading moved back to ESM import',
     severity: "warning-only",
     /**
      * Not fixable here — it is the upstream package's `package.json`. Patching
      * it in `node_modules` would survive exactly until the next install.
      */
-    action: "none — upstream package.json",
+    action: "none — upstream package.json; masked by CJS loading since 0.9.0",
     resolveWhen:
-      "upstream publishes a release with an extension on `main`, OR Node turns DEP0151 into an error (at which point `egr` stops starting and this entry is where to look)",
+      "upstream publishes a release with an extension on `main` (at which point this entry can go), OR grammar loading returns to ESM import (at which point the warning returns and this entry explains it)",
     firstSeen: "2026-08-04",
   },
 ]);
