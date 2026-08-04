@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /**
@@ -19,56 +21,56 @@ import { join } from "node:path";
 
 const ROOT = join(__dirname, "..");
 
-interface PackEntry {
-  path: string;
-}
-interface PackResult {
-  files: PackEntry[];
-}
-
+/**
+ * The paths inside the tarball npm would publish, with the leading `package/`
+ * stripped.
+ *
+ * **Why this builds a real tarball instead of reading `npm pack --json`.** The
+ * JSON route was tried twice and broke twice, each time in an environment it
+ * had not been run in before: once under `npm test` (the outer npm exports
+ * `npm_config_*`, and the inherited value beat the `--ignore-scripts` flag, so
+ * `prepare` ran and printed build progress onto stdout), and once in CI, where
+ * trailing output after the JSON array defeated a "find the array and slice"
+ * workaround. Both times the check reported a packaging problem when packaging
+ * was fine.
+ *
+ * The lesson is the one this file is about: a measurement whose result depends
+ * on incidental properties of how it was invoked is not measuring the thing it
+ * claims to. So this stops parsing a text stream that other tools are entitled
+ * to write to, and inspects the artifact instead — which is also what the
+ * requirement actually asks for.
+ */
 function packedFiles(): string[] {
-  // `prepare` (tsup) writes build progress to stdout and would corrupt the
-  // JSON, so scripts are suppressed two ways. Both are needed:
-  //
-  //   - The CLI flag alone worked when this test was run directly and silently
-  //     stopped working under `npm test`, because the outer npm exports its
-  //     own `npm_config_*` into the child environment and the inherited value
-  //     won. The failure was loud here (invalid JSON), but the same
-  //     environment-dependent behaviour is exactly how a check ends up
-  //     measuring something different from what it measured when it was
-  //     written.
-  //   - The explicit env var pins it regardless of what the parent exported.
-  //
-  // Suppressing scripts does not change which files npm reports — that comes
-  // from `files` plus what is on disk.
-  const stdout = execFileSync(
-    "npm",
-    ["pack", "--dry-run", "--json", "--ignore-scripts"],
-    {
+  const dir = mkdtempSync(join(tmpdir(), "egr-pack-"));
+  try {
+    execFileSync("npm", ["pack", "--pack-destination", dir, "--ignore-scripts"], {
       cwd: ROOT,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
+      // stdout is deliberately ignored — nothing here reads it, so nothing here
+      // can be broken by what npm or a lifecycle script decides to print.
+      stdio: "ignore",
       env: { ...process.env, npm_config_ignore_scripts: "true" },
-    },
-  );
+    });
 
-  // Belt and braces: if anything still prints ahead of the payload, find the
-  // JSON rather than failing on the first stray character. A parse error here
-  // would read like a packaging regression when it is only noise on stdout.
-  const start = stdout.indexOf("[");
-  if (start === -1) {
-    throw new Error(
-      `npm pack --json produced no JSON array; this check cannot run. Output was: ${stdout.slice(0, 200)}`,
-    );
+    const tarball = readdirSync(dir).find((f) => f.endsWith(".tgz"));
+    if (!tarball) {
+      throw new Error(
+        `npm pack produced no tarball in ${dir}; this check cannot run`,
+      );
+    }
+
+    const listing = execFileSync("tar", ["-tzf", join(dir, tarball)], {
+      encoding: "utf8",
+    });
+    return listing
+      .split("\n")
+      .filter(Boolean)
+      // npm wraps everything in a top-level `package/` directory.
+      .map((entry) => entry.replace(/^package\//, ""))
+      // Directory entries end in a slash on some tar implementations.
+      .filter((entry) => entry !== "" && !entry.endsWith("/"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-  const parsed = JSON.parse(stdout.slice(start)) as PackResult[];
-  const first = parsed[0];
-  if (!first || !Array.isArray(first.files)) {
-    throw new Error(
-      "npm pack --json did not return the expected shape; this check cannot run",
-    );
-  }
-  return first.files.map((f) => f.path);
 }
 
 describe("the published tarball contains what the install hooks need", () => {
