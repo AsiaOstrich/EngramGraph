@@ -283,7 +283,26 @@ async function main(): Promise<void> {
             ? ` (healed ${ph.healed.length}, regressed ${ph.regressed.length} since last index)`
             : "";
         const parse = ph ? `\nparse: ${ph.clean} clean, ${ph.partial} partial, ${ph.failed} failed${delta}` : "";
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${scip}${parse}`;
+        // Languages this installation has no grammar for (XSPEC-365 R2). Kept
+        // off the `parse:` line on purpose: those counts describe files the
+        // engine read and struggled with, and folding "you have no Dart
+        // grammar" in there would send the reader to inspect source code when
+        // the fix is a toolchain. Silence would be worse still — the files
+        // simply wouldn't be in the graph, and `callers()` would answer
+        // "nothing calls X" with no hint that a whole language was missing.
+        const sk = s.code.skippedLanguages ?? [];
+        const skipped = sk.length
+          ? "\n" +
+            sk
+              .map(
+                (l) =>
+                  `skipped: ${l.files} ${l.label} file(s) — ${l.label} support is not enabled ` +
+                  `in this installation (${l.package}: ${l.reason}). ` +
+                  `Everything else was indexed normally.`,
+              )
+              .join("\n")
+          : "";
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${scip}${parse}${skipped}`;
       });
       break;
     }

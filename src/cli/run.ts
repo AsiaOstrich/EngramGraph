@@ -10,6 +10,7 @@ import { join, resolve } from "node:path";
 
 import pkg from "../../package.json" with { type: "json" };
 import type { GraphConnection } from "../graph-db/connection.js";
+import type { ProjectIndexResult } from "../code-graph/types.js";
 import { clearGraph } from "../graph-db/schema.js";
 import { writeFragment } from "../graph-db/writer.js";
 import { gitBranchEngramDir, listBranches, sanitizeBranch } from "../graph-db/git-branch.js";
@@ -51,7 +52,13 @@ const CODE_EXTS = [
 ] as const;
 
 export interface IndexResultSummary {
-  code: { files: number; functions: number; classes: number; calls: number; implements: number; ambiguous: number; unresolved: number };
+  /**
+   * Everything `indexProject` returns except the bulky per-file array — derived
+   * from `ProjectIndexResult` rather than restated, so a field added there
+   * (`skippedLanguages`, XSPEC-365 R2) reaches the CLI summary instead of being
+   * silently dropped by a hand-maintained copy of the shape.
+   */
+  code: Omit<ProjectIndexResult, "parseHealth">;
   knowledge?: { specs: number; decisions: number; impacts: number; supersedes: number; relates: number };
   /** Present only when `--scip` was given. See {@link ingestScipOverlay}. */
   scip?: ScipIngestStats & { documentsInIndex: number; filesMatched: number };

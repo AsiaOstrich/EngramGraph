@@ -42,20 +42,33 @@ npm install -g engramgraph
 npx engramgraph index ./src
 ```
 
-### 平台支援矩陣
+### 原生相依與平台支援
 
-EngramGraph 依賴 [`ryugraph`](https://github.com/predictable-labs/ryugraph) 作為嵌入式圖譜資料庫，該套件按平台附上預先編譯好的原生二進位檔。截至 `ryugraph@25.9.1`，已驗證的支援狀況為：
+EngramGraph 有**兩個**互相獨立的原生相依，而它們的失敗方式不同。分清楚你撞到的是哪一個，就知道是整個安裝壞了、還是只少了一種語言：
 
-| 平台 | 狀態 | 備註 |
-|------|------|------|
-| macOS ARM64（Apple Silicon）| ✅ 可用 | 已透過 [Cross-Platform Compatibility Check](.github/workflows/release-compat-check.yml)（`macos-latest`）驗證 |
-| macOS x64（Intel）| ⚠️ 未經 CI 驗證（已知限制，見下方）| 目前無已知問題——`ryujs-darwin-x64.node` 是獨立、正當建置的二進位檔（不同於 Linux ARM64 的情況）——但沒有自動化發布關卡驗證 |
-| Linux x64，glibc ≥ 2.38（Ubuntu 24.04+、Debian 13+）| ✅ 可用 | 已透過 CI glibc 相容性矩陣驗證（`node:24-trixie`，glibc 2.41）|
-| Linux x64，glibc < 2.38（Ubuntu 22.04 LTS、Debian 12）| ❌ 無法使用 | 上游 `ryugraph` 二進位檔需要比這些仍常見的 LTS 發行版所附更新的 glibc。已透過 CI glibc 相容性矩陣驗證（`node:24`，glibc 2.36）|
-| Linux ARM64（任何 glibc）| ❌ 無法使用 | 上游把 x86-64 的二進位檔用 arm64 的檔名發布——追蹤於 [predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48)。已透過 CI（`ubuntu-24.04-arm`）驗證 |
-| Windows x64 | ✅ 可用 | 已透過 CI（`windows-latest`）驗證 |
+| | 套件 | 是否必要 | 該平台沒有預建二進位檔時 |
+|---|---|---|---|
+| **圖譜資料庫** | [`ryugraph`](https://github.com/predictable-labs/ryugraph) | **是** | 透過 `cmake-js` 從原始碼編譯。編不出來就完全沒有可用的 `egr`。 |
+| **語言文法** | `tree-sitter` ＋ 12 個文法套件 | 逐語言而定 | 透過 `node-gyp` 從原始碼編譯。編不出來**只影響該語言**——`egr` 照樣安裝、照樣索引其他語言。 |
 
-這會影響 **Apple Silicon Mac 上的 Docker Desktop**（預設用 `linux/arm64`）與
+截至 `engramgraph@0.8.0` 的預建二進位檔涵蓋狀況：
+
+| 平台 | 圖譜資料庫 | 語言文法 | 你會得到什麼 |
+|------|-----------|---------|-------------|
+| Linux x64，glibc ≥ 2.38（Ubuntu 24.04+、Debian 13+）| ✅ 已預建 | ✅ 13 個全部已預建 | 全部功能，完全不需要編譯器 |
+| macOS ARM64（Apple Silicon）| ✅ 已預建 | ⚠️ Dart 需編譯 | 有 C/C++ 工具鏈就是全部；沒有的話是**除 Dart 以外**的所有語言 |
+| macOS x64（Intel）| ✅ 已預建 | ⚠️ Dart 需編譯 | 同上 |
+| Windows x64 | ✅ 已預建 | ⚠️ Dart 需編譯 | 同上——但請看 [Windows](#windows啟用-dart-文法)，那裡有兩個讓這件事比聽起來難的陷阱 |
+| Windows ARM64 | ❌ **無預建** | ⚠️ Dart 需編譯 | 連圖譜資料庫都需要工具鏈；未經測試 |
+| Linux ARM64（任何 glibc）| ❌ **上游有問題** | ⚠️ Dart 需編譯 | 上游把 x86-64 的二進位檔用 arm64 檔名發布——[predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48) |
+| Linux x64，glibc < 2.38（Ubuntu 22.04 LTS、Debian 12）| ❌ **上游有問題** | ✅ 13 個全部已預建 | `ryugraph` 的二進位檔需要比這些仍常見的 LTS 發行版更新的 glibc |
+
+**Linux x64 是唯一完全不需要編譯器就能安裝的平台。** 其他每個平台上，`npm install` 至少會編譯 Dart 文法（[`@vokturz/tree-sitter-dart`](https://www.npmjs.com/package/@vokturz/tree-sitter-dart) 只發布 `linux-x64` 的預建二進位檔）。該文法是**選用相依（optional dependency）**：編譯失敗時 npm 會繼續、安裝會成功，而 `egr` 會在你索引時告訴你 Dart 不可用。安裝期也會有一則前置提示先講清楚這件事，不必等編譯器的錯誤刷過去才知道。
+
+> **為什麼偏偏是 Dart。** 本專案其他每個文法都出貨六種平台/架構的二進位檔。Dart 是例外，因為它是 npm 上唯一與本專案鎖定的 `tree-sitter` 核心 ABI 相容的 Dart 文法——另外兩個**確實**出貨完整預建檔的候選，載入時正常，接著在 `Parser.setLanguage` 裡拋錯。四個候選的比較紀錄在 `src/code-graph/grammars.d.ts`。這是一個已知不理想的取捨，之所以保留是因為其他選項更糟；若日後出現維護較好的套件，值得重新評估。
+
+
+上表的 Linux ARM64 那一列會影響 **Apple Silicon Mac 上的 Docker Desktop**（預設用 `linux/arm64`）與
 **AWS Graviton／其他 ARM64 Linux 主機**——若 `egr` 在這些環境上失敗，很可能就是
 [#48](https://github.com/predictable-labs/ryugraph/issues/48)，不是你的環境設定有問題。
 在受影響的 Docker 主機上強制 `--platform linux/amd64` 可以繞過（代價是在 ARM64 硬體上以模擬方式執行），直到上游修正為止。
@@ -63,7 +76,37 @@ EngramGraph 依賴 [`ryugraph`](https://github.com/predictable-labs/ryugraph) �
 另外請注意：npm ≥ 11 預設會把原生安裝腳本（含 `ryugraph` 的）擋在核准提示之後。若 `npm install`
 印出 `npm warn allow-scripts`，請執行 `npm approve-scripts --all` 後重新安裝——否則原生二進位檔永遠不會被複製到位。
 
-**為什麼 macOS Intel 沒有納入自動化發布關卡。** 這不是疏漏，是刻意的決定，有兩個獨立事實指向同一個方向：
+> **上表這些列是怎麼查證的。** `ryugraph` 的部分來自 2026-07-10 的直接調查；Windows x64 那一列來自 2026-08-04 在一台 Windows 11 上的實際安裝；文法涵蓋範圍來自實際讀取已發布套件所附的 `prebuilds/` 目錄，並由 `test/language-support.test.ts` 在每次測試執行時重新斷言。本表先前的版本引用 [`release-compat-check.yml`](.github/workflows/release-compat-check.yml) 作為自動化發布關卡——**那個引證是錯的**：該 workflow 與發布 job 賽跑，在套件上架 npm 之前就放棄，因此它的矩陣一次都沒有執行過，沒有任何一次發布真的通過該關卡驗證。修復該關卡另案追蹤；在它真的會跑之前，請把本表當成人工查核的結果，因為它就是。
+
+#### Windows：啟用 Dart 文法
+
+在 Windows 上安裝 C++ 工具鏈有兩個陷阱，而它們會產生**同一句**錯誤訊息 `gyp ERR! find VS - missing any VC++ toolset`：
+
+1. **`node-gyp` 不認得 Visual Studio 2026（v18）。** 它的 Visual Studio 搜尋器把版本 15/16/17 硬編碼對應到 2017/2019/2022，其餘一律丟棄，因此會把一台裝了完整 VS 2026 MSVC 的機器回報成 `unknown version "undefined"`。`VCINSTALLDIR` 與 `msvs_version` 都繞不過去。**請把 C++ 工作負載裝進 Build Tools 2022**，即使機器上已經有更新版的 Visual Studio。
+2. **加入 `VCTools` 工作負載並不會裝到編譯器。** 在該工作負載底下，`Microsoft.VisualStudio.Component.VC.Tools.x86.x64` 是 *Recommended* 而非 *Required*——所以一台機器可以回報「有 Visual Studio C++ 核心功能」卻根本沒有編譯器。請明確勾選它（以及一個 Windows SDK）。
+
+用 Visual Studio Installer：選 **Visual Studio Build Tools 2022** → 修改 → 勾選**使用 C++ 的桌面開發** → 確認右側的 **MSVC v143 … 建置工具**與 **Windows 11 SDK** 有被勾到。或在提升權限的 shell 執行（且不要在 installer 自己的目錄下執行）：
+
+```powershell
+& "C:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe" modify `
+  --installPath "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools" `
+  --channelId VisualStudio.17.Release `
+  --productId Microsoft.VisualStudio.Product.BuildTools `
+  --add Microsoft.VisualStudio.Workload.VCTools `
+  --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+  --add Microsoft.VisualStudio.Component.Windows11SDK.26100 `
+  --passive --norestart
+```
+
+**驗收要看 `node-gyp` 印什麼，不是看安裝程式的 exit code。** 安裝程式回 0 不代表編譯器裝上了——那正是陷阱 2 會造成的狀態。重跑一次安裝，找這一行：
+
+```
+gyp verb find VS - found VC++ toolset: v143
+```
+
+它出現就是通過，它缺席就是失敗，無論成因是哪一個陷阱。
+
+**為什麼 macOS Intel 沒有納入自動化發布關卡。**（這一段講的是該關卡的*設計*；至於該關卡根本沒在執行，見上方的查證說明。）排除 Intel Mac 不是疏漏，是刻意的決定，有兩個獨立事實指向同一個方向：
 
 - **GitHub 自家的 Intel Mac（`macos-13`）代管 runner 目前有嚴重的排隊容量限制。** 2026-07-10 的一次實測執行在
   `queued` 狀態卡了約 50 分鐘都沒開始跑。GitHub Actions 的 `timeout-minutes` 無法限制這種情況——它只在
@@ -87,6 +130,10 @@ Linux 上的原生二進位檔載入失敗，會透過 Node 的 `dlopen` 呈現�
 | `ryujs.node: cannot open shared object file: No such file or directory`（用 `ls` 檢查檔案*確實存在*）| CPU 架構不對——該路徑上的二進位檔是給另一個平台/架構用的 |
 | `.../libc.so.6: version 'GLIBC_2.38' not found` | 你的發行版 glibc 版本比預建二進位檔要求的舊（見上方矩陣）|
 | `npm warn allow-scripts ... not yet covered by allowScripts` | npm ≥ 11 擋下了複製原生二進位檔的安裝腳本——執行 `npm approve-scripts --all` 後重新安裝/重建 |
+| `gyp ERR! find VS - missing any VC++ toolset`（Windows）| 沒有可用的 MSVC 編譯器。兩種不同成因會產生這一模一樣的行——見 [Windows：啟用 Dart 文法](#windows啟用-dart-文法)。注意這**不是致命錯誤**：它只讓你失去 Dart |
+| `gyp ERR! find VS unknown version "undefined" found at ...\18\BuildTools` | `node-gyp` 不認得 Visual Studio 2026。請改把 C++ 工作負載裝進 **Build Tools 2022** |
+| Windows/macOS 上一整面 `node-gyp` 輸出、最後是 `npm error code 1` | Dart 文法編譯失敗。沒有 C/C++ 工具鏈時這是預期結果，而且可以承受——其他語言全部照常運作 |
+| 索引時出現 `Dart support is not enabled in this installation` | 同一件事的另一端。`egr` 是正常的，只是這台機器沒有建置 Dart 文法 |
 
 若你遇到的問題不在上表範圍內，請先查
 [predictable-labs/ryugraph 的 issues](https://github.com/predictable-labs/ryugraph/issues)，

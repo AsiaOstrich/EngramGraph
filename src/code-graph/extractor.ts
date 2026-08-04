@@ -29,28 +29,46 @@
  * concrete case to justify it.
  */
 
-import Parser from "tree-sitter";
-import JavaScript from "tree-sitter-javascript";
-import TypeScript from "tree-sitter-typescript";
-import CSharp from "tree-sitter-c-sharp";
-import Python from "tree-sitter-python";
-import Go from "tree-sitter-go";
-import Java from "tree-sitter-java";
-import Kotlin from "@tree-sitter-grammars/tree-sitter-kotlin";
-import Rust from "tree-sitter-rust";
-import Cpp from "tree-sitter-cpp";
-import Ruby from "tree-sitter-ruby";
-import PhpModule from "tree-sitter-php";
-import Dart from "@vokturz/tree-sitter-dart";
-
+// Grammars are no longer imported here (// implements XSPEC-365 R2). Thirteen
+// static imports meant one missing native binary broke module initialization,
+// so "Dart's grammar isn't built for this platform" surfaced as "`egr` cannot
+// index anything". `grammar-registry.ts` loads each grammar on first use and
+// records the failure instead of propagating it; see its header.
 import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
-import type { ExtractOptions, ProjectFile, SupportedLanguage } from "./types.js";
+import type {
+  ExtractOptions,
+  ProjectFile,
+  SkippedLanguage,
+  SupportedLanguage,
+} from "./types.js";
 import { tagsQuerySourceFor } from "./queries/index.js";
 import { toPosixPath } from "./path-utils.js";
 import { collectComments, findEnclosingFunction, qualifyFunctions, runTagQuery } from "./tag-query-engine.js";
 import { measureErrorSpan, type FileParseHealth } from "./parse-health.js";
 import { errorSignatures } from "./error-signature.js";
+import {
+  GrammarUnavailableError,
+  isLanguageAvailable,
+  labelFor,
+  languageFor,
+  parserFor,
+} from "./grammar-registry.js";
+
+/**
+ * Re-exported from `grammar-registry.ts`, where they now live (XSPEC-365 R2).
+ * Kept exported from this module because `scip-ingest.ts` and several tests
+ * import them from here, and because the reason they were exported in the
+ * first place (XSPEC-333 R3: SCIP ingest needs the same grammar lookup and
+ * parser cache rather than a second copy) is unchanged.
+ *
+ * Behaviour change worth knowing at the call site: both now throw
+ * {@link GrammarUnavailableError} for a language whose grammar could not be
+ * loaded, where previously an unloadable grammar made this whole module fail
+ * to import. Callers that process many files should treat that error as "skip
+ * this file's language", not as a parse failure — `extractProject` below does.
+ */
+export { languageFor, parserFor, isLanguageAvailable, GrammarUnavailableError };
 
 /**
  * Provenance stamp for every node this extractor produces (XSPEC-333 R1).
@@ -230,64 +248,6 @@ export function detectLanguage(filePath: string): SupportedLanguage {
   return "javascript";
 }
 
-/** Exported (XSPEC-333 R3 Java PoC) — see {@link parserFor}'s doc comment. */
-export function languageFor(language: SupportedLanguage): Parser.Language {
-  switch (language) {
-    case "typescript":
-      return TypeScript.typescript;
-    case "tsx":
-      return TypeScript.tsx;
-    case "javascript":
-      return JavaScript;
-    case "csharp":
-      return CSharp;
-    case "python":
-      return Python;
-    case "go":
-      return Go;
-    case "java":
-      return Java;
-    case "kotlin":
-      return Kotlin;
-    case "rust":
-      return Rust;
-    case "cpp":
-      return Cpp;
-    case "ruby":
-      return Ruby;
-    case "php":
-      return PhpModule.php;
-    case "dart":
-      return Dart;
-  }
-}
-
-/**
- * Reuse one native Parser per language. tree-sitter parsers hold native
- * resources and have no `delete()`; allocating a fresh one per call leaks
- * handles and can keep a test worker process from exiting cleanly.
- */
-const parserCache = new Map<SupportedLanguage, Parser>();
-
-/**
- * Exported (XSPEC-333 R3 Java PoC) so a second SCIP-ingest language doesn't
- * have to duplicate this cache: `scip-ingest.ts`'s original C#-only PoC kept
- * its own single-language `csharpParser` cache rather than reusing this one,
- * which was fine when there was exactly one SCIP-backed language, but adding
- * Java meant either duplicating this whole grammar-lookup switch a second
- * time or reusing the one tree-sitter parser cache this module already
- * maintains for every language `egr index` supports — the latter is the
- * change made here, no behavior change for existing (non-SCIP) callers.
- */
-export function parserFor(language: SupportedLanguage): Parser {
-  let parser = parserCache.get(language);
-  if (!parser) {
-    parser = new Parser();
-    parser.setLanguage(languageFor(language));
-    parserCache.set(language, parser);
-  }
-  return parser;
-}
 
 /** An unresolved call: `from` (caller id) invoked something named `callee`. */
 export interface RawCall {
@@ -554,6 +514,8 @@ export interface ProjectExtraction {
   unresolved: number;
   /** Per-file raw parse-health, one entry per input file (XSPEC-334 R1b). */
   parseHealth: FileParseHealth[];
+  /** Languages skipped for want of a grammar (XSPEC-365 R2). Empty is normal. */
+  skippedLanguages: SkippedLanguage[];
 }
 
 /**
@@ -580,8 +542,44 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
   // cross-file resolution below only ever sees successfully-parsed files.
   const extractions: Extraction[] = [];
   const okFiles: ProjectFile[] = [];
+  // Languages whose grammar isn't available here (XSPEC-365 R2), tallied per
+  // language rather than per file. Checked before the try/catch below on
+  // purpose: an unavailable grammar is not a parse failure, and letting it
+  // fall into that catch would file every .dart file as a blindspot in the
+  // source — sending the reader to inspect code when the actual fix is a
+  // toolchain. See SkippedLanguage's doc comment.
+  const skipped = new Map<SupportedLanguage, SkippedLanguage>();
   for (const f of files) {
     const language = f.language ?? detectLanguage(f.path);
+    if (!isLanguageAvailable(language)) {
+      const existing = skipped.get(language);
+      if (existing) {
+        existing.files += 1;
+      } else {
+        // `languageFor` is the one call that can hand us the load error's
+        // details; it is memoized, so this costs nothing after the first file.
+        let reason = "grammar unavailable";
+        let pkg = "(unknown)";
+        try {
+          languageFor(language);
+        } catch (err) {
+          if (err instanceof GrammarUnavailableError) {
+            reason = err.cause;
+            pkg = err.grammarPackage;
+          } else {
+            reason = err instanceof Error ? err.message : String(err);
+          }
+        }
+        skipped.set(language, {
+          language,
+          label: labelFor(language),
+          package: pkg,
+          reason,
+          files: 1,
+        });
+      }
+      continue;
+    }
     try {
       const ex = collectExtraction(f.source, { filePath: f.path, language: f.language });
       extractions.push(ex);
@@ -683,7 +681,13 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
   const calls = buildCallEdges(resolved);
   return {
     fragment: { nodes, edges: [...defines, ...calls, ...implementsEdges] },
-    files: files.length,
+    // Files the engine actually looked at, which is `parseHealth.length` (one
+    // entry per attempted file) rather than `files.length` (everything handed
+    // in). The two are equal unless a language was skipped for want of a
+    // grammar — and in that case reporting the input count would claim credit
+    // for indexing files that were never opened. `skippedLanguages` carries
+    // the difference.
+    files: parseHealth.length,
     functions: nodes.filter((n) => n.label === "Function").length,
     classes: nodes.filter((n) => n.label === "Class").length,
     calls: calls.length,
@@ -691,5 +695,6 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
     ambiguous,
     unresolved,
     parseHealth,
+    skippedLanguages: [...skipped.values()],
   };
 }

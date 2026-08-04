@@ -37,34 +37,112 @@ any directory. Or run the CLI without a global install:
 npx engramgraph index ./src
 ```
 
-### Platform support matrix
+### Native dependencies and platform support
 
-EngramGraph depends on [`ryugraph`](https://github.com/predictable-labs/ryugraph) for
-its embedded graph database, which ships prebuilt native binaries per platform. As of
-`ryugraph@25.9.1`, verified support is:
+EngramGraph has **two** independent native dependencies, and they fail in different
+ways. Knowing which one you hit tells you whether the install is broken or merely
+missing one language:
 
-| Platform | Status | Notes |
-|---|---|---|
-| macOS ARM64 (Apple Silicon) | ✅ Works | Verified via [Cross-Platform Compatibility Check](.github/workflows/release-compat-check.yml) (`macos-latest`) |
-| macOS x64 (Intel) | ⚠️ Not CI-verified (known limitation, see below) | No known issue — `ryujs-darwin-x64.node` is a distinct, legitimately-built binary (unlike the Linux ARM64 case) — but not exercised by an automated release gate |
-| Linux x64, glibc ≥ 2.38 (Ubuntu 24.04+, Debian 13+) | ✅ Works | Verified via CI glibc-compat matrix (`node:24-trixie`, glibc 2.41) |
-| Linux x64, glibc < 2.38 (Ubuntu 22.04 LTS, Debian 12) | ❌ Broken | Upstream `ryugraph` binary requires a newer glibc than these still-common LTS distros ship. Verified via CI glibc-compat matrix (`node:24`, glibc 2.36) |
-| Linux ARM64 (any glibc) | ❌ Broken | Upstream ships the x86-64 binary under the arm64 filename — tracked in [predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48). Verified via CI (`ubuntu-24.04-arm`) |
-| Windows x64 | ✅ Works | Verified via CI (`windows-latest`) |
+| | Package(s) | Required? | If no prebuilt binary exists for your platform |
+|---|---|---|---|
+| **Graph database** | [`ryugraph`](https://github.com/predictable-labs/ryugraph) | **Yes** | Built from source via `cmake-js`. If that fails you have no working `egr` at all. |
+| **Language grammars** | `tree-sitter` + 12 grammar packages | Per language | Built from source via `node-gyp`. If that fails, **only that language** is unavailable — `egr` installs and indexes everything else. |
 
-This affects **Docker Desktop on Apple Silicon Macs** (defaults to `linux/arm64`) and
-**AWS Graviton / other ARM64 Linux hosts** — if `egr` fails there, it's very likely
-[#48](https://github.com/predictable-labs/ryugraph/issues/48), not a problem with your
-setup. Forcing `--platform linux/amd64` on affected Docker hosts works around it (at
-the cost of running under emulation on ARM64 hardware) until upstream is fixed.
+Prebuilt coverage as of `engramgraph@0.8.0`:
+
+| Platform | Graph DB | Grammars | What you get |
+|---|---|---|---|
+| Linux x64, glibc ≥ 2.38 (Ubuntu 24.04+, Debian 13+) | ✅ prebuilt | ✅ all 13 prebuilt | Everything, no compiler needed |
+| macOS ARM64 (Apple Silicon) | ✅ prebuilt | ⚠️ Dart compiles | Everything if you have a C/C++ toolchain; otherwise all languages **except Dart** |
+| macOS x64 (Intel) | ✅ prebuilt | ⚠️ Dart compiles | Same as above |
+| Windows x64 | ✅ prebuilt | ⚠️ Dart compiles | Same as above — see [Windows](#windows-enabling-the-dart-grammar) for the two traps that make this harder than it sounds |
+| Windows ARM64 | ❌ **no prebuilt** | ⚠️ Dart compiles | Needs a toolchain even for the graph database; untested |
+| Linux ARM64 (any glibc) | ❌ **broken upstream** | ⚠️ Dart compiles | Upstream ships the x86-64 binary under the arm64 filename — [predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48) |
+| Linux x64, glibc < 2.38 (Ubuntu 22.04 LTS, Debian 12) | ❌ **broken upstream** | ✅ all 13 prebuilt | `ryugraph`'s binary needs a newer glibc than these still-common LTS distros ship |
+
+**Linux x64 is the only platform that installs with no compiler at all.** Everywhere
+else, `npm install` compiles at least the Dart grammar
+([`@vokturz/tree-sitter-dart`](https://www.npmjs.com/package/@vokturz/tree-sitter-dart)
+publishes a prebuilt binary for `linux-x64` only). That grammar is an
+**optional dependency**: if the build fails, npm continues, the install succeeds, and
+`egr` tells you Dart is unavailable when you index. An install-time notice says so up
+front, before the compiler output scrolls past.
+
+> **Why Dart specifically.** Every other grammar in this project ships binaries for all
+> six platform/arch pairs. Dart is the exception because it is the only npm Dart grammar
+> that is ABI-compatible with this project's pinned `tree-sitter` core — the two
+> alternatives that *do* ship full prebuilds load cleanly and then throw inside
+> `Parser.setLanguage`. `src/code-graph/grammars.d.ts` records the four-candidate
+> comparison. It is a known-bad trade, kept because the alternatives are worse, and
+> worth revisiting if a better-maintained package appears.
+
+The Linux ARM64 row affects **Docker Desktop on Apple Silicon Macs** (defaults to
+`linux/arm64`) and **AWS Graviton / other ARM64 Linux hosts** — if `egr` fails there
+it is very likely [#48](https://github.com/predictable-labs/ryugraph/issues/48), not
+your setup. Forcing `--platform linux/amd64` works around it (at the cost of emulation)
+until upstream is fixed.
 
 Also note: npm ≥ 11 gates native install scripts (including `ryugraph`'s) behind an
 approval prompt by default. If `npm install` prints `npm warn allow-scripts`, run
 `npm approve-scripts --all` and reinstall — otherwise the native binary is never
 copied into place.
 
-**Why macOS Intel isn't in the automated release gate.** This isn't an oversight —
-it's a deliberate call. Two independent facts point the same direction:
+> **How these rows were checked.** The `ryugraph` findings come from direct
+> investigation on 2026-07-10; the Windows x64 row from a real install on Windows 11
+> on 2026-08-04; the grammar coverage from reading the published packages' shipped
+> `prebuilds/` directories, re-asserted on every test run by
+> `test/language-support.test.ts`. Earlier revisions of this table cited
+> [`release-compat-check.yml`](.github/workflows/release-compat-check.yml) as an
+> automated release gate — **that citation was wrong**: the workflow raced the publish
+> job and gave up before the package reached npm, so its matrix never once executed and
+> no release has actually been gate-verified. Repairing that gate is tracked separately;
+> until it runs, treat this table as manually checked, because that is what it is.
+
+#### Windows: enabling the Dart grammar
+
+Installing the C++ toolchain on Windows has two traps that produce the **same** error
+message, `gyp ERR! find VS - missing any VC++ toolset`:
+
+1. **`node-gyp` does not recognise Visual Studio 2026 (v18).** Its Visual Studio finder
+   hard-codes version 15/16/17 → 2017/2019/2022 and discards anything else, reporting a
+   machine with a complete VS 2026 MSVC install as `unknown version "undefined"`. Neither
+   `VCINSTALLDIR` nor `msvs_version` gets around it. **Install the C++ workload into
+   Build Tools 2022**, even if a newer Visual Studio is already present.
+2. **Adding the `VCTools` workload does not install a compiler.** Inside that workload,
+   `Microsoft.VisualStudio.Component.VC.Tools.x86.x64` is *Recommended*, not *Required* —
+   so a machine can report "Visual Studio C++ core features" while having no compiler at
+   all. Select it (and a Windows SDK) explicitly.
+
+Via the Visual Studio Installer: pick **Visual Studio Build Tools 2022** → Modify →
+check **Desktop development with C++** → confirm **MSVC v143 … build tools** and a
+**Windows 11 SDK** are checked on the right. Or from an elevated shell, not run from the
+installer's own directory:
+
+```powershell
+& "C:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe" modify `
+  --installPath "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools" `
+  --channelId VisualStudio.17.Release `
+  --productId Microsoft.VisualStudio.Product.BuildTools `
+  --add Microsoft.VisualStudio.Workload.VCTools `
+  --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+  --add Microsoft.VisualStudio.Component.Windows11SDK.26100 `
+  --passive --norestart
+```
+
+**Verify by what `node-gyp` prints, not by the installer's exit code.** The installer
+returning 0 does not mean the compiler landed — that is exactly the state trap 2
+produces. Re-run the install and look for this line:
+
+```
+gyp verb find VS - found VC++ toolset: v143
+```
+
+Its presence is the whole signal. Its absence is the failure, whichever trap caused it.
+
+**Why macOS Intel isn't in the automated release gate.** (This is about the gate's
+*design*; separately, the gate has not been executing at all — see the note above.)
+Excluding Intel Mac isn't an oversight, it's a deliberate call. Two independent facts
+point the same direction:
 
 - **GitHub's own Intel Mac (`macos-13`) hosted runners currently have severe queue
   capacity constraints.** A real test run on 2026-07-10 sat in `queued` for ~50 minutes
@@ -96,6 +174,10 @@ text doesn't always describe the real cause:
 | `ryujs.node: cannot open shared object file: No such file or directory` (file *does* exist per `ls`) | Wrong CPU architecture — the binary at that path is for a different platform/arch than the one you're running on |
 | `.../libc.so.6: version 'GLIBC_2.38' not found` | Your distro's glibc is older than what the prebuilt binary requires (see matrix above) |
 | `npm warn allow-scripts ... not yet covered by allowScripts` | npm ≥ 11 blocked the install script that copies the native binary — run `npm approve-scripts --all` then reinstall/rebuild |
+| `gyp ERR! find VS - missing any VC++ toolset` (Windows) | No usable MSVC compiler. Two different causes produce this identical line — see [Windows: enabling the Dart grammar](#windows-enabling-the-dart-grammar). Note this is **not fatal**: it only costs you Dart |
+| `gyp ERR! find VS unknown version "undefined" found at ...\18\BuildTools` | `node-gyp` doesn't recognise Visual Studio 2026. Install the C++ workload into **Build Tools 2022** instead |
+| A wall of `node-gyp` output ending in `npm error code 1`, on Windows/macOS | The Dart grammar failed to compile. Expected without a C/C++ toolchain, and survivable — every other language still works |
+| `Dart support is not enabled in this installation` (at index time) | The above, seen from the other end. `egr` is working; the Dart grammar isn't built here |
 
 If you hit something not covered here, please check
 [predictable-labs/ryugraph's issues](https://github.com/predictable-labs/ryugraph/issues)

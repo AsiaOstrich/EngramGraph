@@ -30,6 +30,9 @@
   },
   "files": [
     "dist",
+    "language-support.js",
+    "language-support.d.ts",
+    "preinstall.js",
     "README.md",
     "LICENSE"
   ],
@@ -37,6 +40,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "preinstall": "node preinstall.js",
     "build": "tsup",
     "prepare": "tsup && husky",
     "health": "node scripts/health-check.mjs",
@@ -61,7 +65,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@tree-sitter-grammars/tree-sitter-kotlin": "^1.1.0",
-    "@vokturz/tree-sitter-dart": "^1.0.0",
     "hono": "^4.6.0",
     "ryugraph": "^25.9.1",
     "tree-sitter": "^0.22.4",
@@ -75,6 +78,9 @@
     "tree-sitter-ruby": "^0.23.1",
     "tree-sitter-rust": "^0.23.1",
     "tree-sitter-typescript": "^0.23.2"
+  },
+  "optionalDependencies": {
+    "@vokturz/tree-sitter-dart": "^1.0.0"
   },
   "overrides": {
     "cmake-js": "^8.0.0"
