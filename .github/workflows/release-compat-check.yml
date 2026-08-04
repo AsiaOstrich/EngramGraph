@@ -45,17 +45,49 @@ jobs:
             SPEC="engramgraph@latest"
           fi
 
+          # HOW LONG TO WAIT, AND WHY THIS NUMBER (XSPEC-365 R6).
+          #
+          # This job used to poll 10 times at 15s = ~2.5 minutes, and it lost
+          # that race every single time. Both this workflow and publish.yml
+          # trigger on `release: published` and start in the same second, but
+          # the package only reaches the registry when publish.yml finishes —
+          # measured at 3m36s / 3m31s / 3m51s / 3m36s for v0.5.0 through
+          # v0.8.0. Every release was ~60-80s short. The consequence was not a
+          # flaky gate, it was NO gate: `resolve-version` failed, and with it
+          # every matrix job was skipped (0s), across four consecutive
+          # releases, while the README cited this workflow as proof that
+          # Windows and macOS were verified.
+          #
+          # 40 attempts x 15s = 10 minutes, roughly 2.5x the slowest observed
+          # publish. Sized against measurement rather than intuition, and
+          # deliberately generous: the cost of waiting too long is a few
+          # runner-minutes, while the cost of waiting too little is a gate that
+          # reports failure in a way indistinguishable from a real breakage.
+          ATTEMPTS=40
           echo "Waiting for $SPEC to be resolvable on the npm registry..."
-          for i in $(seq 1 10); do
+          for i in $(seq 1 "$ATTEMPTS"); do
             if npm view "$SPEC" version >/dev/null 2>&1; then
-              echo "Found $SPEC on npm registry."
+              echo "Found $SPEC on npm registry after ~$(( (i - 1) * 15 ))s."
               echo "package-spec=$SPEC" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "  attempt $i/10: not yet available, waiting 15s..."
+            echo "  attempt $i/$ATTEMPTS: not yet available, waiting 15s..."
             sleep 15
           done
-          echo "::error::$SPEC never became available on the npm registry after 10 attempts (~2.5min)."
+
+          # TELL THE TWO FAILURES APART (XSPEC-365 R6).
+          #
+          # "the package never got published" and "a platform cannot install
+          # it" both used to surface as this one workflow going red, which is
+          # how a gate that had never run at all went unnoticed for four
+          # releases. This branch is the former, and says so explicitly: no
+          # platform was tested, so nothing about platform support can be
+          # concluded from this run either way.
+          echo "::error title=Package never reached npm — NO platform was tested::" \
+            "$SPEC did not appear on the npm registry within $(( ATTEMPTS * 15 / 60 )) minutes." \
+            "This is a publish/registry problem, NOT a platform-compatibility failure:" \
+            "the matrix below did not run, so this release is UNVERIFIED rather than broken." \
+            "Check whether publish.yml succeeded for this tag."
           exit 1
 
   # NOTE: intentionally does NOT include macos-13 (Intel Mac). GitHub's
@@ -93,6 +125,100 @@ jobs:
         with:
           package-spec: ${{ needs.resolve-version.outputs.package-spec }}
           smoke-command: 'npx egr --version'
+
+  # The job the platform matrix above cannot be (XSPEC-365 R6 / AC-9).
+  #
+  # `windows-latest` ships Visual Studio with the C++ workload preinstalled, so
+  # the matrix job above proves the package installs on a Windows machine that
+  # already has a compiler — which is not the machine this was broken for. Most
+  # Windows users do not have one, and for them `npm install -g engramgraph`
+  # failed outright until XSPEC-365, because the Dart grammar (prebuilt for
+  # linux-x64 only) had to be compiled and was a hard dependency.
+  #
+  # Rather than trying to uninstall Visual Studio from a hosted runner, this
+  # makes node-gyp refuse the one that is there. The path was traced through
+  # node-gyp@11.4.2's source rather than assumed, because a mechanism that
+  # quietly did nothing would leave this job passing over an untested surface —
+  # the exact failure this whole workflow exists to stop:
+  #
+  #   env npm_config_msvs_version=2019
+  #     -> node-gyp.js strips `npm_config_`, maps `_` to `-`  => opts['msvs-version']
+  #     -> configure.js:112 passes it as `configMsvsVersion`
+  #     -> find-visualstudio.js sets configVersionYear = 2019
+  #     -> checkConfigVersion() rejects every installation whose year differs
+  #
+  # The runner has 2022, so every candidate is discarded and the build fails
+  # exactly as it does on a machine with no toolchain at all. Set as a raw
+  # environment variable rather than via `npm config`: npm 11 deprecated
+  # arbitrary keys in its own config, but node-gyp reads `process.env`
+  # directly, so this route is unaffected.
+  windows-no-toolchain:
+    name: windows-x64-no-toolchain
+    needs: resolve-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install with the C++ toolchain made unusable
+        shell: bash
+        env:
+          # See the job comment: makes node-gyp discard the runner's VS2022.
+          npm_config_msvs_version: "2019"
+        run: |
+          set -o pipefail
+          # No `set -e` guard needed for the install itself: the whole point of
+          # this job is that npm must SUCCEED here. If the Dart grammar's
+          # failure aborts the install, this step fails, which is the
+          # regression this job exists to catch.
+          npm install -g "${{ needs.resolve-version.outputs.package-spec }}" 2>&1 | tee install.log
+
+      - name: The install said what would compile, before it compiled it
+        shell: bash
+        run: |
+          set -e
+          # R1: the preflight notice must appear, and must appear BEFORE the
+          # node-gyp output — a warning printed after the wall of errors it is
+          # supposed to explain is worth nothing. Asserted by line order, not
+          # by mere presence.
+          grep -q "no prebuilt binary" install.log \
+            || { echo "::error::preinstall notice missing from install output"; exit 1; }
+
+          notice_line=$(grep -n "no prebuilt binary" install.log | head -1 | cut -d: -f1)
+          gyp_line=$(grep -n "gyp" install.log | head -1 | cut -d: -f1 || true)
+          if [ -n "$gyp_line" ] && [ "$notice_line" -gt "$gyp_line" ]; then
+            echo "::error::preinstall notice appeared at line $notice_line, after node-gyp output at line $gyp_line"
+            exit 1
+          fi
+          echo "Notice at line $notice_line, first gyp output at line ${gyp_line:-none}."
+
+      - name: egr works, minus Dart
+        shell: bash
+        run: |
+          set -e
+          # R2/R2a end-to-end on a real install: the CLI runs at all, and a
+          # project containing a .dart file indexes rather than failing.
+          egr --version
+
+          mkdir -p probe/src
+          printf 'export function a() { return b(); }\nexport function b() { return 1; }\n' > probe/src/a.ts
+          printf 'void main() { greet(); }\nvoid greet() {}\n' > probe/src/b.dart
+
+          cd probe
+          egr index ./src 2>&1 | tee index.log
+
+          # The TypeScript file must be in the graph...
+          grep -qE "code: [1-9][0-9]* files" index.log \
+            || { echo "::error::nothing was indexed"; exit 1; }
+
+          # ...and the Dart file must be reported as skipped, by name. Silence
+          # here would be the worse bug: the files would simply be missing from
+          # the graph with nothing to say a whole language had been dropped.
+          grep -q "Dart" index.log \
+            || { echo "::error::Dart was skipped silently — no mention in index output"; exit 1; }
+          grep -q "skipped:" index.log \
+            || { echo "::error::no 'skipped:' line — degradation was not reported"; exit 1; }
 
   glibc-matrix:
     name: linux-x64-glibc-compat
