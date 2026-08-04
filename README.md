@@ -138,11 +138,16 @@ copied into place.
 Installing the C++ toolchain on Windows has two traps that produce the **same** error
 message, `gyp ERR! find VS - missing any VC++ toolset`:
 
-1. **`node-gyp` does not recognise Visual Studio 2026 (v18).** Its Visual Studio finder
-   hard-codes version 15/16/17 → 2017/2019/2022 and discards anything else, reporting a
-   machine with a complete VS 2026 MSVC install as `unknown version "undefined"`. Neither
-   `VCINSTALLDIR` nor `msvs_version` gets around it. **Install the C++ workload into
-   Build Tools 2022**, even if a newer Visual Studio is already present.
+1. **`node-gyp` 11.x does not recognise Visual Studio 2026 (v18)** — and 11.x is what
+   npm 11 bundles, so this is the common case. Its Visual Studio finder hard-codes
+   version 15/16/17 → 2017/2019/2022 and discards anything else, reporting a machine with
+   a complete VS 2026 MSVC install as `unknown version "undefined"`. Neither
+   `VCINSTALLDIR` nor `msvs_version` gets around it on that version. Two ways out:
+   **install the C++ workload into Build Tools 2022** (works regardless of node-gyp
+   version), or **upgrade node-gyp** — 12.x does recognise VS 2026 (verified in CI: it
+   reports `checking VS2026 (18.8.x)` and offers `2026` as a valid `msvs_version`). The
+   exact 11.x→12.x version where support landed is unverified; check your own with
+   `npx node-gyp --version`.
 2. **Adding the `VCTools` workload does not install a compiler.** Inside that workload,
    `Microsoft.VisualStudio.Component.VC.Tools.x86.x64` is *Recommended*, not *Required* —
    so a machine can report "Visual Studio C++ core features" while having no compiler at
@@ -210,7 +215,7 @@ text doesn't always describe the real cause:
 | `.../libc.so.6: version 'GLIBC_2.38' not found` | Your distro's glibc is older than what the prebuilt binary requires (see matrix above) |
 | `npm warn allow-scripts ... not yet covered by allowScripts` | npm ≥ 11 blocked the install script that copies the native binary — run `npm approve-scripts --all` then reinstall/rebuild |
 | `gyp ERR! find VS - missing any VC++ toolset` (Windows) | No usable MSVC compiler. Two different causes produce this identical line — see [Windows: enabling the Dart grammar](#windows-enabling-the-dart-grammar). Note this is **not fatal**: it only costs you Dart |
-| `gyp ERR! find VS unknown version "undefined" found at ...\18\BuildTools` | `node-gyp` doesn't recognise Visual Studio 2026. Install the C++ workload into **Build Tools 2022** instead |
+| `gyp ERR! find VS unknown version "undefined" found at ...\18\BuildTools` | **node-gyp 11.x** doesn't recognise Visual Studio 2026. Install the C++ workload into **Build Tools 2022**, or upgrade node-gyp to 12.x |
 | A wall of `node-gyp` output ending in `npm error code 1`, on Windows/macOS | The Dart grammar failed to compile. Expected without a C/C++ toolchain, and survivable — every other language still works |
 | `Dart support is not enabled in this installation` (at index time) | The above, seen from the other end. `egr` is working; the Dart grammar isn't built here |
 

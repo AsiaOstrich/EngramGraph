@@ -104,7 +104,7 @@ EngramGraph 有**兩個**互相獨立的原生相依，而它們的失敗方式�
 
 在 Windows 上安裝 C++ 工具鏈有兩個陷阱，而它們會產生**同一句**錯誤訊息 `gyp ERR! find VS - missing any VC++ toolset`：
 
-1. **`node-gyp` 不認得 Visual Studio 2026（v18）。** 它的 Visual Studio 搜尋器把版本 15/16/17 硬編碼對應到 2017/2019/2022，其餘一律丟棄，因此會把一台裝了完整 VS 2026 MSVC 的機器回報成 `unknown version "undefined"`。`VCINSTALLDIR` 與 `msvs_version` 都繞不過去。**請把 C++ 工作負載裝進 Build Tools 2022**，即使機器上已經有更新版的 Visual Studio。
+1. **`node-gyp` 11.x 不認得 Visual Studio 2026（v18）**——而 11.x 正是 npm 11 內建的版本，所以這是常見情況。它的 Visual Studio 搜尋器把版本 15/16/17 硬編碼對應到 2017/2019/2022，其餘一律丟棄，因此會把一台裝了完整 VS 2026 MSVC 的機器回報成 `unknown version "undefined"`。在該版本上 `VCINSTALLDIR` 與 `msvs_version` 都繞不過去。有兩條出路：**把 C++ 工作負載裝進 Build Tools 2022**（不受 node-gyp 版本影響），或**升級 node-gyp**——12.x 認得 VS 2026（CI 實測：它會印 `checking VS2026 (18.8.x)` 並把 `2026` 列為有效的 `msvs_version`）。支援是在 11.x→12.x 的哪一版落地的尚未查證；用 `npx node-gyp --version` 確認你自己的版本。
 2. **加入 `VCTools` 工作負載並不會裝到編譯器。** 在該工作負載底下，`Microsoft.VisualStudio.Component.VC.Tools.x86.x64` 是 *Recommended* 而非 *Required*——所以一台機器可以回報「有 Visual Studio C++ 核心功能」卻根本沒有編譯器。請明確勾選它（以及一個 Windows SDK）。
 
 用 Visual Studio Installer：選 **Visual Studio Build Tools 2022** → 修改 → 勾選**使用 C++ 的桌面開發** → 確認右側的 **MSVC v143 … 建置工具**與 **Windows 11 SDK** 有被勾到。或在提升權限的 shell 執行（且不要在 installer 自己的目錄下執行）：
@@ -153,7 +153,7 @@ Linux 上的原生二進位檔載入失敗，會透過 Node 的 `dlopen` 呈現�
 | `.../libc.so.6: version 'GLIBC_2.38' not found` | 你的發行版 glibc 版本比預建二進位檔要求的舊（見上方矩陣）|
 | `npm warn allow-scripts ... not yet covered by allowScripts` | npm ≥ 11 擋下了複製原生二進位檔的安裝腳本——執行 `npm approve-scripts --all` 後重新安裝/重建 |
 | `gyp ERR! find VS - missing any VC++ toolset`（Windows）| 沒有可用的 MSVC 編譯器。兩種不同成因會產生這一模一樣的行——見 [Windows：啟用 Dart 文法](#windows啟用-dart-文法)。注意這**不是致命錯誤**：它只讓你失去 Dart |
-| `gyp ERR! find VS unknown version "undefined" found at ...\18\BuildTools` | `node-gyp` 不認得 Visual Studio 2026。請改把 C++ 工作負載裝進 **Build Tools 2022** |
+| `gyp ERR! find VS unknown version "undefined" found at ...\18\BuildTools` | **node-gyp 11.x** 不認得 Visual Studio 2026。請改把 C++ 工作負載裝進 **Build Tools 2022**，或把 node-gyp 升到 12.x |
 | Windows/macOS 上一整面 `node-gyp` 輸出、最後是 `npm error code 1` | Dart 文法編譯失敗。沒有 C/C++ 工具鏈時這是預期結果，而且可以承受——其他語言全部照常運作 |
 | 索引時出現 `Dart support is not enabled in this installation` | 同一件事的另一端。`egr` 是正常的，只是這台機器沒有建置 Dart 文法 |
 
