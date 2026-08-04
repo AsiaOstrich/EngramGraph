@@ -288,11 +288,18 @@ describe("CodeGraph cross-file resolution — C#", () => {
  * genuinely declares nothing. That is worse than an outright failure: the
  * caller has no signal that anything was lost.
  *
- * Neither reproduces now. 0.8.0 replaced the hand-written AST walker with the
- * tag-query engine (XSPEC-333 R2), and these shapes went with it. Verified on
- * 2026-08-04 by running the issue's own repro against published 0.7.0 (0
- * functions, 0 classes) and against this build (3 functions, 1 class) — the
- * fix is real, not an artefact of a different test.
+ * Neither reproduces now, and the reason is not what the issue assumed.
+ * **0.7.0 had no C# grammar at all** — its only tree-sitter dependencies were
+ * javascript and typescript (verified against the published package on
+ * 2026-08-04), so `.cs` fell through `detectLanguage`'s default and was parsed
+ * as JavaScript. That explains both halves of the report exactly: C# that
+ * happens to look like JS yields plausible numbers, while a base-list clause
+ * (`: IFoo`) and range/index syntax (`[..x]`, `[^1]`) are not JavaScript at
+ * all, so the tree came back with nothing recognisable and the file read as
+ * empty. The reporter's opening line — "C# **is now parsed** on 0.7.0" — was
+ * the wrong grammar producing believable output.
+ *
+ * Real C# support arrived in 0.8.0. These tests exercise it.
  *
  * Kept as tests rather than closed and forgotten: the bug was a silent zero,
  * and a silent zero is exactly what nobody notices coming back.

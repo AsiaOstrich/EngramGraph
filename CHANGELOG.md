@@ -6,9 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.0] — 2026-08-04
 
-One theme: **installing was all-or-nothing, and the gate that should have caught that had never run.**
+One theme, arrived at from two directions: **what users installed was not what this project tested, and nothing was positioned to notice.**
 
-On every platform except Linux x64, `npm install -g engramgraph` compiled the Dart grammar from source — it is the one grammar published without a prebuilt binary for your platform. Without a C/C++ toolchain that build failed, and because Dart was a hard dependency imported statically, the failure was not "Dart is unavailable" but "the install aborts, and `egr` indexes nothing at all". Thirteen languages held hostage by one. Meanwhile `release-compat-check.yml` — the workflow whose entire job is to catch exactly this — had never executed its matrix once, and the README cited it as proof that Windows worked.
+*Installing was all-or-nothing.* On every platform except Linux x64, `npm install -g engramgraph` compiled the Dart grammar from source — it is the one grammar published without a prebuilt binary for your platform. Without a C/C++ toolchain that build failed, and because Dart was a hard dependency imported statically, the failure was not "Dart is unavailable" but "the install aborts, and `egr` indexes nothing at all". Thirteen languages held hostage by one.
+
+*And the C# parser users received was never the one tested.* `"tree-sitter-c-sharp": "^0.23.1"` spans three published versions that do not share an API. npm resolves a caret to the newest, so every fresh install got 0.23.5 and **no C# file has ever parsed for anyone who installed from npm** — while `package-lock.json` pinned the working 0.23.1 here, keeping the entire test suite green about a version no user would receive.
+
+*Nothing was positioned to notice either one.* `release-compat-check.yml` — the workflow whose whole job is to catch this class of problem — had never executed its matrix once, and the README cited it as proof that Windows worked.
 
 ### Added
 
@@ -16,6 +20,7 @@ On every platform except Linux x64, `npm install -g engramgraph` compiled the Da
 - **Post-install MCP notice.** Installing put `egr-mcp` on your PATH and said nothing about it, so half of what this package does was discoverable only by finding the right README section. Global installs now get the registration command and how to confirm it took. It is not registered automatically, and should not be: a package that writes itself into your assistant's tool configuration during `npm install` has granted itself tool access unasked.
 - **`language-support.js`** — one source of truth for which languages exist, which package backs each, and which platforms ship binaries for it. The install hook, the runtime language set, and the docs table all read it, and its claims are re-checked against the installed packages on every test run rather than trusted.
 - **A CI job that installs without a usable compiler**, which the existing Windows job could not be — GitHub's Windows runner ships Visual Studio, so it only ever proved the package installs on machines that already have a toolchain.
+- **`test/entrypoints.test.ts`** — loads and parses through both published builds, ESM and CommonJS.
 
 ### Changed
 
@@ -27,6 +32,12 @@ On every platform except Linux x64, `npm install -g engramgraph` compiled the Da
 
 ### Fixed
 
+- **C# never parsed for anyone who installed from npm.** `^0.23.1` resolved to 0.23.5, whose exports and peer range belong to a newer tree-sitter ABI; every `.cs` file failed. All thirteen tree-sitter dependencies are now exact versions, and a test fails if any becomes a range again, drifts from the lockfile, or stops binding to a real `Parser`. Two other grammars had the same gap without the same consequence — python resolved to 0.23.6 and rust to 0.23.3, both untested here, both shipping on luck.
+- **`egr signatures` hid the failures it exists to group.** Signatures come from a parse tree and a file that threw has none, so hard failures carried none — and the message covering them fired only when there were *no* partial signatures at all, so a single partial file hid any number of failures behind it. One user saw "2 failure types across 2 partial-parse files" while 584 `.cs` files had failed outright. Failures are now bucketed by cause and reported first.
+- **Windows could not back up before a schema migration.** `cpSync` goes through `CopyFileEx`, which opens the source without `FILE_SHARE_READ`, and the backup runs while the database is still open. Upgrading 0.7.0 → 0.8.0 hit `EBUSY`, and the only way forward was to move the database aside and rebuild — discarding exactly the data the backup exists to protect.
+- **`require('engramgraph')` threw on import.** The CommonJS build compiled `createRequire(import.meta.url)` to `createRequire(undefined)`. Everything in this repo is ESM, so no test touched it.
+- **The one command that reaches the network now says so.** `INSTALL ALGO` fetches ryugraph's extension on first use, and its failure was a bare IO exception. It now names the three affected commands (`god-nodes`, `communities`, `related`), states that everything else works offline, and gives the offline build steps.
+- **GitHub issue #2 (C# base-list clause + range/index syntax silently zeroing a whole file) does not reproduce** and now has regression tests. The cause was not a C# parser bug: 0.7.0 shipped no C# grammar, so `.cs` fell through to the JavaScript one — which yields believable numbers for C# that resembles JS and nothing at all for syntax that does not. Pinned rather than closed, because a silent zero is what nobody notices coming back.
 - **`release-compat-check.yml` never ran its matrix.** It and `publish.yml` both fire on `release: published` and start in the same second, but the package only reaches npm when publish finishes — measured at 3m31s–3m51s against a 2.5 minute wait. Every release since 0.5.0 came up 60–80s short and skipped every platform job at 0s. The wait is now sized against that measurement, and "the package never reached npm" is now reported distinctly from "a platform cannot install it" — previously both were just a red workflow, which is how a gate that had never run went unnoticed for four releases.
 - The Intel Mac job no longer joins every manual run, where it dragged in a ~50-minute queue and left the run incomplete long after everything useful had finished.
 
