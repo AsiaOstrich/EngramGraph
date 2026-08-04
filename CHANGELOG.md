@@ -4,6 +4,32 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-08-04
+
+One theme: **installing was all-or-nothing, and the gate that should have caught that had never run.**
+
+On every platform except Linux x64, `npm install -g engramgraph` compiled the Dart grammar from source — it is the one grammar published without a prebuilt binary for your platform. Without a C/C++ toolchain that build failed, and because Dart was a hard dependency imported statically, the failure was not "Dart is unavailable" but "the install aborts, and `egr` indexes nothing at all". Thirteen languages held hostage by one. Meanwhile `release-compat-check.yml` — the workflow whose entire job is to catch exactly this — had never executed its matrix once, and the README cited it as proof that Windows worked.
+
+### Added
+
+- **Install-time preflight.** Before any compiler runs, the install says what is about to be built from source on this platform, what it needs, and what happens if it is missing. It judges by prebuilt-binary coverage rather than trying to detect a toolchain — toolchain detection is precisely what misleads here, as node-gyp's own Visual Studio finder demonstrates.
+- **Post-install MCP notice.** Installing put `egr-mcp` on your PATH and said nothing about it, so half of what this package does was discoverable only by finding the right README section. Global installs now get the registration command and how to confirm it took. It is not registered automatically, and should not be: a package that writes itself into your assistant's tool configuration during `npm install` has granted itself tool access unasked.
+- **`language-support.js`** — one source of truth for which languages exist, which package backs each, and which platforms ship binaries for it. The install hook, the runtime language set, and the docs table all read it, and its claims are re-checked against the installed packages on every test run rather than trusted.
+- **A CI job that installs without a usable compiler**, which the existing Windows job could not be — GitHub's Windows runner ships Visual Studio, so it only ever proved the package installs on machines that already have a toolchain.
+
+### Changed
+
+- **A grammar that fails to load now costs you that language, not the whole tool.** Grammars load lazily, failures are recorded instead of propagated, and a grammar is only considered available once a real `Parser` accepts it — three packages on record `require()` cleanly and then throw inside `setLanguage`.
+- **`@vokturz/tree-sitter-dart` is an optional dependency.** Its build can fail without aborting the install.
+- **Files skipped for want of a grammar are reported separately from parse health.** A file that failed to parse is source worth inspecting; a file skipped here was never opened. Same symptom, different fix — merging them sends people to read code when they need a compiler.
+- **`files` in an index summary counts files actually read**, not files handed in. The two differ only when a language was skipped, and reporting the input count there would claim credit for files never opened.
+- **Platform documentation rewritten in all three languages.** The old matrix covered only the graph database, never mentioned the grammars as a second independent native dependency, and marked six rows "Verified via CI" citing a workflow that had never run.
+
+### Fixed
+
+- **`release-compat-check.yml` never ran its matrix.** It and `publish.yml` both fire on `release: published` and start in the same second, but the package only reaches npm when publish finishes — measured at 3m31s–3m51s against a 2.5 minute wait. Every release since 0.5.0 came up 60–80s short and skipped every platform job at 0s. The wait is now sized against that measurement, and "the package never reached npm" is now reported distinctly from "a platform cannot install it" — previously both were just a red workflow, which is how a gate that had never run went unnoticed for four releases.
+- The Intel Mac job no longer joins every manual run, where it dragged in a ~50-minute queue and left the run incomplete long after everything useful had finished.
+
 ## [0.8.0] — 2026-07-31
 
 Two themes, both about the same thing: **the index used to be confidently wrong, and nothing said so.** A hand-written AST walker silently dropped what it could not parse, and a parse failure looked exactly like a file with nothing in it.
