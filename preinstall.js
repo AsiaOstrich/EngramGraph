@@ -26,6 +26,22 @@
  * paths of this script itself. Blocking installation would leave the user with
  * no `egr` at all, when the actual consequence is losing one language out of
  * thirteen.
+ *
+ * **This is best-effort, and is NOT how the information reaches users.**
+ * Measured on 2026-08-04 with the command people actually type
+ * (`npm install -g engramgraph`, no `--foreground-scripts`): this notice
+ * appeared zero times in 242 lines of output. npm suppresses lifecycle-script
+ * output by default, and npm >= 11 additionally holds those scripts behind an
+ * approval gate, so on a fresh machine the script may not run at all. Every
+ * test of this file had passed, because every test invoked it the way it was
+ * written rather than the way users install — the same mistake, in miniature,
+ * that this whole release is about.
+ *
+ * It is kept because it costs nothing and does surface where script output is
+ * shown (CI logs, `--foreground-scripts`, `npm_config_foreground_scripts`),
+ * and it is the only thing that can speak *before* a compile. But the channel
+ * users actually see is `egr doctor` and the skipped-language line at index
+ * time — a command someone types cannot be suppressed by a package manager.
  */
 
 import { compiledFromSourceOn, currentPlatform } from "./language-support.js";

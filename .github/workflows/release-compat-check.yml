@@ -183,61 +183,87 @@ jobs:
       - name: Install with the C++ toolchain made unusable
         shell: bash
         env:
-          # See the job comment: makes node-gyp discard the runner's VS2022.
+          # See the job comment: makes node-gyp discard the runner's Visual Studio.
           npm_config_msvs_version: "2019"
         run: |
           set -o pipefail
-          # No `set -e` guard needed for the install itself: the whole point of
-          # this job is that npm must SUCCEED here. If the Dart grammar's
-          # failure aborts the install, this step fails, which is the
-          # regression this job exists to catch.
+          # No `set -e` guard on the install itself: the whole point of this job
+          # is that npm must SUCCEED here. If the Dart grammar's build failure
+          # aborts the install, this step fails, which is the regression the job
+          # exists to catch.
           npm install -g "${{ needs.resolve-version.outputs.package-spec }}" 2>&1 | tee install.log
 
-      - name: The install said what would compile, before it compiled it
-        shell: bash
-        run: |
-          set -e
-          # R1: the preflight notice must appear, and must appear BEFORE the
-          # node-gyp output — a warning printed after the wall of errors it is
-          # supposed to explain is worth nothing. Asserted by line order, not
-          # by mere presence.
-          grep -q "no prebuilt binary" install.log \
-            || { echo "::error::preinstall notice missing from install output"; exit 1; }
-
-          notice_line=$(grep -n "no prebuilt binary" install.log | head -1 | cut -d: -f1)
-          gyp_line=$(grep -n "gyp" install.log | head -1 | cut -d: -f1 || true)
-          if [ -n "$gyp_line" ] && [ "$notice_line" -gt "$gyp_line" ]; then
-            echo "::error::preinstall notice appeared at line $notice_line, after node-gyp output at line $gyp_line"
-            exit 1
-          fi
-          echo "Notice at line $notice_line, first gyp output at line ${gyp_line:-none}."
+          # npm >= 11 holds native install scripts behind an approval gate. The
+          # first version of this job missed that and never reached a compile at
+          # all — it asserted against an install where node-gyp had not run, and
+          # would have passed a package that could not build anything. Approve
+          # and rebuild so the Dart compile is genuinely attempted and genuinely
+          # fails on this toolchain-less runner.
+          npm approve-scripts --all 2>&1 | tail -5 || true
+          npm rebuild -g 2>&1 | tail -20 || true
 
       - name: egr works, minus Dart
         shell: bash
         run: |
           set -e
-          # R2/R2a end-to-end on a real install: the CLI runs at all, and a
-          # project containing a .dart file indexes rather than failing.
+          # R2a: the CLI exists at all, which is the thing that used to be
+          # impossible here — the install aborted before producing one.
           egr --version
 
+          # R2 + the doctor command: the user-facing channel. `egr doctor` is
+          # asserted rather than the install output on purpose. The install-time
+          # notice this job used to check reaches nobody: npm suppresses
+          # lifecycle-script output by default and gates the scripts entirely,
+          # so it appeared zero times on a real install. A command the user
+          # types cannot be suppressed by a package manager.
+          egr doctor 2>&1 | tee doctor.log
+
+          grep -q "Dart" doctor.log \
+            || { echo "::error::doctor does not mention Dart at all"; exit 1; }
+
+          # Dart must be reported unavailable WITH a reason. "unavailable" on
+          # its own sends the reader nowhere.
+          if grep -qE "^  ✗ Dart" doctor.log; then
+            grep -E "^  ✗ Dart" doctor.log | grep -q "vokturz" \
+              || { echo "::error::Dart is unavailable but doctor names no package/reason"; exit 1; }
+            echo "Dart correctly reported unavailable with a reason."
+          else
+            echo "::error::Dart loaded on a runner with no usable C++ toolchain — either the toolchain block failed (check the msvs_version log above) or a prebuilt binary appeared upstream. Either way this job is no longer testing what it claims."
+            exit 1
+          fi
+
+          # Every other language must still be there. Losing one is the design;
+          # losing several would mean the degradation is over-broad.
+          grep -q "12 available, 1 unavailable" doctor.log \
+            || { echo "::error::expected 12 available / 1 unavailable"; grep "languages:" doctor.log; exit 1; }
+
+      - name: Indexing still works, and says what it skipped
+        shell: bash
+        run: |
+          set -e
           mkdir -p probe/src
           printf 'export function a() { return b(); }\nexport function b() { return 1; }\n' > probe/src/a.ts
-          printf 'void main() { greet(); }\nvoid greet() {}\n' > probe/src/b.dart
+          printf 'public class C { public string M() { return "x"; } }\n' > probe/src/b.cs
+          printf 'void main() { greet(); }\nvoid greet() {}\n' > probe/src/c.dart
 
           cd probe
           egr index ./src 2>&1 | tee index.log
 
-          # The TypeScript file must be in the graph...
-          grep -qE "code: [1-9][0-9]* files" index.log \
-            || { echo "::error::nothing was indexed"; exit 1; }
+          # TypeScript and C# must be in the graph. C# specifically: it is the
+          # language that never parsed for anyone who installed from npm before
+          # the grammar versions were pinned.
+          grep -qE "code: [2-9][0-9]* files" index.log \
+            || { echo "::error::fewer files indexed than expected"; exit 1; }
+          grep -q "0 failed" index.log \
+            || { echo "::error::some files failed to parse"; exit 1; }
 
-          # ...and the Dart file must be reported as skipped, by name. Silence
-          # here would be the worse bug: the files would simply be missing from
-          # the graph with nothing to say a whole language had been dropped.
-          grep -q "Dart" index.log \
-            || { echo "::error::Dart was skipped silently — no mention in index output"; exit 1; }
+          # And the Dart file must be reported as skipped, by name. Silence here
+          # is the worse bug: the files would simply be absent from the graph
+          # with nothing to say a whole language had been dropped.
           grep -q "skipped:" index.log \
             || { echo "::error::no 'skipped:' line — degradation was not reported"; exit 1; }
+          grep "skipped:" index.log | grep -q "Dart" \
+            || { echo "::error::skipped line does not name Dart"; exit 1; }
 
   glibc-matrix:
     name: linux-x64-glibc-compat

@@ -14,7 +14,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, type GcResult, type BlindspotsResult, type SignaturesResult } from "./run.js";
+import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
 import type { ConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { readIndexHealth, definitionFiles, type IndexHealth } from "../code-graph/index.js";
@@ -59,6 +59,9 @@ Commands:
                                   failures by error, partial parses by
                                   structural signature (turns "584 files" into
                                   "1 root cause")
+  doctor                          What this installation can do on this machine
+                                  — languages available, what had to be
+                                  compiled, which commands need network
   serve [--port 3000]             Run the REST server (routes under /graph/*)
   mcp                             Run the MCP server over stdio (for coding assistants)
 
@@ -71,7 +74,11 @@ Options:
 
 Graph DB selection (highest first): ENGRAM_DB env > --graph > --isolation
 git-branch (per current branch) > default ./.engram/graph.db.
-Env ENGRAM_ISOLATION=git-branch enables per-branch isolation without the flag.`;
+Env ENGRAM_ISOLATION=git-branch enables per-branch isolation without the flag.
+
+Connect a coding assistant (MCP): claude mcp add egr -- npx egr-mcp
+  then confirm with: claude mcp list   (Codex/Cursor/Windsurf: see docs/MCP.md)
+Run "egr doctor" if a language seems to be missing from your graph.`;
 
 const VERSION = (pkg as { version: string }).version;
 
@@ -174,6 +181,48 @@ async function main(): Promise<void> {
         .map((f) => `  ${f.path} [${f.language}] ${f.failed ? "FAILED" : `partial (${f.errorNodes} error node${f.errorNodes === 1 ? "" : "s"})`}`)
         .join("\n");
       return `${head}\n${body}`;
+    });
+    return;
+  }
+
+  // doctor reports on the installation itself — no graph connection needed, so
+  // it still works when the graph is missing or unreadable, which is exactly
+  // when someone is most likely to run it.
+  if (cmd === "doctor") {
+    const r = cmdDoctor(resolveDbPath(loc));
+    out(r, values.json, (d) => {
+      const t = d as DoctorResult;
+      const lines = [
+        `egr ${t.egrVersion}   node ${t.node}   ${t.platform}`,
+        `graph: ${t.graphDb}`,
+        "",
+        `languages: ${t.available} available, ${t.unavailable} unavailable`,
+      ];
+      for (const l of t.languages) {
+        const mark = l.available ? "✓" : "✗";
+        const note = l.available
+          ? l.compilesFromSource
+            ? " (compiled from source on this platform)"
+            : ""
+          : ` — ${l.package}: ${l.reason}`;
+        lines.push(`  ${mark} ${l.label}${note}`);
+      }
+      if (t.unavailable > 0) {
+        lines.push(
+          "",
+          "An unavailable language means its native module could not be loaded here —",
+          "usually because this platform has no prebuilt binary for it and the machine",
+          "has no C/C++ toolchain to compile one. Files in that language are skipped at",
+          "index time and reported there; everything else indexes normally.",
+          "Setup steps: https://github.com/AsiaOstrich/EngramGraph#native-dependencies-and-platform-support",
+        );
+      }
+      lines.push(
+        "",
+        `needs network: ${t.networkCommands.join(", ")} (every other command works offline)`,
+        "connect an assistant: claude mcp add egr -- npx egr-mcp",
+      );
+      return lines.join("\n");
     });
     return;
   }
@@ -318,7 +367,7 @@ async function main(): Promise<void> {
                 (l) =>
                   `skipped: ${l.files} ${l.label} file(s) — ${l.label} support is not enabled ` +
                   `in this installation (${l.package}: ${l.reason}). ` +
-                  `Everything else was indexed normally.`,
+                  `Everything else was indexed normally; run "egr doctor" for setup steps.`,
               )
               .join("\n")
           : "";

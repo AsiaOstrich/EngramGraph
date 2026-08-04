@@ -89,8 +89,6 @@ describe("the published tarball contains what the install hooks need", () => {
   for (const required of [
     // Runs before dependencies are installed — cannot come from dist/.
     "preinstall.js",
-    // Runs after install to explain MCP registration.
-    "postinstall.js",
     // Read by preinstall.js at install time. Bundled into dist/ as well, but
     // dist/ does not exist yet when preinstall runs, so the root copy ships.
     "language-support.js",
@@ -106,6 +104,13 @@ describe("the published tarball contains what the install hooks need", () => {
     // surface, which they are not.
     expect(files).not.toContain("language-support.d.ts");
     expect(files).not.toContain("preinstall.d.ts");
-    expect(files).not.toContain("postinstall.d.ts");
+  });
+
+  it("no longer ships postinstall.js", () => {
+    // Removed in 0.9.1. It ran an MCP registration notice that npm suppressed,
+    // so it delivered nothing while looking like a feature; its content moved
+    // to `egr --help` and `egr doctor`, which npm cannot silence. Asserted
+    // rather than merely deleted so a revert has to be deliberate.
+    expect(files).not.toContain("postinstall.js");
   });
 });

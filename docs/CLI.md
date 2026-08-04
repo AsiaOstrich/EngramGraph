@@ -218,6 +218,30 @@ egr gc --dry-run
 egr gc
 ```
 
+### `doctor`
+
+What this installation can actually do on this machine — the first thing to run
+when a language is missing from your graph.
+
+```bash
+egr doctor
+egr doctor --json
+```
+
+Reports the egr/Node version and platform, the graph DB path, every language
+with whether its native module loaded (and the reason if it did not), which
+native dependencies this platform had to compile from source, which commands
+need network access, and the MCP registration command.
+
+It does not open the graph, so it still answers when the graph is missing or
+unreadable — which is when people run it.
+
+> **Why this is a command and not an install-time message.** It was one, and it
+> reached nobody: npm suppresses lifecycle-script output by default and npm ≥ 11
+> gates those scripts behind an approval prompt, so the notice appeared zero
+> times on a real `npm install -g`. A command you type cannot be suppressed by
+> a package manager.
+
 ### `serve [--port 3000]`
 
 Run the REST server (Hono) over the graph DB. Routes are mounted under

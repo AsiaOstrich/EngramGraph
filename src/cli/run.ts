@@ -41,6 +41,9 @@ import {
   type ParseHealthSummary,
 } from "../code-graph/parse-manifest.js";
 import { walkFiles } from "./walk.js";
+import { unavailableGrammars } from "../code-graph/grammar-registry.js";
+import { GRAMMARS, compiledFromSourceOn, currentPlatform } from "../../language-support.js";
+import type { SupportedLanguage } from "../code-graph/types.js";
 
 const EGR_VERSION = (pkg as { version: string }).version;
 
@@ -615,4 +618,81 @@ export function cmdGc(opts: { cwd?: string; dryRun?: boolean }): GcResult {
     }
   }
   return { dir, orphans, deleted: !opts.dryRun && orphans.length > 0 };
+}
+
+/**
+ * `egr doctor` — what this installation can actually do on this machine.
+ *
+ * **Why this exists, and why it is not an install-time message.** The original
+ * design put this information in `preinstall`/`postinstall` hooks. It does not
+ * reach anyone: npm suppresses lifecycle-script output by default, and npm ≥ 11
+ * additionally blocks those scripts behind an approval gate — measured on
+ * 2026-08-04 by running the real user command (`npm install -g engramgraph`,
+ * no `--foreground-scripts`) and finding zero occurrences of either notice in
+ * 242 lines of output. Every test of those hooks had passed, because every
+ * test invoked them the way they were written rather than the way users
+ * install.
+ *
+ * A command the user types cannot be suppressed by a package manager. That is
+ * the whole argument for moving it here.
+ */
+export interface DoctorLanguage {
+  language: SupportedLanguage;
+  label: string;
+  package: string;
+  available: boolean;
+  /** Why it is unavailable; absent when it loaded fine. */
+  reason?: string;
+  /** True when this platform has no prebuilt binary and must compile it. */
+  compilesFromSource: boolean;
+}
+
+export interface DoctorResult {
+  egrVersion: string;
+  node: string;
+  platform: string;
+  graphDb: string;
+  languages: DoctorLanguage[];
+  available: number;
+  unavailable: number;
+  /** Native dependencies with no prebuilt binary for this platform. */
+  compiledFromSource: Array<{ package: string; kind: string; languages: string[] }>;
+  /** Commands that need network access; everything else works offline. */
+  networkCommands: string[];
+}
+
+export function cmdDoctor(dbPath: string): DoctorResult {
+  const unavailable = new Map(
+    unavailableGrammars().map((g) => [g.language, g]),
+  );
+  const fromSource = compiledFromSourceOn();
+  const fromSourcePackages = new Set(fromSource.map((d) => d.package));
+
+  const languages: DoctorLanguage[] = GRAMMARS.map((g) => {
+    const failure = unavailable.get(g.language);
+    return {
+      language: g.language,
+      label: g.label,
+      package: g.package,
+      available: failure === undefined,
+      ...(failure ? { reason: failure.reason } : {}),
+      compilesFromSource: fromSourcePackages.has(g.package),
+    };
+  });
+
+  return {
+    egrVersion: EGR_VERSION,
+    node: process.version,
+    platform: currentPlatform(),
+    graphDb: dbPath,
+    languages,
+    available: languages.filter((l) => l.available).length,
+    unavailable: languages.filter((l) => !l.available).length,
+    compiledFromSource: fromSource.map((d) => ({
+      package: d.package,
+      kind: d.kind,
+      languages: d.languages,
+    })),
+    networkCommands: ["god-nodes", "communities", "related"],
+  };
 }

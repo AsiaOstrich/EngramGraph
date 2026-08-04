@@ -83,7 +83,7 @@ missing one language:
 | **Graph database** | [`ryugraph`](https://github.com/predictable-labs/ryugraph) | **Yes** | Built from source via `cmake-js`. If that fails you have no working `egr` at all. |
 | **Language grammars** | `tree-sitter` + 12 grammar packages | Per language | Built from source via `node-gyp`. If that fails, **only that language** is unavailable — `egr` installs and indexes everything else. |
 
-Prebuilt coverage as of `engramgraph@0.9.0`:
+Prebuilt coverage as of `engramgraph@0.9.1`:
 
 | Platform | Graph DB | Grammars | What you get |
 |---|---|---|---|

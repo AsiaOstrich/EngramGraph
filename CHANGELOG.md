@@ -4,6 +4,29 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-08-04
+
+**The 0.9.0 install notices reached nobody, and the release gate that found that out had itself only just started working.**
+
+0.9.0 added a platform preflight to `preinstall` and an MCP registration hint to `postinstall`. On a real `npm install -g engramgraph` — no `--foreground-scripts`, the command people actually type — both appeared **zero times** in 242 lines of output. npm suppresses lifecycle-script output by default, and npm ≥ 11 additionally holds those scripts behind an approval gate, so on a fresh machine they may not run at all. Every test of them passed throughout, because each invoked the hook the way it was written rather than the way anyone installs.
+
+This is the same shape as the C# grammar bug 0.9.0 fixed, applied to 0.9.0's own new feature: the thing being measured was not the thing being shipped. It was caught by the cross-platform gate repaired in 0.9.0, on its first real run.
+
+### Added
+
+- **`egr doctor`** — what this installation can do on this machine: every language and whether its native module loaded (with the reason if not), what this platform had to compile from source, which commands need network access, and the MCP registration command. It does not open the graph, so it still answers when the graph is missing — which is when people run it.
+- **`egr --help` now carries the MCP registration command**, the line that used to live in a `postinstall` hook nobody saw.
+
+### Changed
+
+- The skipped-language line at index time now points at `egr doctor` for setup steps, instead of stating the problem and stopping there.
+- `preinstall.js` is kept but documented as best-effort: it surfaces in CI logs and under `--foreground-scripts`, and is the only thing that can speak before a compile, but it is no longer treated as the channel that informs users.
+- The no-toolchain CI job asserts against `egr doctor` rather than install output. Its first version also never reached a compile at all — npm ≥ 11 had blocked the install scripts — so it was asserting against an install where node-gyp had not run. It now approves scripts and rebuilds first, then requires Dart to be reported unavailable *with a reason* and the other twelve languages to still be present.
+
+### Removed
+
+- `postinstall.js`. Rather than keep a mechanism that mostly does not deliver, its content moved to `egr --help` and `egr doctor`.
+
 ## [0.9.0] — 2026-08-04
 
 One theme, arrived at from two directions: **what users installed was not what this project tested, and nothing was positioned to notice.**

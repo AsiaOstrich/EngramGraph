@@ -12,6 +12,18 @@ import { ALL_PLATFORMS } from "../language-support.js";
  * where something is going wrong — which are the machines whose output nobody
  * is reading. Left untested, it would be wrong precisely when it matters and
  * right in every environment anyone looks at.
+ *
+ * **What they do NOT establish: that any user sees this.** They call the hook
+ * directly. On a real `npm install -g engramgraph` the notice appeared zero
+ * times in 242 lines of output (measured 2026-08-04) — npm suppresses
+ * lifecycle-script output by default, and npm >= 11 gates those scripts behind
+ * an approval prompt, so on a fresh machine it may not run at all. Every
+ * assertion below was green while the feature reached nobody, because each one
+ * invokes the hook the way it was written rather than the way people install.
+ *
+ * The channel that does reach users is `egr doctor` and the skipped-language
+ * line at index time (`test/doctor.test.ts`). Do not read a pass here as
+ * evidence the information got through.
  */
 
 const ROOT = join(__dirname, "..");
