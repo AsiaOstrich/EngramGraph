@@ -105,6 +105,22 @@ jobs:
   # 2026) drops it entirely, and only security-only updates continue until
   # ~2029 — Intel Mac is a sunsetting platform on both Apple's and GitHub's
   # side. See the best-effort `macos-x64-intel-manual` job below instead.
+  # KNOWN-BROKEN PLATFORMS ARE EXPECTATIONS, NOT FAILURES (XSPEC-365 R6).
+  #
+  # `linux-arm64` cannot work: upstream ryugraph ships the x86-64 binary under
+  # the arm64 filename (predictable-labs/ryugraph#48). Before this change it
+  # failed every run, and so did the workflow — which meant the top-level
+  # red/green carried no information at all. "It went red again" and "something
+  # new just broke" were indistinguishable, which is the exact failure this
+  # whole spec was written to diagnose, sitting inside the gate meant to fix it.
+  #
+  # So a known-broken platform now declares `expect-fail`, and the assertion is
+  # inverted rather than suppressed. `continue-on-error: true` alone would have
+  # been worse than the disease: it hides a newly-broken platform just as
+  # effectively as an expected one, and it never tells you when upstream is
+  # fixed. Here, failing is the pass condition — and PASSING is a failure,
+  # because the README documents these platforms as broken, and a doc that
+  # overstates breakage is as wrong as one that understates it.
   platform-matrix:
     name: ${{ matrix.label }}
     needs: resolve-version
@@ -116,6 +132,8 @@ jobs:
             label: linux-x64
           - os: ubuntu-24.04-arm
             label: linux-arm64
+            expect-fail: true
+            reason: 'upstream ryugraph ships the x86-64 binary under the arm64 filename (predictable-labs/ryugraph#48)'
           - os: windows-latest
             label: windows-x64
           - os: macos-latest
@@ -126,10 +144,44 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - uses: ./.github/actions/fresh-install-smoke-test
+      - id: smoke
+        # Tolerated here so the outcome can be compared against the expectation
+        # in the next step. Nothing is suppressed: every path below either
+        # passes deliberately or fails loudly.
+        continue-on-error: true
+        uses: ./.github/actions/fresh-install-smoke-test
         with:
           package-spec: ${{ needs.resolve-version.outputs.package-spec }}
           smoke-command: 'npx egr --version'
+
+      - name: Compare the outcome against what this platform is expected to do
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.smoke.outcome }}
+          EXPECT_FAIL: ${{ matrix.expect-fail }}
+          REASON: ${{ matrix.reason }}
+        run: |
+          set -e
+          if [ "$EXPECT_FAIL" = "true" ]; then
+            if [ "$OUTCOME" = "failure" ]; then
+              echo "${{ matrix.label }}: failed as documented — $REASON"
+              echo "Not a regression. The README records this platform as broken."
+              exit 0
+            fi
+            echo "::error title=${{ matrix.label }} works now — the docs are wrong::" \
+              "This platform is documented as broken ($REASON) and it just installed" \
+              "successfully. Upstream appears fixed. Update the README platform matrix" \
+              "and drop expect-fail from this matrix entry — a doc that overstates" \
+              "breakage sends people away from a platform that works."
+            exit 1
+          fi
+
+          if [ "$OUTCOME" = "success" ]; then
+            echo "${{ matrix.label }}: OK"
+            exit 0
+          fi
+          echo "::error title=${{ matrix.label }} is broken::This platform is expected to work and did not."
+          exit 1
 
   # The job the platform matrix above cannot be (XSPEC-365 R6 / AC-9).
   #
@@ -265,16 +317,38 @@ jobs:
           grep "skipped:" index.log | grep -q "Dart" \
             || { echo "::error::skipped line does not name Dart"; exit 1; }
 
+  # Same inversion as the matrix above (XSPEC-365 R6). glibc < 2.38 cannot work:
+  # upstream ryugraph's binary needs a newer glibc than Ubuntu 22.04 LTS and
+  # Debian 12 ship. Failing is the documented state; succeeding means upstream
+  # moved and the README's "❌ Broken" row became a false claim.
   glibc-matrix:
     name: linux-x64-glibc-compat
     needs: resolve-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/glibc-compat-check
+      - id: glibc
+        continue-on-error: true
+        uses: ./.github/actions/glibc-compat-check
         with:
           package-spec: ${{ needs.resolve-version.outputs.package-spec }}
           smoke-command: 'npx egr --version'
+
+      - name: Compare the outcome against the documented glibc state
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.glibc.outcome }}
+        run: |
+          set -e
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "glibc compat: failed as documented — upstream ryugraph requires glibc >= 2.38."
+            echo "Not a regression. The README records glibc < 2.38 as broken."
+            exit 0
+          fi
+          echo "::error title=glibc compat passes now — the docs are wrong::" \
+            "The README records glibc < 2.38 as broken and this check just passed." \
+            "Update the platform matrix and drop this inversion."
+          exit 1
 
   # Best-effort only — never blocks a release. Only runs when explicitly
   # requested via workflow_dispatch (not on `release: published`), so a
