@@ -205,6 +205,39 @@ export const OTHER_NATIVE_DEPENDENCIES = Object.freeze([
   },
 ]);
 
+/**
+ * Known problems with the native dependencies that are not currently breaking
+ * anything, recorded so the next person to hit one does not diagnose it from
+ * scratch. // implements XSPEC-365 R5
+ *
+ * Each entry carries the condition under which it stops being an observation
+ * and becomes work — a note without one is just a note, and gets read as "we
+ * know, and we have decided not to care" long after the situation has changed.
+ */
+export const KNOWN_ISSUES = Object.freeze([
+  {
+    id: "tree-sitter-c-sharp-dep0151",
+    package: "tree-sitter-c-sharp",
+    /**
+     * Running `egr` prints:
+     *   DeprecationWarning: DEP0151 — the package's `main` field is
+     *   "bindings/node" with no file extension, so Node has to guess.
+     * Cosmetic today; Node has escalated resolution deprecations to hard
+     * errors before.
+     */
+    symptom: 'DeprecationWarning DEP0151 — "main" resolves without an extension',
+    severity: "warning-only",
+    /**
+     * Not fixable here — it is the upstream package's `package.json`. Patching
+     * it in `node_modules` would survive exactly until the next install.
+     */
+    action: "none — upstream package.json",
+    resolveWhen:
+      "upstream publishes a release with an extension on `main`, OR Node turns DEP0151 into an error (at which point `egr` stops starting and this entry is where to look)",
+    firstSeen: "2026-08-04",
+  },
+]);
+
 /** `${process.platform}-${process.arch}` for the running process. */
 export function currentPlatform() {
   return `${process.platform}-${process.arch}`;

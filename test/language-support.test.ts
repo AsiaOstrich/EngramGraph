@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ALL_PLATFORMS,
   GRAMMARS,
+  KNOWN_ISSUES,
   OTHER_NATIVE_DEPENDENCIES,
   compiledFromSourceOn,
 } from "../language-support.js";
@@ -176,6 +177,32 @@ describe("registry extensions agree with detectLanguage()", () => {
     const registered = new Set(GRAMMARS.flatMap((g) => [...g.extensions]));
 
     expect([...walked].sort()).toEqual([...registered].sort());
+  });
+});
+
+describe("KNOWN_ISSUES", () => {
+  it("every entry names a condition that ends it", () => {
+    // A known-issue note without a resolve condition rots into "we know and
+    // have decided not to care", read years after the situation changed. This
+    // is the one property worth enforcing mechanically.
+    expect(KNOWN_ISSUES.length).toBeGreaterThan(0);
+    for (const issue of KNOWN_ISSUES) {
+      expect(issue.resolveWhen, `${issue.id} has no resolve condition`).toBeTruthy();
+      expect(issue.resolveWhen.length).toBeGreaterThan(20);
+      expect(issue.package, `${issue.id} names no package`).toBeTruthy();
+    }
+  });
+
+  it("only names packages this project actually depends on", () => {
+    // An entry about a package we no longer use is worse than no entry: it
+    // sends the reader looking for something that isn't there.
+    const known = new Set([
+      ...GRAMMARS.map((g) => g.package),
+      ...OTHER_NATIVE_DEPENDENCIES.map((d) => d.package),
+    ]);
+    for (const issue of KNOWN_ISSUES) {
+      expect(known, `${issue.id} names an unknown package`).toContain(issue.package);
+    }
   });
 });
 

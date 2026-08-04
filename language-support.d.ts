@@ -75,7 +75,20 @@ export interface CompiledFromSource {
   role?: string;
 }
 
+/** A known, currently-harmless problem with a native dependency. */
+export interface KnownIssue {
+  id: string;
+  package: string;
+  symptom: string;
+  severity: "warning-only";
+  action: string;
+  /** What has to happen for this to stop being an observation. */
+  resolveWhen: string;
+  firstSeen: string;
+}
+
 export const ALL_PLATFORMS: readonly Platform[];
+export const KNOWN_ISSUES: readonly KnownIssue[];
 export const GRAMMARS: readonly Grammar[];
 export const OTHER_NATIVE_DEPENDENCIES: readonly NativeDependency[];
 

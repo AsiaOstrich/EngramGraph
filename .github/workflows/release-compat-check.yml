@@ -21,6 +21,11 @@ on:
         description: 'Package version to test (default: latest published on npm)'
         required: false
         default: ''
+      include_intel_mac:
+        description: 'Also run the Intel Mac job (queues ~50min — see below)'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   resolve-version:
@@ -136,22 +141,36 @@ jobs:
   # linux-x64 only) had to be compiled and was a hard dependency.
   #
   # Rather than trying to uninstall Visual Studio from a hosted runner, this
-  # makes node-gyp refuse the one that is there. The path was traced through
-  # node-gyp@11.4.2's source rather than assumed, because a mechanism that
-  # quietly did nothing would leave this job passing over an untested surface —
-  # the exact failure this whole workflow exists to stop:
+  # makes node-gyp refuse the one that is there:
   #
   #   env npm_config_msvs_version=2019
   #     -> node-gyp.js strips `npm_config_`, maps `_` to `-`  => opts['msvs-version']
-  #     -> configure.js:112 passes it as `configMsvsVersion`
+  #     -> configure.js passes it as `configMsvsVersion`
   #     -> find-visualstudio.js sets configVersionYear = 2019
   #     -> checkConfigVersion() rejects every installation whose year differs
   #
-  # The runner has 2022, so every candidate is discarded and the build fails
-  # exactly as it does on a machine with no toolchain at all. Set as a raw
-  # environment variable rather than via `npm config`: npm 11 deprecated
-  # arbitrary keys in its own config, but node-gyp reads `process.env`
-  # directly, so this route is unaffected.
+  # Traced through node-gyp's source rather than assumed, because a knob that
+  # quietly did nothing would leave this job green over an untested surface —
+  # the exact failure this whole workflow exists to stop — and then confirmed
+  # against a real run on 2026-08-04, which logged:
+  #
+  #   --msvs_version=2019 was set on the command line
+  #   checking VS2026 (18.8.12023.21) found at "...\Microsoft Visual Studio\18\Enterprise"
+  #   - found VC++ toolset: v145
+  #   - msvs_version does not match this version
+  #   could not find a version of Visual Studio 2017 or newer to use
+  #
+  # Note what that run also showed, since it contradicts a claim made earlier
+  # in this project's docs: the runner carries Visual Studio 2026 with a
+  # working v145 toolset, and node-gyp 12.x recognises it fine (it offers
+  # "2026" as a valid msvs_version). It is only node-gyp 11.x — the version
+  # npm 11 bundles — that cannot see VS 2026 at all. This job does not depend
+  # on either behaviour: whichever Visual Studio the runner happens to ship,
+  # asking for a year it does not have rejects it.
+  #
+  # Set as a raw environment variable rather than via `npm config`: npm 11
+  # deprecated arbitrary keys in its own config, but node-gyp reads
+  # `process.env` directly, so this route is unaffected.
   windows-no-toolchain:
     name: windows-x64-no-toolchain
     needs: resolve-version
@@ -238,7 +257,14 @@ jobs:
   # Intel Mac compatibility.
   macos-x64-intel-manual:
     name: macos-x64-intel (manual, best-effort)
-    if: github.event_name == 'workflow_dispatch'
+    # Opt-in, not "any manual run" (XSPEC-365 R6 follow-up). Gating this on
+    # `workflow_dispatch` alone made every manual run inherit the ~50-minute
+    # Intel Mac queue this job's own comment documents — the whole run sits
+    # incomplete until it lands, which makes `workflow_dispatch` useless for
+    # the thing it is most needed for: checking a change to this workflow
+    # without cutting a release. Measured on 2026-08-04: every other job
+    # finished within ~4 minutes while this one was still queued.
+    if: github.event_name == 'workflow_dispatch' && inputs.include_intel_mac
     needs: resolve-version
     runs-on: macos-13
     continue-on-error: true
