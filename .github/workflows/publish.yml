@@ -14,8 +14,121 @@ on:
     types: [published]
 
 jobs:
+  # DOES THE SUITE STILL PASS AGAINST WHAT USERS WILL ACTUALLY INSTALL?
+  # // implements XSPEC-366 R3
+  #
+  # A published npm package does not carry its lockfile. The `publish` job
+  # below installs with `package-lock.json` in place, so it tests the versions
+  # this repo pins. A consumer runs `npm install engramgraph` and gets whatever
+  # the declared ranges resolve to at that moment. When the two differ, the
+  # entire suite is green about a combination nobody installs.
+  #
+  # That is not hypothetical here. `"tree-sitter-c-sharp": "^0.23.1"` spanned
+  # three published versions with incompatible APIs; npm took the newest, and
+  # **no .cs file ever parsed for anyone who installed from npm** while every
+  # test passed, for the whole life of C# support. XSPEC-365 has the full
+  # account; XSPEC-366 R2 pinned the grammars afterwards.
+  #
+  # Pinning fixed the dependencies that were known to be dangerous. This job
+  # exists for the ones that are not known yet: it deletes the lockfile,
+  # resolves everything the way a consumer would, and runs the real suite
+  # against the result. It does not need to be told which dependency will
+  # break next.
+  #
+  # `publish` needs it, so a failure here stops the release rather than
+  # producing a version that is green in CI and broken on installation.
+  consumer-resolution:
+    name: Test against consumer resolution (no lockfile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g npm@latest
+
+      - name: Record what the lockfile pins, then remove it
+        run: |
+          set -e
+          node -e "
+            const lock = require('./package-lock.json');
+            const pkg = require('./package.json');
+            const declared = { ...pkg.dependencies, ...pkg.optionalDependencies };
+            const rows = Object.keys(declared).map((name) => ({
+              name,
+              range: declared[name],
+              locked: (lock.packages['node_modules/' + name] || {}).version || null,
+            }));
+            require('fs').writeFileSync('locked-versions.json', JSON.stringify(rows, null, 2));
+            console.log('Recorded ' + rows.length + ' runtime dependencies from the lockfile.');
+          "
+          rm package-lock.json
+
+      # Resolves every range fresh, exactly as a consumer's install does.
+      - run: npm install --legacy-peer-deps
+
+      - name: Report which dependencies resolved differently from what is pinned
+        run: |
+          set -e
+          # Printed whether or not anything differs. A silent job leaves "the
+          # suite passed against identical versions" and "the suite passed
+          # against sixteen untested ones" looking the same in the log, and
+          # only one of those is worth knowing about later.
+          # Versions are read straight off disk, NOT through require(). A
+          # package may block '/package.json' in its `exports` map — hono,
+          # ryugraph and @modelcontextprotocol/sdk all do — and require() then
+          # throws for a package that is installed and fine. The first version
+          # of this step did exactly that and reported three drifts where there
+          # were two, one of them fabricated. A drift report that invents
+          # drifts is worse than none: it trains the reader to ignore it.
+          node -e "
+            const { readFileSync, existsSync } = require('node:fs');
+            const rows = require('./locked-versions.json');
+            let drifted = 0;
+            let unreadable = 0;
+            for (const row of rows) {
+              const manifest = 'node_modules/' + row.name + '/package.json';
+              if (!existsSync(manifest)) {
+                unreadable++;
+                console.log('  ' + row.name + '  ' + row.range + '  pinned=' + row.locked + '  NOT INSTALLED');
+                continue;
+              }
+              const actual = JSON.parse(readFileSync(manifest, 'utf8')).version;
+              if (actual !== row.locked) {
+                drifted++;
+                console.log('  ' + row.name + '  ' + row.range + '  pinned=' + row.locked + '  resolved=' + actual);
+              }
+            }
+            if (unreadable > 0) {
+              console.log('');
+              console.error(unreadable + ' declared dependencies are not installed — this check cannot speak for them.');
+              process.exitCode = 1;
+            }
+            console.log('');
+            console.log(drifted + ' of ' + rows.length + ' runtime dependencies resolved to a version this repo does not pin.');
+            console.log(drifted === 0
+              ? 'Consumers install exactly what the lockfile tests.'
+              : 'The suite below runs against THOSE versions — the ones users actually get.');
+          "
+
+      # ryugraph's ALGO extension is fetched from an unreliable host; the same
+      # from-source build the publish job uses, so this job fails on the code
+      # rather than on that download.
+      - name: Build ryugraph ALGO extension from source
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake
+          cd node_modules/ryugraph/ryu-source
+          make extension-release EXTENSION_LIST=algo NUM_THREADS="$(nproc)"
+          mkdir -p "$HOME/.ryu/extension/25.9.0/linux_amd64/algo"
+          cp extension/algo/build/libalgo.ryu_extension "$HOME/.ryu/extension/25.9.0/linux_amd64/algo/"
+
+      - run: npm run build
+      - run: npm run test:coverage
+
   publish:
     name: Publish to npm
+    needs: consumer-resolution
     runs-on: ubuntu-latest
     permissions:
       contents: read
