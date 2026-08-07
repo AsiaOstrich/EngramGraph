@@ -235,10 +235,17 @@ npm warn deprecated npmlog@6.0.2: This package is no longer supported.
 npm warn deprecated are-we-there-yet@3.0.1: This package is no longer supported.
 npm warn deprecated gauge@4.0.4: This package is no longer supported.
 npm warn deprecated tar@6.2.1: ...widely publicized security vulnerabilities...
-4 high severity vulnerabilities
+4 vulnerabilities (3 high, 1 critical)
 ```
 
-All four trace back to a single chain: `ryugraph` (this package's embedded graph-DB
+The exact count moves as advisories are published against the same pinned versions — it
+was four high when this section was written, and a consumer install on 2026-08-08
+reported one critical and three high, carrying twelve advisories on `tar` alone. The
+release gate (`npm run audit:ship`) audits a packed tarball installed into an empty
+directory, so this is measured against what you get rather than what this repo pins;
+`security/accepted-advisories.json` records the acknowledgement and the date it expires.
+
+All of them trace back to a single chain: `ryugraph` (this package's embedded graph-DB
 engine) pins `cmake-js@^7.3.0`, which depends on `tar@^6.2.0` (several high-severity
 path-traversal CVEs, fixed in `tar@7.5.11`+) and the now-deprecated `npmlog`/`gauge`/
 `are-we-there-yet` stack. `cmake-js@8.0.0` already dropped `npmlog` and bumped `tar` to

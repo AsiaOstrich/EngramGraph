@@ -200,6 +200,30 @@ jobs:
       # on `release` only, so there is no push/PR CI to attach a gate to).
       - run: npm run test:coverage
 
+      # WHAT DOES A CONSUMER'S TREE LOOK LIKE, NOT WHAT DOES THIS REPO'S?
+      #
+      # The script packs the tarball, installs it into an empty directory and
+      # audits that. Auditing in place would be cheaper and would answer the
+      # wrong question: package.json overrides cmake-js to ^8.0.0 (fddd07e,
+      # "clearing remaining tar CVEs"), and npm overrides govern the project
+      # that declares them rather than travelling with a published package. So
+      # `npm audit --omit=dev` here reports nothing while `npm install
+      # engramgraph@0.9.1` into an empty directory pulls cmake-js@7.4.0 and
+      # tar@6.2.1 — twelve advisories, one critical.
+      #
+      # That gap is not news: README's "Dependency vulnerability warnings"
+      # section explains it, links the upstream issue (ryugraph#49) and gives
+      # consumers the override to apply themselves. What was missing is anything
+      # that checks. Prose does not notice when the count grows — the README
+      # says "4 high severity", and a consumer install today reports one
+      # critical and three high — and prose says nothing at all when some
+      # *other* dependency starts doing the same thing.
+      #
+      # Findings are cleared through security/accepted-advisories.json, where
+      # every entry carries an expiry date.
+      - name: Audit what consumers install (not what this repo pins)
+        run: npm run audit:ship
+
       - name: Determine npm dist-tag
         id: tag
         run: |

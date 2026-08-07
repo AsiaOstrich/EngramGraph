@@ -47,6 +47,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "audit:ship": "node scripts/check-shipped-advisories.mjs",
     "dev": "node --experimental-strip-types --watch src/api/dev-server.ts",
     "test:coverage": "vitest run --coverage"
   },
@@ -63,9 +64,9 @@
   ],
   "dependencies": {
     "@bufbuild/protobuf": "2.12.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@tree-sitter-grammars/tree-sitter-kotlin": "1.1.0",
-    "hono": "^4.6.0",
+    "hono": "^4.13.1",
     "ryugraph": "25.9.1",
     "tree-sitter": "0.22.4",
     "tree-sitter-c-sharp": "0.23.1",

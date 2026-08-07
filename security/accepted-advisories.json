@@ -1,0 +1,11 @@
+{
+  "$comment": "Advisories knowingly shipped, each with a date it stops being acceptable. Checked by scripts/check-shipped-advisories.mjs — read its header for why the check audits what a consumer installs rather than this repo's own tree. Every entry needs package, advisory (a GHSA id, or \"*\" for every advisory on that package), reason, and expires. An acceptance without an expiry is a deletion with better manners, so the checker refuses one.",
+  "accepted": [
+    {
+      "package": "tar",
+      "advisory": "*",
+      "reason": "Known and documented, not newly found: see README's 'Dependency vulnerability warnings' section and upstream ryugraph#49. Recorded here so a release has to acknowledge it rather than inherit it silently. The chain is engramgraph -> ryugraph@25.9.1 -> cmake-js -> tar; ryugraph declares cmake-js ^7.3.0, the last 7.x is 7.4.0 and it declares tar ^6.2.0, while the advisories cover tar <=7.5.20 — every version inside ryugraph's declared range is affected, and no newer ryugraph exists (only 25.9.0 and 25.9.1, same range). engramgraph cannot fix this from its own manifest: the cmake-js ^8.0.0 override in package.json cleans this repo's tree only, since npm overrides do not travel with a published package. Reachability is narrower than the count: cmake-js runs when ryugraph builds its native addon from source, not on the prebuilt path. Clears when ryugraph widens its cmake-js range or engramgraph drops ryugraph. Consumers can apply the same override in their own project today — README shows it.",
+      "expires": "2026-11-06"
+    }
+  ]
+}
