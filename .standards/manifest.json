@@ -467,8 +467,8 @@
       "installedAt": "2026-07-30T18:07:12.901Z"
     },
     "AGENTS.md": {
-      "hash": "sha256:717f30eea3d7ed443f0acf28c15e59674f7e9ea6c816054e43788d1986a7c310",
-      "size": 3883,
+      "hash": "sha256:958f38af3ca462cf5c088fcfb45412952abdb347df6dbcbe3b0611a5caeb8d8f",
+      "size": 4403,
       "installedAt": "2026-07-30T18:07:12.901Z"
     }
   },
@@ -476,10 +476,10 @@
   "commandHashes": {},
   "integrationBlockHashes": {
     "AGENTS.md": {
-      "blockHash": "sha256:f405a3847bc09ff7bf903f9ef102034b0e47c6be4347c18dc0057a813416d435",
-      "blockSize": 2858,
-      "fullHash": "sha256:717f30eea3d7ed443f0acf28c15e59674f7e9ea6c816054e43788d1986a7c310",
-      "fullSize": 3883
+      "blockHash": "sha256:7448409a9761b0aa217d89f019ab1ffe3cbcb92a2b2a788586d6c62eabcb43f5",
+      "blockSize": 3378,
+      "fullHash": "sha256:958f38af3ca462cf5c088fcfb45412952abdb347df6dbcbe3b0611a5caeb8d8f",
+      "fullSize": 4403
     }
   }
 }
