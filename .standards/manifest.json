@@ -1,9 +1,9 @@
 {
-  "version": "3.3.0",
+  "version": "3.4.0",
   "upstream": {
     "repo": "AsiaOstrich/universal-dev-standards",
-    "version": "6.2.2",
-    "installed": "2026-07-30"
+    "version": "6.3.7",
+    "installed": "2026-08-08"
   },
   "format": "ai",
   "contentMode": "minimal",
@@ -232,9 +232,9 @@
       "installedAt": "2026-07-30T18:07:12.901Z"
     },
     ".standards/full-coverage-testing.ai.yaml": {
-      "hash": "sha256:8b71145923d8f08bd15684d6bb352bafda5895d18189117a05e0f92f8db1ca72",
-      "size": 11787,
-      "installedAt": "2026-07-30T18:07:12.901Z"
+      "hash": "sha256:80ccc6cba98469ecbcc76dd96ef417f40a4a2c83e8b82d28c50c7d58404de371",
+      "size": 11797,
+      "installedAt": "2026-08-08T16:30:03.409Z"
     },
     ".standards/documentation-structure.ai.yaml": {
       "hash": "sha256:b698b62ecc67a62b246ffc65a2ed5d39571042a252a41c095f001e607c1086b4",
@@ -382,9 +382,9 @@
       "installedAt": "2026-07-30T18:07:12.901Z"
     },
     ".standards/knowledge-graph-memory.ai.yaml": {
-      "hash": "sha256:3ef5e3d6833aea169ca4f132827b6be0f620def06667525c97ab17f9592e3def",
-      "size": 3708,
-      "installedAt": "2026-07-30T18:07:12.901Z"
+      "hash": "sha256:325e80786748002db694c927239550c8983fde4597efd4de1a3deac2004fc3ce",
+      "size": 3710,
+      "installedAt": "2026-08-08T16:30:03.410Z"
     },
     ".standards/context-aware-loading.ai.yaml": {
       "hash": "sha256:8830e5baa50d43041e21dcae65bc31b15191297a01f15a89c5501a7ad934f559",
@@ -467,8 +467,8 @@
       "installedAt": "2026-07-30T18:07:12.901Z"
     },
     "AGENTS.md": {
-      "hash": "sha256:d55acd627271e2dc08bf3a0a105dbe68e84eb17b69127172f5c229c372cc4ed2",
-      "size": 1630,
+      "hash": "sha256:717f30eea3d7ed443f0acf28c15e59674f7e9ea6c816054e43788d1986a7c310",
+      "size": 3883,
       "installedAt": "2026-07-30T18:07:12.901Z"
     }
   },
@@ -476,11 +476,10 @@
   "commandHashes": {},
   "integrationBlockHashes": {
     "AGENTS.md": {
-      "blockHash": "sha256:442a8ff312a5ba6927ccf38d16023d84f2d2cf49d8994f1979f25e740d99822a",
-      "blockSize": 605,
-      "fullHash": "sha256:d55acd627271e2dc08bf3a0a105dbe68e84eb17b69127172f5c229c372cc4ed2",
-      "fullSize": 1630,
-      "installedAt": "2026-07-30T18:07:12.901Z"
+      "blockHash": "sha256:f405a3847bc09ff7bf903f9ef102034b0e47c6be4347c18dc0057a813416d435",
+      "blockSize": 2858,
+      "fullHash": "sha256:717f30eea3d7ed443f0acf28c15e59674f7e9ea6c816054e43788d1986a7c310",
+      "fullSize": 3883
     }
   }
 }
