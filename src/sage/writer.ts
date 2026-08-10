@@ -10,8 +10,36 @@
 import type { FeedbackEvent } from "../adapters/signal-source.js";
 import type { GraphConnection } from "../graph-db/connection.js";
 
-/** Node tables that carry a `confidence` property. */
-export type ConfidenceLabel = "Function" | "Spec" | "Decision" | "Doc";
+/**
+ * Node tables that carry a `confidence` property.
+ *
+ * A runtime array with the type derived from it, not the other way round
+ * (XSPEC-373 B10). The label list previously existed as a bare type plus four
+ * hand-written copies — two `as ConfidenceLabel` casts in the CLI, one in the
+ * HTTP route, and a `z.enum` in the MCP server — so nothing connected them and
+ * a fifth label would have to be added in five places. Worse, a cast is
+ * compile-time only: `egr top Module` type-checked, reached Cypher, and
+ * surfaced `Binder exception: Cannot find property confidence for n` to the
+ * user, while the correct message was already written three lines away.
+ */
+export const CONFIDENCE_LABELS = ["Function", "Spec", "Decision", "Doc"] as const;
+
+export type ConfidenceLabel = (typeof CONFIDENCE_LABELS)[number];
+
+/**
+ * Narrow a user-supplied string to a `ConfidenceLabel`, or throw with the
+ * valid set. Case-insensitive: `egr top spec` is unambiguous, and rejecting it
+ * on capitalisation alone would be pedantry.
+ */
+export function asConfidenceLabel(value: string, context: string): ConfidenceLabel {
+  const match = CONFIDENCE_LABELS.find((l) => l.toLowerCase() === value.toLowerCase());
+  if (!match) {
+    throw new Error(
+      `${context}: "${value}" is not a node label with confidence. Valid: ${CONFIDENCE_LABELS.join(" | ")}.`,
+    );
+  }
+  return match;
+}
 
 /** Per-event confidence step (a unit-weight signal moves confidence by this). */
 export const STEP = 0.25;

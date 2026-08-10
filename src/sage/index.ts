@@ -1,5 +1,7 @@
 export {
   applyFeedback,
+  asConfidenceLabel,
+  CONFIDENCE_LABELS,
   STEP,
   MIN_CONFIDENCE,
   MAX_CONFIDENCE,

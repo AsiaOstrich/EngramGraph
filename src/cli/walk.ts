@@ -83,6 +83,11 @@ export interface WalkResult {
    * indexed exactly as before.
    */
   skippedSymlinkDirs: string[];
+  /**
+   * Files matched by extension but not readable (XSPEC-373 B7), with the OS
+   * error. Permission-denied, a race with a delete, an I/O error.
+   */
+  unreadable: Array<{ path: string; reason: string }>;
 }
 
 /**
@@ -96,6 +101,7 @@ export interface WalkResult {
 export function walkFiles(root: string, exts: readonly string[]): WalkResult {
   const files: Array<{ path: string; source: string }> = [];
   const skippedSymlinkDirs: string[] = [];
+  const unreadable: Array<{ path: string; reason: string }> = [];
   const rec = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
@@ -110,10 +116,21 @@ export function walkFiles(root: string, exts: readonly string[]): WalkResult {
         continue;
       }
       if (exts.some((e) => entry.name.endsWith(e)) && !entry.name.endsWith(".d.ts")) {
-        files.push({ path: toPosixPath(relative(root, full)), source: readFileSync(full, "utf8") });
+        const path = toPosixPath(relative(root, full));
+        try {
+          files.push({ path, source: readFileSync(full, "utf8") });
+        } catch (err) {
+          // Discovery runs BEFORE `extractProject`'s per-file resilience
+          // (XSPEC-334 R1a), so an unreadable file used to abort the entire
+          // index with a bare EACCES — one permission-denied file taking the
+          // whole run with it. Recorded and skipped instead. Not swallowed:
+          // silently dropping it would put the file outside the denominator,
+          // which is the failure mode this whole spec is about.
+          unreadable.push({ path, reason: err instanceof Error ? err.message : String(err) });
+        }
       }
     }
   };
   rec(root);
-  return { files, skippedSymlinkDirs };
+  return { files, skippedSymlinkDirs, unreadable };
 }

@@ -84,6 +84,8 @@ export interface IndexResultSummary {
    * are reported rather than followed.
    */
   skippedSymlinkDirs?: string[];
+  /** Files matched by extension but unreadable (XSPEC-373 B7). Absent when none. */
+  unreadableFiles?: Array<{ path: string; reason: string }>;
 }
 
 /**
@@ -331,6 +333,7 @@ export async function cmdIndex(
   // (XSPEC-373 B3). Surfaced from the code walk, which covers the whole tree;
   // the docs walk below re-walks the same directories and would only repeat it.
   if (codeWalk.skippedSymlinkDirs.length > 0) result.skippedSymlinkDirs = codeWalk.skippedSymlinkDirs;
+  if (codeWalk.unreadable.length > 0) result.unreadableFiles = codeWalk.unreadable;
   if (opts.docs) {
     const docs = walkFiles(opts.dir, [".md"]).files.map((f) => ({ content: f.source, fallbackId: f.path }));
     result.knowledge = await indexKnowledgeDocs(conn, docs);

@@ -18,7 +18,7 @@ import type { GraphConnection } from "../graph-db/connection.js";
 import { indexProject, callChain, definitionFiles, implementers, implementedSpecs, readIndexHealth } from "../code-graph/index.js";
 import { readManifest, upsertRun, writeManifest } from "../code-graph/parse-manifest.js";
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
-import { applyFeedback, feedbackForEventType } from "../sage/index.js";
+import { applyFeedback, feedbackForEventType, CONFIDENCE_LABELS } from "../sage/index.js";
 import { related } from "../structural-memory/index.js";
 
 /** Sentinel manifest root for MCP-side `index_code` (R2). See its use below. */
@@ -169,7 +169,7 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
       inputSchema: {
         nodeId: z.string(),
         type: z.string(),
-        nodeLabel: z.enum(["Function", "Spec", "Decision", "Doc"]).optional(),
+        nodeLabel: z.enum(CONFIDENCE_LABELS).optional(),
         weight: z.number().optional(),
       },
     },

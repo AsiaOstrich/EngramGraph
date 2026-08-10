@@ -15,7 +15,7 @@ import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
 import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
-import type { ConfidenceLabel } from "../sage/index.js";
+import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { readIndexHealth, definitionFiles, type IndexHealth } from "../code-graph/index.js";
 import { manifestPathForDb } from "../code-graph/parse-manifest.js";
@@ -400,7 +400,16 @@ async function main(): Promise<void> {
             `(${s.skippedSymlinkDirs.slice(0, 3).join(", ")}${s.skippedSymlinkDirs.length > 3 ? ", …" : ""}) — ` +
             `contents are absent from every count above. Index such a directory as its own root to include it.`
           : "";
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}${symlinked}`;
+        // Unreadable files used to abort the whole index with a bare EACCES;
+        // they are skipped now, so they must be named or the file count is
+        // quietly short (XSPEC-373 B7).
+        const unreadable = s.unreadableFiles?.length
+          ? `\nunreadable: ${s.unreadableFiles.length} file(s) matched but could not be read — ` +
+            s.unreadableFiles.slice(0, 3).map((f) => `${f.path} (${f.reason})`).join("; ") +
+            (s.unreadableFiles.length > 3 ? "; …" : "") +
+            `. Not included in any count above.`
+          : "";
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}${symlinked}${unreadable}`;
       });
       break;
     }
@@ -472,14 +481,14 @@ async function main(): Promise<void> {
     }
     case "feedback": {
       if (!a1 || !a2) throw new Error("feedback requires <type> <node-id>");
-      const label = (values.label as ConfidenceLabel) ?? "Function";
+      const label = values.label ? asConfidenceLabel(String(values.label), "feedback --label") : "Function";
       const r = await cmdFeedback(conn, a1, a2, label);
       out(r, values.json, (d) => (d ? `${(d as { nodeId: string }).nodeId}: ${(d as { before: number }).before} → ${(d as { after: number }).after}` : `node not found: ${label} ${a2}`));
       break;
     }
     case "top": {
       if (!a1) throw new Error("top requires a <label> (Function|Spec|Decision|Doc)");
-      const rows = await cmdTop(conn, a1 as ConfidenceLabel, num(values.limit, 10));
+      const rows = await cmdTop(conn, asConfidenceLabel(a1, "top"), num(values.limit, 10));
       out(rows, values.json, (d) => `top ${a1}:\n${fmtNodes(d as Array<{ name: string; confidence: number }>)}`);
       break;
     }
