@@ -17,7 +17,7 @@ import { extractRefs, parseFrontMatter } from "../adapters/knowledge-source.js";
 import type { GraphConnection } from "../graph-db/connection.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
 import { writeFragment } from "../graph-db/writer.js";
-import { classifyRef, type ClassifiedRef } from "./linker.js";
+import { classifyRef, extractRefIds, type ClassifiedRef } from "./linker.js";
 import type { KnowledgeDoc, KnowledgeNodeKind } from "./types.js";
 
 export interface ParsedKnowledgeDoc {
@@ -135,8 +135,9 @@ export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null 
   for (const field of RELATIONSHIP_FIELDS) {
     const value = fields[field];
     if (!value) continue;
-    // XSPEC- must be matched too (dev-platform specs); mirrors linker's ID_RE.
-    for (const m of value.matchAll(/\b(?:XSPEC|SPEC|DEC|ADR)-\d+/gi)) addRef(m[0]);
+    // Pattern lives in linker.ts — this used to restate it, with a comment
+    // saying so, which is exactly how the two drifted apart (XSPEC-373 R4a).
+    for (const id of extractRefIds(value)) addRef(id);
   }
 
   return { id, kind, title, refs, node: makeNode(kind, id, title, fields) };
