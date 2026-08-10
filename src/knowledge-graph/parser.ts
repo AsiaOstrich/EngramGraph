@@ -17,7 +17,7 @@ import { extractRefs, parseFrontMatter } from "../adapters/knowledge-source.js";
 import type { GraphConnection } from "../graph-db/connection.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
 import { writeFragment } from "../graph-db/writer.js";
-import { classifyRef } from "./linker.js";
+import { classifyRef, type ClassifiedRef } from "./linker.js";
 import type { KnowledgeDoc, KnowledgeNodeKind } from "./types.js";
 
 export interface ParsedKnowledgeDoc {
@@ -32,6 +32,55 @@ export interface ParsedKnowledgeDoc {
 function firstHeading(body: string): string | null {
   const m = /^#\s+(.+)$/m.exec(body);
   return m ? (m[1] ?? "").trim() : null;
+}
+
+/** Last path segment of `s`, or `s` itself when it carries no separator. */
+function lastSegment(s: string): string {
+  const parts = s.split(/[/\\]/);
+  return parts[parts.length - 1] ?? s;
+}
+
+/**
+ * Resolve the artifact id of a document, trying each source in turn and
+ * keeping the first that actually classifies (XSPEC-373 R3).
+ *
+ * Three sources, narrowest first: front-matter `id`, the fallback id's LAST
+ * PATH SEGMENT, then the body's first heading.
+ *
+ * ## Why not the whole document
+ *
+ * This used to end in `?? doc.content` — the entire file as an id candidate,
+ * so any `SPEC-…` token anywhere in the prose could name the document. Under
+ * the old `-\d+` pattern that was near-harmless and, via the CLI, dead code:
+ * `cli/run.ts` always supplies `fallbackId`, so the third alternative was
+ * never reached. It was reachable from MCP and the library API, where
+ * `fallbackId` is optional — the agent-facing side. With a widened id pattern
+ * it would become an active mis-attribution engine, so it is gone.
+ *
+ * ## Why the last segment, not the whole path
+ *
+ * `cli/run.ts` passes a repo-relative POSIX path, not a bare name. Matching
+ * against the full path lets a DIRECTORY name a document: under a widened
+ * pattern, `specs/SPEC-AUTH-V2/notes.md` would file `notes.md` as
+ * `SPEC-AUTH-V2`. Taking the last segment fixes that at one point for both
+ * entry paths — an MCP caller's bare id string has no separator, so it is
+ * returned unchanged.
+ *
+ * ## Why "first that classifies", not "first that is non-empty"
+ *
+ * A document whose filename carries no id must still be able to fall through
+ * to its heading. Picking the first non-null candidate and classifying only
+ * that would let a non-conforming filename mask a perfectly good `# SPEC-X`
+ * heading — the file would be dropped for having been named badly.
+ */
+function resolveRef(fields: Record<string, string>, doc: KnowledgeDoc, body: string): ClassifiedRef | null {
+  const candidates = [fields.id, doc.fallbackId ? lastSegment(doc.fallbackId) : null, firstHeading(body)];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const classified = classifyRef(candidate);
+    if (classified) return classified;
+  }
+  return null;
 }
 
 function makeNode(kind: KnowledgeNodeKind, id: string, title: string, fields: Record<string, string>): GraphNode {
@@ -59,8 +108,7 @@ function stubNode(kind: KnowledgeNodeKind, id: string): GraphNode {
  */
 export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null {
   const { fields, body } = parseFrontMatter(doc.content);
-  const rawId = fields.id ?? doc.fallbackId ?? doc.content;
-  const classified = classifyRef(rawId);
+  const classified = resolveRef(fields, doc, body);
   if (!classified) return null;
 
   const { kind, id } = classified;
