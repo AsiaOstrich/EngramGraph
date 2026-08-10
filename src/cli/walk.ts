@@ -34,7 +34,7 @@
  * comparison, which only ever sees `walkFiles`' raw output).
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 import { toPosixPath } from "../code-graph/path-utils.js";
@@ -61,19 +61,59 @@ const SKIP_DIRS = new Set([
   "__pycache__", ".venv", "venv", "vendor", "target", "build",
 ]);
 
-/** Recursively collect files under `root` whose name ends with one of `exts`. */
-export function walkFiles(root: string, exts: readonly string[]): Array<{ path: string; source: string }> {
-  const out: Array<{ path: string; source: string }> = [];
+export interface WalkResult {
+  files: Array<{ path: string; source: string }>;
+  /**
+   * Directory symlinks encountered and NOT descended into (XSPEC-373 B3).
+   *
+   * `Dirent.isDirectory()` is false for a symlink even when it points at a
+   * directory, and `SKIP_DIRS` does not list them either — so such a tree was
+   * neither walked nor recorded. Measured on two identical trees differing
+   * only in whether one subdirectory was a symlink: 2 files vs 1, and `egr
+   * blindspots` then reported "all 1 indexed files parsed cleanly". The files
+   * were not merely missing from the graph, they were missing from the
+   * DENOMINATOR, so the green tick was sincere.
+   *
+   * Reporting rather than following is deliberate. Descending into symlinks
+   * invites cycles and double-counting, and that trade-off deserves its own
+   * decision; what is not defensible is making the choice silently. This
+   * turns an invisible omission into a visible one.
+   *
+   * Symlinked FILES are unaffected: `readFileSync` follows them, and they are
+   * indexed exactly as before.
+   */
+  skippedSymlinkDirs: string[];
+}
+
+/**
+ * Recursively collect files under `root` whose name ends with one of `exts`,
+ * plus an account of what was skipped.
+ *
+ * Returns a result object rather than a bare array so callers cannot quietly
+ * drop the skip list — an optional out-parameter would be omitted by every
+ * caller that did not already know to ask, which is the failure this is fixing.
+ */
+export function walkFiles(root: string, exts: readonly string[]): WalkResult {
+  const files: Array<{ path: string; source: string }> = [];
+  const skippedSymlinkDirs: string[] = [];
   const rec = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (!SKIP_DIRS.has(entry.name)) rec(full);
-      } else if (exts.some((e) => entry.name.endsWith(e)) && !entry.name.endsWith(".d.ts")) {
-        out.push({ path: toPosixPath(relative(root, full)), source: readFileSync(full, "utf8") });
+        continue;
+      }
+      // `throwIfNoEntry: false` covers a broken symlink — a dangling link is
+      // not a skipped directory, and must not abort the whole walk either.
+      if (entry.isSymbolicLink() && statSync(full, { throwIfNoEntry: false })?.isDirectory()) {
+        skippedSymlinkDirs.push(toPosixPath(relative(root, full)));
+        continue;
+      }
+      if (exts.some((e) => entry.name.endsWith(e)) && !entry.name.endsWith(".d.ts")) {
+        files.push({ path: toPosixPath(relative(root, full)), source: readFileSync(full, "utf8") });
       }
     }
   };
   rec(root);
-  return out;
+  return { files, skippedSymlinkDirs };
 }

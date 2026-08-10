@@ -55,7 +55,7 @@ describe("walkFiles + simulated win32 path.relative(): output is still '/'-separ
       writeFileSync(join(dir, "Services", "Deep", "Nested.cs"), "class Nested {}");
       writeFileSync(join(dir, "Program.cs"), "class Program {}");
 
-      const files = walkFiles(dir, [".cs"]).map((f) => f.path);
+      const files = walkFiles(dir, [".cs"]).files.map((f) => f.path);
 
       // With the mocked win32-style `relative()` above, this is exactly the
       // regression case: without `toPosixPath` inside `walkFiles`, these

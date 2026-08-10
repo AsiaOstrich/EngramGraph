@@ -78,6 +78,12 @@ export interface IndexResultSummary {
    * consumer wants. Present on every index run.
    */
   parseHealth?: ParseHealthSummary & { healed: string[]; regressed: string[] };
+  /**
+   * Directory symlinks under `<dir>` that were not walked (XSPEC-373 B3).
+   * Absent when there were none. See `walk.ts`'s `WalkResult` for why these
+   * are reported rather than followed.
+   */
+  skippedSymlinkDirs?: string[];
 }
 
 /**
@@ -297,7 +303,8 @@ export async function cmdIndex(
 ): Promise<IndexResultSummary> {
   if (opts.clean) await clearGraph(conn); // drop existing data so deleted nodes are pruned
   if (opts.scip) await assertCallsSchemaHasProvenanceColumns(conn);
-  const codeFiles = walkFiles(opts.dir, CODE_EXTS);
+  const codeWalk = walkFiles(opts.dir, CODE_EXTS);
+  const codeFiles = codeWalk.files;
 
   // Read the PREVIOUS manifest before this run rewrites this dir's section, so
   // R1d can diff which files healed/regressed. Keyed by ABSOLUTE index root so
@@ -320,8 +327,12 @@ export async function cmdIndex(
   // summary surfaces — keeping the per-file array out of `--json` output.
   const { parseHealth, ...code } = await indexProject(conn, codeFiles);
   const result: IndexResultSummary = { code };
+  // Directory symlinks are neither descended into nor, previously, recorded
+  // (XSPEC-373 B3). Surfaced from the code walk, which covers the whole tree;
+  // the docs walk below re-walks the same directories and would only repeat it.
+  if (codeWalk.skippedSymlinkDirs.length > 0) result.skippedSymlinkDirs = codeWalk.skippedSymlinkDirs;
   if (opts.docs) {
-    const docs = walkFiles(opts.dir, [".md"]).map((f) => ({ content: f.source, fallbackId: f.path }));
+    const docs = walkFiles(opts.dir, [".md"]).files.map((f) => ({ content: f.source, fallbackId: f.path }));
     result.knowledge = await indexKnowledgeDocs(conn, docs);
   }
   if (opts.scip) {

@@ -27,7 +27,7 @@ describe("walkFiles", () => {
   });
 
   it("skips bin/ and obj/ when walking a directory for .cs files", () => {
-    const files = walkFiles(dir, [".cs"]).map((f) => f.path);
+    const files = walkFiles(dir, [".cs"]).files.map((f) => f.path);
     expect(files).toEqual(["Program.cs"]);
   });
 
@@ -39,7 +39,7 @@ describe("walkFiles", () => {
     mkdirSync(join(dir, "Services", "Deep"), { recursive: true });
     writeFileSync(join(dir, "Services", "Deep", "Nested.cs"), "class Nested {}");
     try {
-      const files = walkFiles(dir, [".cs"]).map((f) => f.path);
+      const files = walkFiles(dir, [".cs"]).files.map((f) => f.path);
       expect(files).toContain("Services/Deep/Nested.cs");
       expect(files.some((f) => f.includes("\\"))).toBe(false);
     } finally {

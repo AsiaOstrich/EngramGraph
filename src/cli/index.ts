@@ -392,7 +392,15 @@ async function main(): Promise<void> {
               )
               .join("\n")
           : "";
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}`;
+        // Says explicitly that the counts above EXCLUDE these. Without that
+        // clause the line reads as trivia, and the denominator stays wrong in
+        // the reader's head — which is the whole failure mode (XSPEC-373 B3).
+        const symlinked = s.skippedSymlinkDirs?.length
+          ? `\nskipped: ${s.skippedSymlinkDirs.length} symlinked director${s.skippedSymlinkDirs.length === 1 ? "y" : "ies"} not walked ` +
+            `(${s.skippedSymlinkDirs.slice(0, 3).join(", ")}${s.skippedSymlinkDirs.length > 3 ? ", …" : ""}) — ` +
+            `contents are absent from every count above. Index such a directory as its own root to include it.`
+          : "";
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}${symlinked}`;
       });
       break;
     }
