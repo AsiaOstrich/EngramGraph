@@ -26,7 +26,7 @@ import {
 } from "../code-graph/index.js";
 import { readScipIndex } from "../code-graph/providers/scip/scip-reader.js";
 import { ingestScipIndex, type ScipIngestStats, type ScipSourceFile } from "../code-graph/providers/scip/scip-ingest.js";
-import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
+import { indexKnowledgeDocs, impactAnalysis, type KnowledgeIndexResult } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType, topByConfidence, type ConfidenceLabel } from "../sage/index.js";
 import { godNodes, communities, related, type GodNode, type CommunityMember, type RelatedNode } from "../structural-memory/index.js";
 import {
@@ -62,7 +62,11 @@ export interface IndexResultSummary {
    * silently dropped by a hand-maintained copy of the shape.
    */
   code: Omit<ProjectIndexResult, "parseHealth">;
-  knowledge?: { specs: number; decisions: number; impacts: number; supersedes: number; relates: number };
+  // Was an inline restatement of KnowledgeIndexResult's five fields — a second
+  // copy that had to be edited in lockstep, and the reason `docsScanned` /
+  // `docsUnresolved` were invisible here until the compiler said so. Reference
+  // the type instead of repeating it.
+  knowledge?: KnowledgeIndexResult;
   /** Present only when `--scip` was given. See {@link ingestScipOverlay}. */
   scip?: ScipIngestStats & { documentsInIndex: number; filesMatched: number };
   /**

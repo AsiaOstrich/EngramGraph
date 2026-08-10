@@ -150,12 +150,32 @@ const RELATIONSHIP_FIELDS = ["related", "depends_on", "impacts", "impacted_by", 
  * reference knowledge source: spec/decision markdown → graph fragment.
  */
 export class SpecDecisionKnowledgeSource {
+  /**
+   * Docs that were read but yielded no artifact id, by fallback id
+   * (XSPEC-373 R1).
+   *
+   * `parseKnowledgeDoc` returns null for these and they vanish: no node, no
+   * edge, no error, and nothing in the summary distinguishes "44 documents we
+   * could not name" from "no spec documents here". Recording them is the
+   * difference between those two.
+   *
+   * Raw paths only — no reason codes, no classification. XSPEC-334 R1b
+   * (`parse-health.ts`'s module doc) rejected a stable diagnostic taxonomy on
+   * the grounds that fixing one before observing the real distribution of
+   * failures bakes in a wrong first cut, and that reasoning applies here
+   * unchanged. Consumers derive whatever view they need at read time.
+   */
+  readonly unresolved: string[] = [];
+
   constructor(private readonly docs: KnowledgeDoc[]) {}
 
   async ingest(): Promise<GraphFragment> {
-    const parsed = this.docs
-      .map(parseKnowledgeDoc)
-      .filter((p): p is ParsedKnowledgeDoc => p !== null);
+    const parsed: ParsedKnowledgeDoc[] = [];
+    for (const doc of this.docs) {
+      const p = parseKnowledgeDoc(doc);
+      if (p) parsed.push(p);
+      else this.unresolved.push(doc.fallbackId ?? "<unnamed document>");
+    }
 
     const nodes: GraphNode[] = [];
     const edges: GraphEdge[] = [];
@@ -212,6 +232,76 @@ export interface KnowledgeIndexResult {
   impacts: number;
   supersedes: number;
   relates: number;
+  /**
+   * How many documents were read (XSPEC-373 R1).
+   *
+   * The counts above are a numerator with no denominator: `specs: 0` reads
+   * identically whether nothing was scanned or 44 documents were scanned and
+   * none could be named. Note it is NOT `specs + decisions`' denominator
+   * either — those count graph NODES, which include stubs minted for
+   * `[[ref]]`s to documents that do not exist, so a single real document that
+   * links four absent ids reports `5 specs` off one file.
+   */
+  docsScanned: number;
+  /** Fallback ids of the documents that yielded no artifact id — raw, unclassified. */
+  docsUnresolved: string[];
+}
+
+/** A prefix that appears repeatedly among documents that could not be named. */
+export interface UnresolvedCluster {
+  /** The token before the first `-`, upper-cased (e.g. `REQ`). */
+  prefix: string;
+  count: number;
+  /** Up to three filenames, for a message a human can act on. */
+  samples: string[];
+}
+
+/**
+ * Prefixes that were systematically rejected (XSPEC-373 R1).
+ *
+ * ## Why not "unresolved > 0"
+ *
+ * Because that fires on every healthy repo. A README, a CHANGELOG and a
+ * CONTRIBUTING are all documents with no artifact id, and always will be —
+ * measured across three of our own repos, a bare non-zero check flagged
+ * EngramGraph's own tree (25 markdown files, 0 specs) while staying silent on
+ * universal-dev-standards, where 2831 of 2850 files failed to resolve. Warning
+ * on the count is loud where nothing is wrong and quiet where something is.
+ *
+ * ## Why not "yield === 0" either
+ *
+ * That was this spec's own first draft, and it is the same defect it set out
+ * to fix: one document that happens to be named `SPEC-001.md` makes the count
+ * non-zero and silences the warning for the other 43. A single success hiding
+ * an arbitrary number of failures is exactly the shape `cli/run.ts`'s
+ * `failureBuckets` comment describes ("a single partial file was enough to
+ * hide any number of failures behind it", 584 .cs files).
+ *
+ * ## What is actually diagnostic
+ *
+ * A CONSISTENT SHAPE being refused. `README.md` contributes no prefix at all,
+ * so a normal repo yields no clusters; 44 files named `REQ-…` yield one
+ * cluster of 44, which is a naming convention this tool does not recognise.
+ * Zero is a quantity; consistency is evidence of intent.
+ *
+ * Numeric leading tokens are excluded, so date-stamped notes
+ * (`2026-08-10-meeting.md`) never form a cluster.
+ */
+export function unresolvedIdClusters(unresolved: readonly string[], minCount = 3): UnresolvedCluster[] {
+  const byPrefix = new Map<string, string[]>();
+  for (const ref of unresolved) {
+    const name = lastSegment(ref);
+    const m = /^([A-Za-z][A-Za-z0-9_]*)-/.exec(name);
+    if (!m?.[1]) continue;
+    const prefix = m[1].toUpperCase();
+    const files = byPrefix.get(prefix) ?? [];
+    files.push(name);
+    byPrefix.set(prefix, files);
+  }
+  return [...byPrefix.entries()]
+    .filter(([, files]) => files.length >= minCount)
+    .map(([prefix, files]) => ({ prefix, count: files.length, samples: files.slice(0, 3) }))
+    .sort((a, b) => b.count - a.count || a.prefix.localeCompare(b.prefix));
 }
 
 /** Ingest spec/decision docs and write them to the graph. */
@@ -219,7 +309,8 @@ export async function indexKnowledgeDocs(
   conn: GraphConnection,
   docs: KnowledgeDoc[],
 ): Promise<KnowledgeIndexResult> {
-  const fragment = await new SpecDecisionKnowledgeSource(docs).ingest();
+  const source = new SpecDecisionKnowledgeSource(docs);
+  const fragment = await source.ingest();
   await writeFragment(conn, fragment);
   return {
     specs: fragment.nodes.filter((n) => n.label === "Spec").length,
@@ -227,5 +318,7 @@ export async function indexKnowledgeDocs(
     impacts: fragment.edges.filter((e) => e.label === "IMPACTS").length,
     supersedes: fragment.edges.filter((e) => e.label === "SUPERSEDES").length,
     relates: fragment.edges.filter((e) => e.label === "RELATES").length,
+    docsScanned: docs.length,
+    docsUnresolved: source.unresolved,
   };
 }

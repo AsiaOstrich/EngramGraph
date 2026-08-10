@@ -19,6 +19,7 @@ import type { ConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { readIndexHealth, definitionFiles, type IndexHealth } from "../code-graph/index.js";
 import { manifestPathForDb } from "../code-graph/parse-manifest.js";
+import { unresolvedIdClusters } from "../knowledge-graph/parser.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
 
@@ -309,7 +310,27 @@ async function main(): Promise<void> {
       const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean, scip: values.scip, manifestPath });
       out(r, values.json, (d) => {
         const s = d as Awaited<ReturnType<typeof cmdIndex>>;
-        const k = s.knowledge ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relates} relates` : "";
+        // The counts carry their denominator (XSPEC-373 R1): `0 specs` alone
+        // cannot distinguish "nothing was scanned" from "44 documents were
+        // scanned and none could be named", and that ambiguity is the whole
+        // defect this line used to have.
+        const k = s.knowledge
+          ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relates} relates` +
+            ` (${s.knowledge.docsScanned} doc(s) scanned, ${s.knowledge.docsUnresolved.length} unnamed)`
+          : "";
+        // A prefix rejected over and over is a naming convention this tool does
+        // not know — as opposed to a README, which is simply not a spec. See
+        // `unresolvedIdClusters` for why neither "unresolved > 0" nor
+        // "yield === 0" is the right trigger.
+        const clusters = s.knowledge ? unresolvedIdClusters(s.knowledge.docsUnresolved) : [];
+        const kWarning = clusters
+          .map(
+            (c) =>
+              `\nknowledge: WARNING — ${c.count} document(s) named \`${c.prefix}-…\` yielded no artifact id ` +
+              `(e.g. ${c.samples.join(", ")}). Recognised prefixes are XSPEC/SPEC/DEC/ADR, ` +
+              `each followed by a number or a name (e.g. SPEC-42, SPEC-EXTERNAL-AUTH).`,
+          )
+          .join("");
         // A matched-files-but-zero-resolution result is a real, silent-failure-
         // shaped signal worth surfacing even though it isn't a hard error.
         // The path-separator mismatch that used to be this warning's main
@@ -371,7 +392,7 @@ async function main(): Promise<void> {
               )
               .join("\n")
           : "";
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${scip}${parse}${skipped}`;
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}`;
       });
       break;
     }
