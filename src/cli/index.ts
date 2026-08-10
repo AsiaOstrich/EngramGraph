@@ -434,11 +434,23 @@ async function main(): Promise<void> {
       const health = readIndexHealth(manifestPathForDb(resolveDbPath(loc)), r.modules.map((m) => m.module));
       out(r, values.json, (d) => {
         const res = d as Awaited<ReturnType<typeof cmdImplementers>>;
+        // Four situations that all used to print `(none)` (XSPEC-373 R2), and
+        // they send you to four different places: fix the id, index the docs,
+        // write the spec, or write the code.
+        if (res.origin === null) {
+          return `implementers(${res.spec}):\n  no spec with this id is in the graph — check the id, or index the directory containing its document${healthNote(health)}`;
+        }
+        const provenance =
+          res.origin === "referenced"
+            ? "  ⚠ this id is only referenced by another document — no spec document and no code declares it"
+            : res.origin === "annotated"
+              ? "  ⚠ known only from a code annotation — its document has not been indexed (run `egr index <dir> --docs`)"
+              : "";
         const head = `implementers(${res.spec})${res.title ? ` — ${res.title}` : ""}:`;
         const body = res.modules.length
           ? res.modules.map((m) => `  ${m.module}${m.functions.length ? ` (${m.functions.join(", ")})` : ""}`).join("\n")
-          : "  (none)";
-        return `${head}\n${body}${healthNote(health)}`;
+          : "  (none — this spec is in the graph; no file declares it implements it)";
+        return `${head}\n${provenance ? provenance + "\n" : ""}${body}${healthNote(health)}`;
       });
       break;
     }

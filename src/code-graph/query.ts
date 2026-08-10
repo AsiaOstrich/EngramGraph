@@ -13,6 +13,7 @@
 
 import type { GraphConnection } from "../graph-db/connection.js";
 import { toPosixPath } from "./path-utils.js";
+import type { KnowledgeOrigin } from "../graph-db/types.js";
 
 export type CallDirection = "callers" | "callees" | "both";
 
@@ -125,6 +126,23 @@ export interface ImplementersResult {
   /** Spec title if the doc has been indexed (`index --docs`), else null. */
   title: string | null;
   modules: ImplementerModule[];
+  /**
+   * How this spec's id got into the graph, or null when it is not there at all
+   * (XSPEC-373 R2).
+   *
+   * The obvious existence signal was `title === null`, and it is wrong in both
+   * directions — which is what a review caught before this shipped. A spec
+   * asserted by a `// implements` comment has a null title AND real
+   * implementers; a phantom minted from a `[[ref]]` used to have a non-null
+   * title (its own id) and no document behind it. Answering "not in the graph"
+   * off a null title would have told a user their indexed spec did not exist,
+   * and answering "exists" off a non-null one would have vouched for a spec
+   * nobody ever wrote.
+   *
+   * `origin` is the field that actually knows: absent means absent, and the
+   * three present values say which route the id took.
+   */
+  origin: KnowledgeOrigin | null;
 }
 
 function toStringList(value: unknown): string[] {
@@ -140,11 +158,16 @@ export async function implementers(
   conn: GraphConnection,
   specId: string,
 ): Promise<ImplementersResult> {
-  const titleRows = await conn.query(`MATCH (s:Spec {id: $specId}) RETURN s.title AS title`, {
-    specId,
-  });
-  const rawTitle = titleRows[0]?.title;
+  const specRows = await conn.query(
+    `MATCH (s:Spec {id: $specId}) RETURN s.title AS title, s.origin AS origin`,
+    { specId },
+  );
+  const rawTitle = specRows[0]?.title;
   const title = rawTitle == null ? null : String(rawTitle);
+  // No row at all → not in the graph. A row with no origin is pre-R5 data,
+  // reported as `declared` since that is what every pre-R5 document node was.
+  const origin: KnowledgeOrigin | null =
+    specRows.length === 0 ? null : ((specRows[0]?.origin as KnowledgeOrigin | null) ?? "declared");
 
   const rows = await conn.query(
     `MATCH (s:Spec {id: $specId})<-[:IMPLEMENTS]-(m:Module)
@@ -157,7 +180,7 @@ export async function implementers(
     module: String(r.module),
     functions: toStringList(r.functions),
   }));
-  return { spec: specId, title, modules };
+  return { spec: specId, title, modules, origin };
 }
 
 export interface ImplementedSpec {
