@@ -73,7 +73,8 @@
  */
 
 import type { GraphConnection } from "./connection.js";
-import type { GraphEdge, GraphFragment, GraphNode } from "./types.js";
+import type { GraphEdge, GraphFragment, GraphNode, KnowledgeOrigin } from "./types.js";
+import { KNOWLEDGE_ORIGIN_RANK } from "./types.js";
 import type { RyuValue } from "ryugraph";
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -88,6 +89,31 @@ function assertSafeKey(key: string): void {
 interface ExistingProvenance {
   provider: unknown;
   confidence: unknown;
+  origin?: unknown;
+}
+
+/**
+ * Whether a write carrying `origin` may overwrite what is already there
+ * (XSPEC-373 R5).
+ *
+ * Knowledge nodes have no `provider`, so they bypass `shouldOverwrite`
+ * entirely and last-write-wins — which let a `[[ref]]` stub overwrite a real
+ * document's title depending on index order. Origin gives them their own
+ * precedence: a declared document outranks a code annotation, which outranks
+ * a bare link. Equal rank still writes (a re-index of the same document must
+ * update it).
+ *
+ * A row with no recorded origin (pre-migration data) is treated as the weakest
+ * thing there is, so the first write that knows its own provenance wins and
+ * heals the row. Ambiguity resolves toward being corrected, not toward being
+ * frozen.
+ */
+function originAllowsOverwrite(existingOrigin: unknown, newOrigin: unknown): boolean {
+  const rank = (o: unknown): number =>
+    typeof o === "string" && o in KNOWLEDGE_ORIGIN_RANK
+      ? KNOWLEDGE_ORIGIN_RANK[o as KnowledgeOrigin]
+      : 0;
+  return rank(newOrigin) >= rank(existingOrigin);
 }
 
 /**
@@ -157,6 +183,15 @@ async function mergeNode(conn: GraphConnection, node: GraphNode): Promise<void> 
   // See `preserveConfidence` below — SAGE owns `confidence` on an existing
   // node; an extractor's constant is a starting value, not an update.
   let preserveConfidence = false;
+  // Knowledge nodes carry `origin` instead of `provider` and get their own
+  // precedence (XSPEC-373 R5) — without it, last-write-wins let a `[[ref]]`
+  // stub overwrite a real document's title depending on index order.
+  if ("origin" in node.properties) {
+    const rows = await conn.query(`MATCH (n:${node.label} {id: $id}) RETURN n.origin AS origin`, {
+      id: node.id,
+    });
+    if (rows.length > 0) write = originAllowsOverwrite(rows[0]?.origin, node.properties.origin);
+  }
   if (hasProvenance) {
     const hasConfidence = "confidence" in node.properties;
     const existing = await readExistingNodeProvenance(conn, node.label, node.id, hasConfidence);

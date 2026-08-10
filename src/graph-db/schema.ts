@@ -23,9 +23,9 @@ export const NODE_TABLE_DDL: readonly string[] = [
   `CREATE NODE TABLE Function(id STRING, name STRING, file STRING, start_line INT64, confidence DOUBLE, provider STRING, PRIMARY KEY(id))`,
   `CREATE NODE TABLE Class(id STRING, name STRING, file STRING, provider STRING, PRIMARY KEY(id))`,
   `CREATE NODE TABLE Module(id STRING, path STRING, PRIMARY KEY(id))`,
-  `CREATE NODE TABLE Spec(id STRING, title STRING, status STRING, confidence DOUBLE, PRIMARY KEY(id))`,
-  `CREATE NODE TABLE Decision(id STRING, title STRING, date STRING, confidence DOUBLE, PRIMARY KEY(id))`,
-  `CREATE NODE TABLE Doc(id STRING, title STRING, status STRING, confidence DOUBLE, PRIMARY KEY(id))`,
+  `CREATE NODE TABLE Spec(id STRING, title STRING, status STRING, confidence DOUBLE, origin STRING, PRIMARY KEY(id))`,
+  `CREATE NODE TABLE Decision(id STRING, title STRING, date STRING, confidence DOUBLE, origin STRING, PRIMARY KEY(id))`,
+  `CREATE NODE TABLE Doc(id STRING, title STRING, status STRING, confidence DOUBLE, origin STRING, PRIMARY KEY(id))`,
 ];
 
 /** REL TABLE DDL statements. Must run after their endpoint NODE tables. */

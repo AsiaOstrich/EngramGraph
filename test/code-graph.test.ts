@@ -126,11 +126,15 @@ describe("CodeGraph extractor (Phase 2)", () => {
       to: "XSPEC-190", // X preserved (distinct namespace); AC-3 ignored
     });
 
-    // stub Spec node created so the edge target exists, with no properties so a
-    // later `index --docs` pass never has its title/status/confidence clobbered.
+    // Stub Spec node so the edge target exists. It carries `origin` and
+    // nothing else (XSPEC-373 R5): still no title/status/confidence for a
+    // later `index --docs` pass to have clobbered, but now it SAYS what it is
+    // — a spec asserted by code, not by a document. Origin also gives the
+    // writer a precedence rule, so a real document indexed afterwards wins
+    // regardless of order.
     const spec = nodes.find((n) => n.label === "Spec" && n.id === "XSPEC-190");
     expect(spec).toBeDefined();
-    expect(spec?.properties).toEqual({});
+    expect(spec?.properties).toEqual({ origin: "annotated" });
   });
 
   it("links a function-less file (OQ-3: module-level convention) and dedupes ids", () => {

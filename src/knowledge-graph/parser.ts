@@ -88,18 +88,32 @@ function makeNode(kind: KnowledgeNodeKind, id: string, title: string, fields: Re
     return {
       label: "Spec",
       id,
-      properties: { title, status: fields.status ?? "unknown", confidence: 1.0 },
+      properties: { title, status: fields.status ?? "unknown", confidence: 1.0, origin: "declared" },
     };
   }
   return {
     label: "Decision",
     id,
-    properties: { title, date: fields.date ?? "", confidence: 1.0 },
+    properties: { title, date: fields.date ?? "", confidence: 1.0, origin: "declared" },
   };
 }
 
+/**
+ * A node minted only because some other document linked to this id
+ * (XSPEC-373 R5).
+ *
+ * It used to be `makeNode(kind, id, id, {})` — the id echoed back as a title,
+ * plus `confidence: 1.0`. That made a phantom indistinguishable from a real
+ * document at a glance and, worse, actively wrong: `egr implementers SPEC-77`
+ * answered `— SPEC-77` with full confidence for a spec that was never written.
+ *
+ * It now asserts only what is actually known: this id was referenced. No
+ * title, because there is no document to take one from; no confidence,
+ * because nothing has been judged. `origin` keeps it from overwriting the real
+ * document if one is indexed later, in any order.
+ */
 function stubNode(kind: KnowledgeNodeKind, id: string): GraphNode {
-  return makeNode(kind, id, id, {});
+  return { label: kind === "Spec" ? "Spec" : "Decision", id, properties: { origin: "referenced" } };
 }
 
 /**

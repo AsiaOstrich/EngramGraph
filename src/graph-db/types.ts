@@ -110,3 +110,44 @@ export interface GraphFragment {
   nodes: GraphNode[];
   edges: GraphEdge[];
 }
+
+/**
+ * How a knowledge node's id got into the graph (XSPEC-373 R5).
+ *
+ * A Spec node can arrive three ways, and until now they were indistinguishable
+ * — same label, same `confidence: 1.0`, sometimes the same title:
+ *   - `declared`   — a real document was parsed and named it
+ *   - `annotated`  — code said `// implements <id>`; the code exists, the
+ *                    document may not
+ *   - `referenced` — some other document wrote `[[<id>]]`; nothing but a link
+ *                    asserts this id exists at all
+ *
+ * Deliberately NOT folded into `confidence`. That field already carries two
+ * meanings (SAGE's evolving score, and the tie-break in the provider overwrite
+ * policy), and encoding origin as a low confidence would make a stub
+ * permanently un-overwritable by the real document — the exact opposite of
+ * what is wanted. Origin is a fact about provenance, confidence is an
+ * evolving judgement; they are separate columns because they are separate
+ * things.
+ *
+ * Set by the indexer only. A caller cannot declare it, or it becomes the
+ * free-form annotation field this project has ruled out.
+ */
+export type KnowledgeOrigin = "declared" | "annotated" | "referenced";
+
+/**
+ * Overwrite precedence: a real document beats a code annotation, which beats a
+ * bare link (XSPEC-373 R5).
+ *
+ * This is what stops dev-platform's own multi-root index from corrupting
+ * itself. `index-all.sh` walks six roots into one DB; a `[[XSPEC-373]]` in any
+ * of them used to mint a stub whose `title` was the id string, and — since
+ * knowledge nodes carry no `provider` and so bypass the provider policy
+ * entirely — last write won. Whether a spec had its real title depended on
+ * directory ordering.
+ */
+export const KNOWLEDGE_ORIGIN_RANK: Record<KnowledgeOrigin, number> = {
+  declared: 3,
+  annotated: 2,
+  referenced: 1,
+};

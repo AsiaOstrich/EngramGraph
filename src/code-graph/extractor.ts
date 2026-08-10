@@ -435,7 +435,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   // IMPLEMENTS edge's target always exists, then the Module→Spec edge itself.
   const implementsEdges: GraphEdge[] = [];
   for (const specId of moduleSpecs) {
-    nodes.push({ label: "Spec", id: specId, properties: {} });
+    nodes.push({ label: "Spec", id: specId, properties: { origin: "annotated" } });
     implementsEdges.push({
       label: "IMPLEMENTS",
       fromLabel: "Module",
