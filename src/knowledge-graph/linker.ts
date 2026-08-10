@@ -105,16 +105,40 @@ export function classifyRef(ref: string): ClassifiedRef | null {
 }
 
 /**
+ * Markers that turn a comment into an implementation declaration.
+ *
+ * `implements` is this codebase's original convention (`// implements
+ * XSPEC-190`). The `@`-prefixed forms are the mainstream one — Javadoc, JSDoc
+ * and C# XML-doc all annotate with `@tag`, and a project declaring
+ * `// @SPEC SPEC-EXTERNAL-AUTH` was previously invisible no matter how the id
+ * pattern was widened, because this gate never fired (XSPEC-373 R4b).
+ *
+ * ## `\b` cannot be used uniformly here, and getting that wrong is silent
+ *
+ * The natural implementation of "make the keyword configurable" is
+ * `new RegExp("\\b" + marker + "\\b", "i")`. For `@SPEC` that regex can NEVER
+ * match: `\b` needs a word character on exactly one side, and both `@` and the
+ * space before it are non-word, so the boundary does not exist. It compiles,
+ * runs, and silently matches nothing — measured:
+ * `/\b@SPEC\b/i.test("// @SPEC SPEC-EXTERNAL-AUTH")` is `false`.
+ *
+ * So `@` supplies its own left boundary and only the right one is asserted.
+ * The trailing `\b` still matters: it keeps `@SPECIAL` and `@specification`
+ * from being read as `@SPEC`.
+ */
+const IMPLEMENTS_MARKER = /\bimplements\b|@implements\b|@spec\b/i;
+
+/**
  * Extract the canonical Spec ids a code comment declares it *implements*.
  *
- * Only fires when the comment actually contains the `implements` keyword (the
- * `// implements XSPEC-190` convention), so a casual `// see SPEC-123 for
- * rationale` never produces a spurious IMPLEMENTS edge. Returns only Spec-kind
- * ids (XSPEC/SPEC) — a file "implements" a spec, not a decision — and ignores
- * sub-references like `AC-3` (not an artifact prefix). Ids are de-duplicated.
+ * Only fires when the comment carries one of `IMPLEMENTS_MARKER`'s forms, so a
+ * casual `// see SPEC-123 for rationale` never produces a spurious IMPLEMENTS
+ * edge. Returns only Spec-kind ids (XSPEC/SPEC) — a file "implements" a spec,
+ * not a decision — and ignores sub-references like `AC-3` (not an artifact
+ * prefix). Ids are de-duplicated.
  */
 export function extractImplementsSpecs(comment: string): string[] {
-  if (!/\bimplements\b/i.test(comment)) return [];
+  if (!IMPLEMENTS_MARKER.test(comment)) return [];
   const ids = new Set<string>();
   for (const match of comment.matchAll(ID_RE_GLOBAL)) {
     const prefix = (match[1] ?? "").toUpperCase();
