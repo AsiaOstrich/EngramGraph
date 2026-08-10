@@ -12,6 +12,7 @@
  */
 
 import type { GraphConnection } from "../graph-db/connection.js";
+import { toPosixPath } from "./path-utils.js";
 
 export type CallDirection = "callers" | "callees" | "both";
 
@@ -165,27 +166,101 @@ export interface ImplementedSpec {
 }
 
 export interface ImplementedSpecsResult {
+  /** The module id actually queried — after resolution (see `resolvedFrom`). */
   module: string;
   specs: ImplementedSpec[];
+  /**
+   * Whether a Module with this id exists in the graph at all (XSPEC-373 B4).
+   *
+   * `specs: []` had two completely different meanings and no way to tell them
+   * apart: "this file is indexed and declares no spec" and "this file is not
+   * in the graph — wrong path, or never indexed". The outputs were
+   * byte-for-byte identical, so a mistyped or differently-rooted path looked
+   * exactly like an honest empty answer.
+   *
+   * Module nodes are only ever created by the extractor from a real file, so
+   * unlike Spec this needs no origin/provenance field to be trustworthy — a
+   * Module either was indexed or was not.
+   */
+  moduleFound: boolean;
+  /**
+   * Set when the caller's path did not match exactly but resolved to exactly
+   * one module by path suffix — e.g. an absolute path, or one typed from a
+   * subdirectory. Absent on an exact match.
+   */
+  resolvedFrom?: string;
+  /**
+   * Set when the caller's path matched several modules by suffix and was
+   * therefore NOT resolved. Ambiguity is reported, never silently picked.
+   */
+  ambiguousMatches?: string[];
+}
+
+/**
+ * Normalise a user-typed path toward the shape module ids use: POSIX
+ * separators, no `./`, no leading `/`.
+ *
+ * Applied HERE rather than at the CLI so both entry points get it — the MCP
+ * tool called `implementedSpecs` with the raw string and did not even apply
+ * `toPosixPath`, so the same query behaved differently depending on whether a
+ * human or an agent asked it (XSPEC-373 B4).
+ */
+function normalizeModulePath(p: string): string {
+  return toPosixPath(p).replace(/^\.\//, "").replace(/^\/+/, "");
 }
 
 /**
  * code → spec: specs a file (`moduleId` = its indexed path) declares it
  * implements.
+ *
+ * Module ids are repo-relative POSIX paths, but users type what they have: an
+ * absolute path from an editor, a `./`-prefixed one from tab completion, or a
+ * path relative to a subdirectory they happen to be standing in. All of those
+ * previously produced an empty result indistinguishable from a real one, so a
+ * path that merely does not match falls back to a unique suffix match, and a
+ * genuinely absent module now says so (XSPEC-373 B4).
  */
 export async function implementedSpecs(
   conn: GraphConnection,
   moduleId: string,
 ): Promise<ImplementedSpecsResult> {
+  const wanted = normalizeModulePath(moduleId);
+
+  const exists = async (id: string): Promise<boolean> =>
+    (await conn.query(`MATCH (m:Module {id: $id}) RETURN m.id AS id`, { id })).length > 0;
+
+  let resolved = wanted;
+  let resolvedFrom: string | undefined;
+  if (!(await exists(wanted))) {
+    // Both directions, because the mismatch runs both ways: a user pasting an
+    // ABSOLUTE path gives something longer than the id (`…/project/src/a.ts`
+    // vs `src/a.ts`), while a user typing a bare filename gives something
+    // shorter (`a.ts` vs `src/a.ts`). Comparison is on a path BOUNDARY, so
+    // `auth.ts` never matches `oauth.ts` — only whole trailing segments count.
+    const rows = await conn.query(`MATCH (m:Module) RETURN m.id AS id`);
+    const all = rows.map((r) => String(r.id));
+    const matches = all.filter(
+      (id) => id === wanted || id.endsWith(`/${wanted}`) || wanted.endsWith(`/${id}`),
+    );
+    if (matches.length === 1 && matches[0]) {
+      resolved = matches[0];
+      resolvedFrom = moduleId;
+    } else if (matches.length > 1) {
+      return { module: wanted, specs: [], moduleFound: false, ambiguousMatches: matches.sort() };
+    } else {
+      return { module: wanted, specs: [], moduleFound: false };
+    }
+  }
+
   const rows = await conn.query(
     `MATCH (m:Module {id: $moduleId})-[:IMPLEMENTS]->(s:Spec)
      RETURN s.id AS id, s.title AS title
      ORDER BY id`,
-    { moduleId },
+    { moduleId: resolved },
   );
   const specs = rows.map((r) => ({
     id: String(r.id),
     title: r.title == null ? null : String(r.title),
   }));
-  return { module: moduleId, specs };
+  return { module: resolved, specs, moduleFound: true, ...(resolvedFrom ? { resolvedFrom } : {}) };
 }

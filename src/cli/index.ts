@@ -444,7 +444,20 @@ async function main(): Promise<void> {
       const health = readIndexHealth(manifestPathForDb(resolveDbPath(loc)), [r.module]);
       out(r, values.json, (d) => {
         const res = d as Awaited<ReturnType<typeof cmdImplementedSpecs>>;
-        return `implemented-by(${res.module}):\n${res.specs.length ? res.specs.map((s) => `  ${s.id}${s.title ? ` — ${s.title}` : ""}`).join("\n") : "  (none)"}${healthNote(health)}`;
+        // Three outcomes that used to print the same `(none)` (XSPEC-373 B4):
+        // not in the graph, ambiguous, or indexed-but-declaring-nothing. The
+        // first sends you to check the path; the third sends you to the code.
+        if (res.ambiguousMatches?.length) {
+          return `implemented-by(${a1}):\n  ambiguous — ${res.ambiguousMatches.length} modules end with this path:\n${res.ambiguousMatches.map((m) => `    ${m}`).join("\n")}`;
+        }
+        if (!res.moduleFound) {
+          return `implemented-by(${a1}):\n  no module with this path is in the graph — check the path, or index the directory containing it${healthNote(health)}`;
+        }
+        const via = res.resolvedFrom ? ` (resolved from ${res.resolvedFrom})` : "";
+        const body = res.specs.length
+          ? res.specs.map((s) => `  ${s.id}${s.title ? ` — ${s.title}` : ""}`).join("\n")
+          : "  (none — this module is indexed but declares no spec)";
+        return `implemented-by(${res.module})${via}:\n${body}${healthNote(health)}`;
       });
       break;
     }
