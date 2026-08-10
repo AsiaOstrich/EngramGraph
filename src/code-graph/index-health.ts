@@ -50,7 +50,7 @@
  *    weakest coverage. Accepted; documented rather than hidden.
  */
 
-import { statSync } from "node:fs";
+import { statSync, existsSync } from "node:fs";
 
 import { allFiles, isHealthy, readManifest, type ParseManifest } from "./parse-manifest.js";
 
@@ -69,6 +69,14 @@ export interface IndexHealth {
    * no blindspot subtree (or no result files were provided).
    */
   possiblyIncomplete?: boolean;
+  /**
+   * Set when the health signal itself could not be produced — a manifest that
+   * exists but could not be read or parsed (XSPEC-373 B8). The counts above
+   * are meaningless in that case; the point is that a consumer can distinguish
+   * "no blindspots" from "we do not know whether there are blindspots", which
+   * previously rendered as the same empty string.
+   */
+  unavailable?: string;
   /**
    * The blindspot files in the touched subtrees, capped at 20. Present iff
    * possiblyIncomplete. See `blindspotsTotal` for the true count — this list
@@ -152,16 +160,43 @@ function readManifestCached(manifestPath: string): ParseManifest | null {
 
 /**
  * Convenience: read the manifest at `manifestPath` (if any) and compute health
- * for `resultFiles`. Returns `null` when no path is given, the manifest is
- * absent/malformed, or the graph is healthy. Wrapped so that ANY failure here
- * returns null rather than propagating — a broken health signal must never take
- * down the query it is annotating (the query already succeeded).
+ * for `resultFiles`. Wrapped so that ANY failure here returns rather than
+ * propagating — a broken health signal must never take down the query it is
+ * annotating (the query already succeeded).
+ *
+ * ## "Healthy" and "we could not tell" are no longer the same answer
+ *
+ * This used to return `null` for three unrelated situations — no manifest
+ * path, an unreadable/corrupt manifest, and a perfectly healthy graph — and
+ * `healthNote` renders `null` as the empty string. So a corrupted manifest
+ * produced output byte-for-byte identical to a clean bill of health
+ * (XSPEC-373 B8). The mechanism built to reveal incomplete results was itself
+ * unable to say that it had failed.
+ *
+ * A read failure now returns a health object carrying `unavailable`, so the
+ * caller can say "unknown" instead of implying "fine". A missing path still
+ * returns null: that is not a failure, it is a caller that never asked.
  */
 export function readIndexHealth(manifestPath: string | undefined, resultFiles: string[]): IndexHealth | null {
   if (!manifestPath) return null;
+  const unknown = (reason: string): IndexHealth => ({
+    filesIndexed: 0,
+    partial: 0,
+    failed: 0,
+    unavailable: reason,
+  });
   try {
-    return computeIndexHealth(readManifestCached(manifestPath), resultFiles);
-  } catch {
-    return null;
+    const manifest = readManifestCached(manifestPath);
+    // TWO layers of catch produced the same null: `readManifest` swallows a
+    // parse error, and `readManifestCached` swallows a stat failure. Absent and
+    // corrupt were therefore indistinguishable here — and one of them is
+    // normal (nothing indexed yet) while the other means the health signal is
+    // lying by omission. Existence separates them.
+    if (manifest === null && existsSync(manifestPath)) {
+      return unknown("manifest exists but could not be parsed");
+    }
+    return computeIndexHealth(manifest, resultFiles);
+  } catch (err) {
+    return unknown(err instanceof Error ? err.message : String(err));
   }
 }

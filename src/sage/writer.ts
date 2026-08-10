@@ -47,6 +47,23 @@ export const STEP = 0.25;
 export const MIN_CONFIDENCE = 0.1;
 export const MAX_CONFIDENCE = 1.0;
 
+/**
+ * Starting point for a node that has never carried a confidence at all
+ * (XSPEC-373 B2).
+ *
+ * `applyFeedback` used to fall back to MAX_CONFIDENCE, which reads "nothing
+ * has ever been judged" as "verified, top marks". That was mostly theoretical
+ * while every knowledge node was stamped 1.0 on creation — and then R5 stopped
+ * doing that for stub nodes, precisely because a spec asserted only by a
+ * `[[ref]]` has nothing behind it. Feeding one such node a single positive
+ * signal would have jumped it from unjudged to 1.0, i.e. a phantom outranking
+ * documents with real feedback history.
+ *
+ * Neutral, not zero: an unjudged node is not evidence of being wrong either,
+ * and MIN is reserved for something feedback has actively pushed down.
+ */
+export const NEUTRAL_CONFIDENCE = 0.5;
+
 export interface ConfidenceUpdate {
   nodeId: string;
   label: ConfidenceLabel;
@@ -81,7 +98,9 @@ export async function applyFeedback(
   );
   if (rows.length === 0) return null;
 
-  const before = Number(rows[0]?.confidence ?? MAX_CONFIDENCE);
+  // NEUTRAL, not MAX — see NEUTRAL_CONFIDENCE. A node with no confidence has
+  // not been judged well; it has not been judged at all.
+  const before = Number(rows[0]?.confidence ?? NEUTRAL_CONFIDENCE);
   const after = clamp(before + delta(event));
 
   await conn.query(`MATCH (n:${label} {id: $id}) SET n.confidence = $c`, {

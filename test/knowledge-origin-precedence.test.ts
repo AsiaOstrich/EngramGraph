@@ -8,6 +8,7 @@ import { initSchema } from "../src/graph-db/schema.js";
 import { writeFragment } from "../src/graph-db/writer.js";
 import { indexKnowledgeDocs } from "../src/knowledge-graph/parser.js";
 import { implementers } from "../src/code-graph/query.js";
+import { applyFeedback } from "../src/sage/writer.js";
 import type { GraphFragment } from "../src/graph-db/types.js";
 
 /**
@@ -129,6 +130,33 @@ describe("knowledge origin precedence (XSPEC-373 R5)", () => {
     await indexKnowledgeDocs(conn, realDoc("SPEC-1", "Second title"));
 
     expect((await readSpec("SPEC-1"))?.title).toBe("Second title");
+  });
+
+  it("feedback on a never-judged node starts neutral, not at full confidence", async () => {
+    // XSPEC-373 B2. `applyFeedback` fell back to MAX_CONFIDENCE for a node
+    // with no confidence, reading "never judged" as "verified, top marks".
+    // Harmless while every node was stamped 1.0 on creation — and then R5
+    // stopped doing that for stubs, which is what made this reachable.
+    await indexKnowledgeDocs(conn, linkingDoc("SPEC-2", "SPEC-900"));
+    expect((await readSpec("SPEC-900"))?.confidence).toBeNull();
+
+    const update = await applyFeedback(conn, { nodeId: "SPEC-900", signal: "positive", weight: 1 }, "Spec");
+
+    // 0.5 neutral + 0.25 step, not 1.0 + 0.25 clamped back to 1.0.
+    expect(update?.before).toBe(0.5);
+    expect(update?.after).toBe(0.75);
+  });
+
+  it("a phantom cannot outrank a document with real feedback history", async () => {
+    // The concrete consequence: one positive signal used to take an unwritten
+    // spec straight to the top of `egr top Spec`.
+    await indexKnowledgeDocs(conn, realDoc("SPEC-1", "Real"));
+    await indexKnowledgeDocs(conn, linkingDoc("SPEC-2", "SPEC-900"));
+    await applyFeedback(conn, { nodeId: "SPEC-900", signal: "positive", weight: 1 }, "Spec");
+
+    const real = await readSpec("SPEC-1");
+    const phantom = await readSpec("SPEC-900");
+    expect(phantom?.confidence).toBeLessThan(real?.confidence ?? 0);
   });
 
   it("implementers can now tell a phantom from a real spec", async () => {

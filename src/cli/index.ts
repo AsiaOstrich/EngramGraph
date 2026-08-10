@@ -112,6 +112,12 @@ const fmtNodes = (
  * is healthy or the result touches no blindspot subtree.
  */
 function healthNote(h: IndexHealth | null): string {
+  // A manifest that exists but cannot be read is NOT a clean bill of health
+  // (XSPEC-373 B8). Both used to render as "" — the mechanism for revealing
+  // incomplete results could not report its own failure.
+  if (h?.unavailable) {
+    return `\n⚠ index health unknown: the parse-health manifest could not be read (${h.unavailable}) — this result is unannotated, not verified`;
+  }
   if (!h?.possiblyIncomplete) return "";
   const n = h.blindspotsTotal ?? h.blindspots?.length ?? 0;
   return `\n⚠ possibly incomplete: ${n} file(s) near this result parsed partially/failed (see \`egr blindspots\`)`;
