@@ -154,10 +154,18 @@ async function mergeNode(conn: GraphConnection, node: GraphNode): Promise<void> 
   const hasProvenance = "provider" in node.properties;
 
   let write = true;
+  // See `preserveConfidence` below — SAGE owns `confidence` on an existing
+  // node; an extractor's constant is a starting value, not an update.
+  let preserveConfidence = false;
   if (hasProvenance) {
     const hasConfidence = "confidence" in node.properties;
     const existing = await readExistingNodeProvenance(conn, node.label, node.id, hasConfidence);
     write = shouldOverwrite(existing, node.properties.provider, node.properties.confidence);
+    preserveConfidence =
+      existing !== null &&
+      existing.provider === node.properties.provider &&
+      existing.confidence !== undefined &&
+      existing.confidence !== null;
   }
 
   if (!write) {
@@ -173,6 +181,20 @@ async function mergeNode(conn: GraphConnection, node: GraphNode): Promise<void> 
   const params: Record<string, RyuValue> = { id: node.id };
   const assignments: string[] = [];
   for (const key of keys) {
+    // `confidence` on an ALREADY-EXISTING node written by the SAME provider is
+    // not this write's to set (XSPEC-373 B1). `extractor.ts` stamps a constant
+    // `confidence: 1` on every parsed function, and its own comment calls that
+    // "only SAGE's *starting* value" — but a same-provider re-index is exactly
+    // the case `shouldOverwrite` waves through, so each ordinary `egr index`
+    // reset the evolution loop's accumulated signal to 1.0. Intent said
+    // starting value; the code wrote it every time.
+    //
+    // Scoped deliberately to the same-provider case. A DIFFERENT provider that
+    // cleared `shouldOverwrite` did so *by having strictly higher confidence*
+    // (XSPEC-333 R1) — that is a precision upgrade and must still land, so it
+    // is not preserved here. Every other property (name/file/start_line) is
+    // overwritten as before; only confidence changes owner.
+    if (key === "confidence" && preserveConfidence) continue;
     assertSafeKey(key);
     params[key] = node.properties[key] as RyuValue;
     assignments.push(`n.${key} = $${key}`);

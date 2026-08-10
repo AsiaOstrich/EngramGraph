@@ -64,14 +64,23 @@ describe("writer overwrite policy (XSPEC-333 R1)", () => {
     };
   }
 
-  it("same provider always overwrites, regardless of confidence delta", async () => {
+  it("same provider always overwrites, regardless of confidence delta — except confidence itself", async () => {
     await writeFragment(conn, functionFragment({ name: "v1", confidence: 0.9, provider: "tree-sitter" }));
     // Re-index by the same provider with a *lower* confidence must still win
     // — it's the authoritative source updating its own prior write.
     await writeFragment(conn, functionFragment({ name: "v2", confidence: 0.1, provider: "tree-sitter" }));
 
     const row = await readFunction("f1");
-    expect(row).toEqual({ name: "v2", confidence: 0.1, provider: "tree-sitter" });
+    // `name: v2` is what this case actually guards: a same-provider write wins
+    // WITHOUT needing higher confidence. That is unchanged.
+    //
+    // `confidence: 0.9` is the one exception, introduced by XSPEC-373 B1. On an
+    // existing node, confidence belongs to SAGE's evolution loop; an extractor
+    // only supplies a starting value (`extractor.ts`'s own comment says so).
+    // This assertion previously read 0.1 — it was pinning the defect: every
+    // ordinary `egr index` re-stamped `confidence: 1` and wiped all accumulated
+    // feedback. See test/sage-confidence-survives-reindex.test.ts.
+    expect(row).toEqual({ name: "v2", confidence: 0.9, provider: "tree-sitter" });
   });
 
   it("different provider with strictly higher confidence overwrites", async () => {
