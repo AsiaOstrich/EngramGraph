@@ -7,7 +7,8 @@
  *
  * `XSPEC-NNN` (dev-platform's cross-project specs) and `SPEC-NNN` (a
  * sub-project's local specs) are *distinct* id namespaces — the `X` prefix is
- * preserved, never normalised to `SPEC-NNN`.
+ * preserved, never normalised to `SPEC-NNN`. `XADR-NNN`/`ADR-NNN` are the same
+ * pairing for decisions.
  */
 
 import type { KnowledgeNodeKind } from "./types.js";
@@ -15,7 +16,18 @@ import type { KnowledgeNodeKind } from "./types.js";
 // `XSPEC` must precede `SPEC` in the alternation so `XSPEC-190` matches the
 // longer prefix first. `\b` still prevents matching `SPEC` mid-word (e.g.
 // `MYSPEC-5`), while allowing the `X` boundary in `XSPEC-190`.
-const PREFIX = "XSPEC|SPEC|DEC|ADR";
+/**
+ * Artifact prefixes, longest-first where one contains another.
+ *
+ * `XSPEC` must precede `SPEC` and `XADR` must precede `ADR`, because
+ * alternation is leftmost-wins: with `ADR` first, `XADR-001` would match the
+ * trailing `ADR-001` — except `\b` forbids a boundary inside `XADR`, so it
+ * would match NOTHING AT ALL. That is not hypothetical. dev-platform's three
+ * cross-project ADRs (`XADR-001`…`XADR-003`) were silently absent from its
+ * graph until `unresolvedIdClusters` named the prefix — the first real find
+ * that warning made, on the very repository that wrote it.
+ */
+const PREFIX = "XSPEC|SPEC|XADR|ADR|DEC";
 
 /**
  * The suffix after `PREFIX-`. Widened from `\d+` (XSPEC-373 R4a) so that

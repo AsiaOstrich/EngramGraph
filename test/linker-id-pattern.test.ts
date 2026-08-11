@@ -80,6 +80,25 @@ describe("artifact id pattern (XSPEC-373 R4a)", () => {
       expect(classifyRef(input)?.kind).toBe(kind);
     });
 
+    it.each([
+      ["XADR-001-license-isolation.md", "XADR-001", "Decision"],
+      ["XADR-003", "XADR-003", "Decision"],
+      ["ADR-009", "ADR-009", "Decision"],
+    ])("%s → %s (%s)", (input, id, kind) => {
+      // XADR must precede ADR in the alternation. With ADR first, `\b` forbids
+      // a boundary inside XADR, so `XADR-001` would match NOTHING — which is
+      // exactly what happened: dev-platform's three cross-project ADRs were
+      // silently absent from its own graph until the unresolved-prefix warning
+      // named them.
+      expect(classifyRef(input)?.id).toBe(id);
+      expect(classifyRef(input)?.kind).toBe(kind);
+    });
+
+    it("does not match a prefix that merely ends with a known one", () => {
+      expect(classifyRef("MYADR-1")).toBeNull();
+      expect(classifyRef("MYSPEC-1")).toBeNull();
+    });
+
     it("keeps XSPEC and SPEC in separate namespaces", () => {
       // XSPEC must win the alternation — never normalised to SPEC-190.
       expect(classifyRef("XSPEC-190")?.id).toBe("XSPEC-190");

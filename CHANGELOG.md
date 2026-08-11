@@ -4,6 +4,16 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] — 2026-08-11
+
+**`XADR-` matched nothing, and the warning added two releases ago is what found it.**
+
+### Fixed
+
+- **`XADR-NNN` ids are now recognised**, classified as decisions alongside `ADR-NNN` — the same pairing `XSPEC`/`SPEC` already had. Alternation is leftmost-wins, so `ADR` appearing first meant `XADR-001` could only match its trailing `ADR-001` — and `\b` forbids a word boundary inside `XADR`, so it matched *nothing at all*. Three cross-project ADRs had been silently absent from the graph that indexes them.
+
+  Found by `unresolvedIdClusters` (0.10.0), on the repository that wrote it: three upper-case files sharing a refused prefix is exactly the shape that trigger exists for, and this is its first real find.
+
 ## [0.11.0] — 2026-08-11
 
 **An agent could be told the answer might be incomplete, and had no way to ask what was missing.**
