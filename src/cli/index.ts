@@ -305,8 +305,36 @@ async function main(): Promise<void> {
     return;
   }
 
+  /**
+   * Commands that only read the graph (XSPEC-374).
+   *
+   * Opening read-only is what makes concurrent use safe, not faster: the
+   * engine is single-writer, and writer-vs-writer does not merely refuse the
+   * loser — it corrupts the database. A read-only open can be refused, and
+   * that is all it can do. Measured matrix in `GraphConnection.open`.
+   *
+   * Enumerated deliberately, and the DEFAULT IS WRITE: a command missing from
+   * this list opens for writing, which is merely conservative. Inverting it —
+   * defaulting to read-only with a list of writers — would mean a new writing
+   * command added later silently gets a read-only connection and fails at its
+   * first write, or worse, appears to work.
+   */
+  const READ_ONLY_COMMANDS = new Set([
+    "callers",
+    "callees",
+    "implementers",
+    "implemented-by",
+    "impact",
+    "top",
+    "god-nodes",
+    "communities",
+    "related",
+    "blindspots",
+    "signatures",
+  ]);
+
   // Data commands: open graph, run, print, exit.
-  const conn = await openGraph(loc);
+  const conn = await openGraph(loc, { readOnly: READ_ONLY_COMMANDS.has(cmd) });
   switch (cmd) {
     case "index": {
       if (!a1) throw new Error("index requires a <dir>");

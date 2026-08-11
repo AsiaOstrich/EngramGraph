@@ -17,7 +17,17 @@ import { createMcpServer } from "./server.js";
 export async function startMcpStdio(dbPath?: string): Promise<void> {
   const path = resolveDbPath(dbPath ?? {});
   process.stderr.write(`egr-mcp: graph ${path}\n`);
-  const conn = await openGraph(path);
+  // Read-only, deliberately (XSPEC-374). This server is long-lived: it holds
+  // the graph for as long as the editor is open. Held for WRITING, it made
+  // every `egr` command in a terminal fail — and worse, writer-vs-writer
+  // corrupts the database rather than refusing cleanly. Held for READING, any
+  // number of terminal queries work alongside it.
+  //
+  // The cost is that the three writing tools cannot run here; they say so
+  // (see `createMcpServer`) and point at the CLI. Querying is what an
+  // assistant needs a long-lived connection for; indexing is what the user
+  // and the freshness hooks already do.
+  const conn = await openGraph(path, { readOnly: true });
   // Parse-health manifest sibling (R2): lets code queries flag answers built
   // on partially-parsed files. Absent manifest → queries behave as pre-R2.
   const server = createMcpServer(conn, { manifestPath: manifestPathForDb(path) });

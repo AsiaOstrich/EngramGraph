@@ -28,7 +28,7 @@
  *   5. single default → `<cwd>/.engram/graph.db`
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { GraphConnection } from "./connection.js";
@@ -78,9 +78,26 @@ export function resolveDbPath(loc: string | GraphLocationOptions = {}): string {
 }
 
 /** Open (creating dirs) + schema-init (+ auto-migrate) a graph connection. */
-export async function openGraph(loc?: string | GraphLocationOptions): Promise<GraphConnection> {
+export async function openGraph(
+  loc?: string | GraphLocationOptions,
+  opts: { readOnly?: boolean } = {},
+): Promise<GraphConnection> {
   const path = resolveDbPath(loc ?? {});
   mkdirSync(dirname(path), { recursive: true });
+
+  // A read-only caller neither creates tables nor migrates columns: both are
+  // writes, and a query has no business doing either. It also cannot corrupt
+  // anything if refused — see `GraphConnection.open` for the measured
+  // concurrency matrix (XSPEC-374).
+  if (opts.readOnly === true) {
+    if (!existsSync(path)) {
+      throw new Error(
+        `No graph at ${path}. Read-only commands cannot create one — run \`egr index <dir>\` first.`,
+      );
+    }
+    return GraphConnection.open(path, { readOnly: true });
+  }
+
   const conn = GraphConnection.open(path);
   await initSchema(conn);
 

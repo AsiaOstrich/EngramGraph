@@ -22,16 +22,45 @@ export class GraphConnection {
   private readonly conn: Connection;
   private readonly dbFilePath: string;
   private closed = false;
+  private readonly readOnlyMode: boolean;
 
-  private constructor(dbPath: string) {
-    this.db = new Database(dbPath);
+  private constructor(dbPath: string, readOnly: boolean) {
+    // 4th positional arg is ryugraph's readOnly flag.
+    this.db = new Database(dbPath, undefined, undefined, readOnly);
     this.conn = new Connection(this.db);
     this.dbFilePath = dbPath;
+    this.readOnlyMode = readOnly;
   }
 
-  /** Open (or create) a graph database at `dbPath`. */
-  static open(dbPath: string): GraphConnection {
-    return new GraphConnection(dbPath);
+  /**
+   * Open (or create) a graph database at `dbPath`.
+   *
+   * ## Read-only is not an optimisation, it is what makes concurrency safe
+   *
+   * The engine is single-writer, and every `egr` invocation used to open for
+   * writing — even a pure query, because opening runs `initSchema`. Measured
+   * on a real graph:
+   *
+   *   writer + writer   → one wins, the rest are refused, AND THE GRAPH IS
+   *                       CORRUPTED (every later query fails with an
+   *                       unintelligible binder error)
+   *   reader + reader   → all succeed, graph intact
+   *   writer + reader   → the reader is refused with "Could not set lock on
+   *                       file", graph intact
+   *   reader + writer   → the writer is refused the same way, graph intact
+   *
+   * So the damage is specific to writer-vs-writer. A query opened read-only
+   * can be refused, but it cannot destroy anything — which is why every
+   * read-only command now says so, rather than taking a write lock it never
+   * needed (XSPEC-374).
+   */
+  static open(dbPath: string, opts: { readOnly?: boolean } = {}): GraphConnection {
+    return new GraphConnection(dbPath, opts.readOnly === true);
+  }
+
+  /** Whether this connection was opened read-only. */
+  get readOnly(): boolean {
+    return this.readOnlyMode;
   }
 
   /**

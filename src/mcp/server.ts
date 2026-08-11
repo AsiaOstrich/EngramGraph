@@ -50,6 +50,17 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
   const server = new McpServer({ name: "engramgraph", version: "0.1.0" });
   const manifestPath = opts.manifestPath;
 
+  /**
+   * Refusal for a tool that writes, on a read-only connection (XSPEC-374).
+   * Names the alternative rather than just the restriction.
+   */
+  const readOnlyRefusal = (tool: string, cliEquivalent: string) =>
+    fail(
+      `${tool} needs write access, and this MCP server holds the graph read-only so that queries here ` +
+        `and \`egr\` commands in a terminal can run at the same time. Run \`${cliEquivalent}\` instead; ` +
+        `this server sees the result on its next query.`,
+    );
+
   server.registerTool(
     "index_code",
     {
@@ -61,6 +72,7 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
       },
     },
     async ({ files }) => {
+      if (conn.readOnly) return readOnlyRefusal("index_code", "egr index <dir>");
       try {
         // The per-file `parseHealth` array is not returned in the tool result
         // (that stays the pre-R2 shape — health is surfaced on QUERY responses
@@ -99,6 +111,7 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
       },
     },
     async ({ docs }) => {
+      if (conn.readOnly) return readOnlyRefusal("index_docs", "egr index <dir> --docs");
       try {
         return ok(await indexKnowledgeDocs(conn, docs));
       } catch (e) {
@@ -176,6 +189,7 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
       },
     },
     async ({ nodeId, type, nodeLabel, weight }) => {
+      if (conn.readOnly) return readOnlyRefusal("ingest_feedback", "egr feedback <type> <node-id>");
       try {
         const mapped = feedbackForEventType(type);
         const update = await applyFeedback(

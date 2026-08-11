@@ -96,6 +96,35 @@ describe("MCP diagnostics tools (XSPEC-373 B6)", () => {
     expect(data.filesWithSignatures).toBe(1);
   });
 
+  it("a read-only server refuses the writing tools by name, and points at the CLI", async () => {
+    // XSPEC-374: the stdio server holds the graph read-only so terminal
+    // commands keep working alongside it. The three writing tools cannot run
+    // there — they must say so and name the alternative, not fail at some
+    // lower layer with a lock error the assistant cannot act on.
+    const conn = GraphConnection.open(join(dir, "ro.db"));
+    await initSchema(conn);
+    await conn.close();
+    const ro = GraphConnection.open(join(dir, "ro.db"), { readOnly: true });
+    const server = createMcpServer(ro);
+    const client = new Client({ name: "t", version: "0.0.0" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+
+    for (const [tool, args, cli] of [
+      ["index_code", { files: [] }, "egr index"],
+      ["index_docs", { docs: [] }, "egr index"],
+      ["ingest_feedback", { nodeId: "x", type: "test_pass" }, "egr feedback"],
+    ] as const) {
+      const res = (await client.callTool({ name: tool, arguments: args })) as {
+        content: Array<{ text: string }>;
+        isError?: boolean;
+      };
+      expect(res.isError).toBe(true);
+      expect(res.content[0]!.text).toContain(tool);
+      expect(res.content[0]!.text).toContain(cli);
+    }
+  });
+
   it("doctor answers without a manifest, and without opening the graph", async () => {
     // The case that matters: indexing itself is what is broken.
     const res = await call(withoutManifest, "doctor");

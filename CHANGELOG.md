@@ -4,6 +4,21 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-08-11
+
+**Two `egr` processes touching one graph did not refuse each other — they destroyed it.**
+
+Every command opened the graph for writing, even a pure query, because opening runs `initSchema`. The engine is single-writer, and writer-versus-writer is not a clean refusal: measured on a real graph, one process wins, the rest are refused, and the database is left answering `Trying to create a vector with ANY type` to everything afterwards. It is unrecoverable except by rebuilding, and the message says nothing about what happened.
+
+This was reachable in ordinary use. An editor's MCP server holds the graph for as long as the editor is open; a `post-commit` hook or a shell-startup freshness check indexes in the background; you run `egr` in a terminal. Any two of those overlapping was enough.
+
+### Changed
+
+- **Query commands open read-only** — `callers`, `callees`, `implementers`, `implemented-by`, `impact`, `top`, `god-nodes`, `communities`, `related`, `blindspots`, `signatures`. A read-only open can be refused; refusal is all it can do. Measured: five concurrent read-only opens all succeed and the graph is intact; a writer and a reader refuse each other cleanly with the graph intact; only writer-versus-writer corrupts.
+- **The MCP stdio server holds the graph read-only.** Held for writing, it made every terminal `egr` command fail for as long as the editor was open. Verified end-to-end: with the server running, `top`, `implementers`, `blindspots` and a full `egr index` all work.
+- **`index_code`, `index_docs` and `ingest_feedback` over MCP now refuse by name** and point at the CLI equivalent, rather than failing at a lower layer with a lock error an assistant cannot act on.
+- **Read-only `openGraph` neither creates nor migrates.** Both are writes. A missing graph now says so and names `egr index`, instead of silently producing an empty one.
+
 ## [0.11.1] — 2026-08-11
 
 **`XADR-` matched nothing, and the warning added two releases ago is what found it.**
