@@ -4,6 +4,37 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-08-11
+
+**A user's 44 specs were dropped without a word, and every empty answer this tool gave looked exactly like every other one.**
+
+`egr index . --docs --clean` printed `knowledge: 0 specs`. The specs were named `SPEC-EXTERNAL-AUTH`, `SPEC-LOGIN` — semantically, not numbered — and the id pattern required digits, so every document was discarded before becoming a node. No error, no count, nothing to distinguish "44 documents we could not name" from "this repo has no specs". Nine ADRs came through, because they happened to be numbered. Finding the cause took a long bisect.
+
+Underneath it was the same shape in a dozen places: `(none)` meant four different things, a symlinked directory vanished from the file count *and* from the denominator so `blindspots` reported all-clear over it, and a corrupted parse-health manifest rendered identically to a clean bill of health. This release is mostly about making those answers different from each other.
+
+### Added
+
+- **Semantic spec ids.** `SPEC-EXTERNAL-AUTH`, `DEC-BOUNDARY` and similar are now recognised alongside numeric ones. Numeric ids are matched **first and stop at their digits**, so `XSPEC-373-index-result.md` still resolves to `XSPEC-373` and does not swallow the description — existing repos are unaffected.
+- **`@SPEC` and `@implements` as implementation markers**, alongside the original `implements`. `@tag` is the Javadoc/JSDoc/XML-doc convention, and no widening of the id pattern helped while this gate only accepted one bare word.
+- **A denominator on the knowledge summary** — `(45 doc(s) scanned, 44 unnamed)`. When a prefix is refused repeatedly, it is named with samples: a convention this tool does not know, as opposed to a README, which is simply not a spec.
+- **`origin` on Spec/Decision/Doc nodes** — `declared`, `annotated` or `referenced`. A spec asserted only by a `[[ref]]` is no longer indistinguishable from one somebody wrote, and a real document now wins over a stub **in any index order** (it previously depended on which directory was walked last).
+- **Skipped and unreadable inputs are reported**: directory symlinks are named and stated to be outside every count, and a file that cannot be read is recorded instead of aborting the whole index.
+
+### Changed
+
+- **`implementers` answers four situations differently**: the id is not in the graph; it exists only because something linked to it; it is known from code but its document was never indexed; or it is real and nobody implements it. Each sends you somewhere different.
+- **`implemented-by` accepts the path you have** — absolute, `./`-prefixed, Windows-separated, or a bare filename resolved by unique suffix — and distinguishes "indexed, declares nothing" from "not in the graph". An ambiguous path reports the ambiguity rather than guessing.
+- **Index health says when it cannot tell.** An unreadable manifest now prints `index health unknown … this result is unannotated, not verified` instead of the empty string it shared with a healthy graph.
+- **`egr top <label>` validates its argument**, case-insensitively, instead of passing it to the database and surfacing a binder exception.
+
+### Fixed
+
+- **Every ordinary `egr index` reset SAGE's accumulated confidence to 1.0.** The extractor re-stamped its starting value on each run, and a same-provider write was unconditionally allowed to overwrite. No rename or migration needed — just re-indexing an unchanged file.
+- **A directory symlink was neither walked nor recorded**, so its files were missing from the graph *and* from the file count; `egr blindspots` then reported everything it could see as clean, which it was.
+- **A document could take its id from any prose inside it**, or from a directory above it. Resolution is now front-matter → filename → first heading, in that order, trying each until one classifies.
+- **Feedback on a node that had never been judged started from maximum confidence** rather than neutral.
+- **Comment capture is now asserted per grammar** rather than trusting one shared list of node-type names — the list had silently swallowed Dart's `///` once before.
+
 ## [0.9.1] — 2026-08-04
 
 **The 0.9.0 install notices reached nobody, and the release gate that found that out had itself only just started working.**
