@@ -298,24 +298,58 @@ export interface UnresolvedCluster {
  * cluster of 44, which is a naming convention this tool does not recognise.
  * Zero is a quantity; consistency is evidence of intent.
  *
- * Numeric leading tokens are excluded, so date-stamped notes
+ * ## Why the prefix must be UPPER CASE
+ *
+ * The first version clustered on any leading token, and on a real repository
+ * that produced THIRTY-ONE warnings in one run: `language-options.md`,
+ * `bdd-workflow.md`, `testing-pyramid.md`, `git-workflow.md` — a skills
+ * library whose files are named topic-first. They share a prefix for the same
+ * reason any documentation set does, and none of them was ever meant to be a
+ * spec. The signal drowned in its own output, which is precisely the warning
+ * fatigue this trigger was designed to avoid; the fixture that "proved" it
+ * worked used `REQ-001.md`, an id shape, so the assumption was never tested
+ * against prose filenames.
+ *
+ * Artifact id conventions are almost universally upper case — SPEC, ADR, RFC,
+ * REQ, STORY, EPIC. Topic naming is lower case. Requiring upper case takes the
+ * same repository from 31 warnings to one.
+ *
+ * The trade-off is on the record: a project naming specs `Spec-Login.md`
+ * (capitalised, not upper) gets no warning. Under-reporting is the right
+ * failure here — one missed hint costs a search, thirty-one spurious ones cost
+ * the reader's attention permanently.
+ *
+ * Numeric leading tokens are excluded too, so date-stamped notes
  * (`2026-08-10-meeting.md`) never form a cluster.
  */
+/** At most this many clusters are reported; see `unresolvedIdClusters`. */
+const MAX_CLUSTERS_REPORTED = 3;
+
 export function unresolvedIdClusters(unresolved: readonly string[], minCount = 3): UnresolvedCluster[] {
   const byPrefix = new Map<string, string[]>();
   for (const ref of unresolved) {
     const name = lastSegment(ref);
-    const m = /^([A-Za-z][A-Za-z0-9_]*)-/.exec(name);
+    // No `i` flag: the prefix must be upper case in the FILENAME ITSELF.
+    const m = /^([A-Z][A-Z0-9_]*)-/.exec(name);
     if (!m?.[1]) continue;
-    const prefix = m[1].toUpperCase();
-    const files = byPrefix.get(prefix) ?? [];
+    const files = byPrefix.get(m[1]) ?? [];
     files.push(name);
-    byPrefix.set(prefix, files);
+    byPrefix.set(m[1], files);
   }
   return [...byPrefix.entries()]
     .filter(([, files]) => files.length >= minCount)
-    .map(([prefix, files]) => ({ prefix, count: files.length, samples: files.slice(0, 3) }))
-    .sort((a, b) => b.count - a.count || a.prefix.localeCompare(b.prefix));
+    .map(([prefix, files]) => ({
+      prefix,
+      count: files.length,
+      // De-duplicated: the same filename under several directories is one
+      // piece of information, not three. A run of this reported
+      // "create-methodology.md, create-methodology.md, create-methodology.md".
+      samples: [...new Set(files)].slice(0, 3),
+    }))
+    .sort((a, b) => b.count - a.count || a.prefix.localeCompare(b.prefix))
+    // Capped, and by size — a reader acts on the biggest one. Thirty-one
+    // warnings is not thirty-one times as useful as three.
+    .slice(0, MAX_CLUSTERS_REPORTED);
 }
 
 /** Ingest spec/decision docs and write them to the graph. */

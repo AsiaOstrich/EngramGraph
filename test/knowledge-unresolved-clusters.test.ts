@@ -76,6 +76,41 @@ describe("unresolved document accounting (XSPEC-373 R1)", () => {
       expect(clusters).toEqual([{ prefix: "REQ", count: 3, samples: ["REQ-001.md", "REQ-002.md", "REQ-003.md"] }]);
     });
 
+    it("ignores lower-case topic naming — the 31-warning regression", () => {
+      // A real run produced THIRTY-ONE warnings against a skills library whose
+      // files are named topic-first. They share prefixes for the same reason
+      // any documentation set does, and none was ever meant to be a spec.
+      const skillsLibrary = [
+        ...Array.from({ length: 15 }, (_, i) => `docs/language-${i}.md`),
+        ...Array.from({ length: 13 }, (_, i) => `docs/requirement-${i}.md`),
+        ...Array.from({ length: 10 }, (_, i) => `skills/bdd-${i}.md`),
+        ...Array.from({ length: 10 }, (_, i) => `skills/testing-${i}.md`),
+        ...Array.from({ length: 5 }, (_, i) => `docs/git-workflow-${i}.md`),
+      ];
+      expect(unresolvedIdClusters(skillsLibrary)).toEqual([]);
+    });
+
+    it("still catches an upper-case id convention in the same tree", () => {
+      // The point is not to go quiet — it is to go quiet about prose.
+      const mixed = [
+        ...Array.from({ length: 10 }, (_, i) => `skills/bdd-${i}.md`),
+        ...Array.from({ length: 4 }, (_, i) => `specs/REQ-00${i}.md`),
+      ];
+      expect(unresolvedIdClusters(mixed).map((c) => [c.prefix, c.count])).toEqual([["REQ", 4]]);
+    });
+
+    it("de-duplicates samples — the same filename in three directories is one fact", () => {
+      const sameName = Array.from({ length: 8 }, (_, i) => `skills/${i}/CREATE-methodology.md`);
+      expect(unresolvedIdClusters(sameName)[0]?.samples).toEqual(["CREATE-methodology.md"]);
+    });
+
+    it("caps the number of clusters reported", () => {
+      const many = ["AA", "BB", "CC", "DD", "EE"].flatMap((p) =>
+        Array.from({ length: 3 }, (_, i) => `${p}-${i}.md`),
+      );
+      expect(unresolvedIdClusters(many)).toHaveLength(3);
+    });
+
     it("stays silent on an ordinary repo's non-spec documents", () => {
       // The trigger this replaces ("unresolved > 0") fired on EngramGraph's own
       // tree: 25 markdown files, zero specs, nothing wrong.
