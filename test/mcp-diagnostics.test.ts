@@ -98,11 +98,20 @@ describe("MCP diagnostics tools (XSPEC-373 B6)", () => {
 
   it("a read-only server refuses the writing tools by name, and points at the CLI", async () => {
     // XSPEC-374: the stdio server holds the graph read-only so terminal
-    // commands keep working alongside it. The three writing tools cannot run
-    // there — they must say so and name the alternative, not fail at some
-    // lower layer with a lock error the assistant cannot act on.
+    // commands keep working alongside it. The writing tools cannot run there —
+    // they must say so and name the alternative, not fail at some lower layer
+    // with a lock error the assistant cannot act on.
+    //
+    // `related` joined this list after shipping in the read-only set by
+    // mistake. It reads in the sense that matters to a caller and writes in the
+    // sense that matters to the engine: ranking installs the algo extension and
+    // builds a projected graph. It looked fine under test because it returns
+    // early on an unknown seed id, so the write was never reached — hence the
+    // case below passes a seed that EXISTS.
     const conn = GraphConnection.open(join(dir, "ro.db"));
     await initSchema(conn);
+    // A real node, so `related` reaches its write path instead of returning [].
+    await conn.query(`CREATE (s:Spec {id: 'SPEC-1', title: 'Real', confidence: 0.9})`);
     await conn.close();
     const ro = GraphConnection.open(join(dir, "ro.db"), { readOnly: true });
     const server = createMcpServer(ro);
@@ -114,6 +123,7 @@ describe("MCP diagnostics tools (XSPEC-373 B6)", () => {
       ["index_code", { files: [] }, "egr index"],
       ["index_docs", { docs: [] }, "egr index"],
       ["ingest_feedback", { nodeId: "x", type: "test_pass" }, "egr feedback"],
+      ["related", { seedId: "SPEC-1" }, "egr related"],
     ] as const) {
       const res = (await client.callTool({ name: tool, arguments: args })) as {
         content: Array<{ text: string }>;

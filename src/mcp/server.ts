@@ -261,6 +261,16 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
     },
     async ({ seedId, depth, limit }) => {
       try {
+        // `related` READS in the sense that matters to a caller and WRITES in
+        // the sense that matters to the engine: ranking requires installing the
+        // algo extension and building a projected graph. Both are writes, so it
+        // cannot run here (XSPEC-374).
+        //
+        // The refusal has to come before the call, not after, because the
+        // engine's own error arrives only when the seed exists — `related`
+        // returns early on an unknown id, so without this an agent would see
+        // this tool work on ids that are absent and fail on ids that are there.
+        if (conn.readOnly) return readOnlyRefusal("related", `egr related <seed-id>`);
         return ok(await related(conn, seedId, depth ?? 2, limit ?? 10));
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));

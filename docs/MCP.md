@@ -61,13 +61,37 @@ the command/args/env are the same:
 | `ingest_feedback` | `nodeId`, `type`, `nodeLabel?` (`Function`\|`Spec`\|`Decision`\|`Doc`), `weight?` | Evolve a node's SAGE confidence from a feedback event (`test_fail`/`test_pass`/`human_fix`). |
 | `implementers` | `specId` | Files declaring `// implements <specId>` and the functions they define. "Which code implements this spec?" Reads `IMPLEMENTS(Module→Spec)` + `DEFINES`. |
 | `implemented_specs` | `moduleId` | Specs a file declares it implements. "Which spec governs this code?" `moduleId` is the file's indexed path. Reads `IMPLEMENTS(Module→Spec)`. |
-| `related` | `seedId`, `depth?`, `limit?` | Structurally important nodes around a seed id (seeded PageRank over all edge types, crosses `Function`/`Spec`/`Module`/`Decision`). "What's connected to X?" |
+| `related` | `seedId`, `depth?`, `limit?` | Structurally important nodes around a seed id (seeded PageRank over all edge types, crosses `Function`/`Spec`/`Module`/`Decision`). "What's connected to X?" **Refused over stdio** — see below. |
 | `blindspots` | — | Files that parsed partially or failed, from the parse-health manifest — where the graph may be missing nodes/edges. Use after a query reports `indexHealth.possiblyIncomplete` to find out WHAT is missing. `manifestPresent` distinguishes "nothing wrong" from "never measured". |
 | `signatures` | — | The same files grouped by root cause instead of listed individually — turns "584 files" into "1 problem". Use when `blindspots` returns a long list. |
 | `doctor` | — | Which languages are available and why any are not, what was compiled on this machine, which commands need network. Does not open the graph, so it answers when indexing itself is what is broken. |
 
 Every tool returns a text content block of JSON; on failure it returns
 `error: <message>` with `isError: true`.
+
+### Tools refused over stdio, and why
+
+The stdio server holds the graph **read-only**. The engine is single-writer,
+and the server is long-lived — it is open for as long as your editor is. If it
+held a write handle, every `egr` command you ran in a terminal meanwhile would
+contend with it, and two writers on this engine do not merely refuse the loser:
+they corrupt the database.
+
+So four tools are refused here, each naming the command that does the job:
+
+| Tool | Run instead |
+|------|-------------|
+| `index_code` | `egr index <dir>` |
+| `index_docs` | `egr index <dir> --docs` |
+| `ingest_feedback` | `egr feedback <type> <node-id>` |
+| `related` | `egr related <seed-id>` |
+
+The server sees the result on its next query — no restart needed.
+
+`related` is the surprising one: it *reads*, from a caller's point of view. But
+ranking requires installing the algo extension and building a projected graph,
+and both are writes. It is listed here rather than removed because the
+capability is real; only this transport cannot provide it.
 
 ## Example assistant flow
 
