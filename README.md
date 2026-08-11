@@ -371,6 +371,21 @@ example flow: **[docs/MCP.md](./docs/MCP.md)**.
 `SUPERSEDES`, `RELATES`, `REFERENCES`. See **[docs/API.md](./docs/API.md)** for the
 full DDL and the front-matter schema that drives knowledge ingestion.
 
+## What EngramGraph does not store
+
+The graph is a derived artifact. `rm -rf .engram/graph.db && egr index` must
+rebuild it losslessly — that is the line. Anything whose only copy would live
+inside the graph does not belong there.
+
+So EngramGraph does not store personal experience, environment or machine
+state, or facts about people. There is no free-form note field and there will
+not be one. Those things are real and worth keeping — they just belong in the
+notes you write by hand, which EngramGraph is meant to sit alongside rather
+than replace.
+
+What it does store is what a parser can rederive from your repository: code
+structure, and the spec/decision documents your repository already contains.
+
 ## Status
 
 - [x] **Phase 1** — scaffold (MIT, Node 22, ESM+CJS, tsup, vitest), Kuzu

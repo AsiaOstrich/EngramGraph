@@ -292,6 +292,18 @@ claude mcp add egr -- npx egr-mcp
 8 个关系表——`CALLS`、`IMPORTS`、`DEFINES`、`IMPLEMENTS`、`IMPACTS`、`SUPERSEDES`、
 `RELATES`、`REFERENCES`。完整 DDL 与驱动知识导入的 front-matter schema 见 **[docs/API.md](./docs/API.md)**。
 
+## EngramGraph 不存储什么
+
+图是**推导出来的产物**。`rm -rf .engram/graph.db && egr index` 必须能无损重建
+它——这就是那条界线。任何「唯一副本只存在于图里」的东西，都不属于这里。
+
+因此 EngramGraph 不存储个人经验、环境或机器状态，也不存储关于人的事实。这里
+没有 free-form 备注字段，将来也不会有。那些东西是真实且值得保存的——它们只是
+属于你手写的笔记，而 EngramGraph 的定位是与那些笔记**并存**，不是取代它们。
+
+它存储的，是解析器能从你的 repository 重新推导出来的东西：代码结构，以及你的
+repository 里已经存在的 spec／decision 文档。
+
 ## 状态
 
 - [x] **Phase 1** — 骨架（MIT、Node 22、ESM+CJS、tsup、vitest）、Kuzu 抽象 +
