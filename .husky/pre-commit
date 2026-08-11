@@ -1,3 +1,10 @@
+# Typecheck before tests: vitest runs the code, it does not type it, so a type
+# error passes here and fails in CI minutes later. That happened on
+# 0.12.0-rc.1 — a `spawnSync` option that does not exist in SpawnSyncOptions
+# sailed through a green 788-test run because the last local typecheck predated
+# the file. Costs a few seconds.
+npm run typecheck
+
 npm test
 
 # UDS Standard Check

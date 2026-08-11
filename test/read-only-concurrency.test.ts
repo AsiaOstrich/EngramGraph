@@ -73,7 +73,10 @@ describe("read-only opens (XSPEC-374)", () => {
          new Connection(db);
          setTimeout(()=>{},1500);`,
       ],
-      { detached: true, stdio: "ignore", timeout: 8000 },
+      // No `detached` — spawnSync is synchronous, so it never meant anything;
+      // it is also not in SpawnSyncOptions, which CI's typecheck caught and the
+      // local run did not, because the last typecheck predated this file.
+      { stdio: "ignore", timeout: 8000 },
     );
     expect(holder.error).toBeUndefined();
 
