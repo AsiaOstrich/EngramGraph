@@ -4,6 +4,18 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] — 2026-08-11
+
+**Both fixes here are for damage 0.10.0 did, and both were found by the person it was released for.**
+
+### Fixed
+
+- **`egr` was unusable on Windows for anyone with an existing graph.** 0.10.0 adds a column to three tables, so the first open migrates — and the migration backed up the database file while the engine still held it open, failing with `EBUSY: resource busy or locked, read` and leaving zero-byte backups. `backup.ts` had already switched to `openSync` for Windows share flags after an earlier `EBUSY … copyfile` report; that was necessary and insufficient, because share flags decide who may *open* a file and do not defeat a byte-range lock the engine holds. The migration now closes the connection before copying and reopens afterwards. If the backup fails for any other reason, the message names the database, the pending columns, the cause, and two ways out — instead of five words.
+
+- **The warning built to prevent noise emitted thirty-one lines of it.** The unresolved-prefix warning fired against a skills library whose files are named topic-first (`language-options.md`, `bdd-workflow.md`, `testing-pyramid.md`) — none meant to be a spec, and the specs it exists to find were already indexed correctly. Artifact id conventions are near-universally upper case; topic naming is lower case. Matching the prefix case-sensitively took that repository from 31 warnings to 2, both of them real. Samples are de-duplicated (one run reported the same filename three times, being three directories deep), and at most three clusters are reported.
+
+  Trade-off on the record: a project naming specs `Spec-Login.md` now gets no hint. Under-reporting is the right failure — one missed hint costs a search, thirty-one spurious ones cost the reader's attention permanently, including for the warning that would have mattered.
+
 ## [0.10.0] — 2026-08-11
 
 **A user's 44 specs were dropped without a word, and every empty answer this tool gave looked exactly like every other one.**
