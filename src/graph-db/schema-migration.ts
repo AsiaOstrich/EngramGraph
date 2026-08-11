@@ -216,6 +216,13 @@ export interface ColumnMigration {
 export interface SchemaMigrationReport {
   /** Every column added this call, in the order the ALTERs were issued. Empty when the schema was already current. */
   readonly migrated: readonly ColumnMigration[];
+  /**
+   * The connection to use from here on. Usually the one passed in — but when a
+   * `reopen` factory is supplied it is a NEW connection, because the backup
+   * requires closing the old one first (XSPEC-373 follow-up; see
+   * `migrateSchemaColumns`).
+   */
+  conn: GraphConnection;
   /** Path of the pre-migration backup, or `null` when nothing was migrated (no backup was needed). */
   readonly backupPath: string | null;
 }
@@ -532,9 +539,9 @@ function pendingSignatureFile(backupPath: string): string {
  * assumption has been violated and altering table schema without a safety
  * net is exactly the risk this module exists to avoid.
  */
-function ensureBackup(conn: GraphConnection, pending: readonly ColumnMigration[]): string {
+function ensureBackup(dbPath: string, pending: readonly ColumnMigration[]): string {
   const currentSig = pendingSignature(pending);
-  const basePath = `${conn.path}.pre-migration-backup`;
+  const basePath = `${dbPath}.pre-migration-backup`;
   const sigFile = pendingSignatureFile(basePath);
 
   if (existsSync(basePath) && existsSync(sigFile)) {
@@ -549,10 +556,10 @@ function ensureBackup(conn: GraphConnection, pending: readonly ColumnMigration[]
     }
   }
 
-  const backupPath = backupDbFile(conn.path);
+  const backupPath = backupDbFile(dbPath);
   if (backupPath === null) {
     throw new Error(
-      `migrateSchemaColumns: detected ${pending.length} pending column migration(s) on "${conn.path}" but the DB file does not exist on disk to back up — refusing to ALTER TABLE without a safety net. This should not be reachable in practice (a pending migration implies the table already has data, which implies the file already exists); if you're seeing this, something about that assumption doesn't hold for this connection.`,
+      `migrateSchemaColumns: detected ${pending.length} pending column migration(s) on "${dbPath}" but the DB file does not exist on disk to back up — refusing to ALTER TABLE without a safety net. This should not be reachable in practice (a pending migration implies the table already has data, which implies the file already exists); if you're seeing this, something about that assumption doesn't hold for this connection.`,
     );
   }
   writeFileSync(pendingSignatureFile(backupPath), `${currentSig.join("\n")}\n`, "utf8");
@@ -575,12 +582,16 @@ function ensureBackup(conn: GraphConnection, pending: readonly ColumnMigration[]
  * `KNOWN_HISTORICAL_PROVIDER_BACKFILL` targets), zero writes, zero
  * checkpoint, zero backup.
  */
-export async function migrateSchemaColumns(conn: GraphConnection): Promise<SchemaMigrationReport> {
+export async function migrateSchemaColumns(
+  conn: GraphConnection,
+  reopen?: () => GraphConnection,
+): Promise<SchemaMigrationReport> {
   const pendingInternal = await detectPendingColumnMigrationsInternal(conn);
   if (pendingInternal.length === 0) {
-    return { migrated: [], backupPath: null };
+    return { migrated: [], backupPath: null, conn };
   }
   const pending: ColumnMigration[] = pendingInternal.map(({ table, column, type }) => ({ table, column, type }));
+  const dbPath = conn.path;
 
   // Flush the WAL into the main file first so the backup below is a
   // fully-consistent snapshot, not one that might depend on WAL entries not
@@ -588,7 +599,56 @@ export async function migrateSchemaColumns(conn: GraphConnection): Promise<Schem
   // `.wal` sidecar and leaves data queryable — see this module's doc).
   await conn.execute("CHECKPOINT");
 
-  const backupPath = ensureBackup(conn, pending);
+  // ## Why the connection is closed before the backup (Windows)
+  //
+  // The backup reads the database file while it is open. `backup.ts` already
+  // switched from `copyFileSync` to `openSync` so Windows would grant the
+  // read a share mode — that fixed `EBUSY … copyfile` for a 0.7.0 → 0.8.0
+  // upgrader. It was not enough: a user upgrading to 0.10.0 (which adds
+  // `origin` to three tables, so every existing graph migrates) hit
+  // `EBUSY … resource busy or locked, read` instead, with two zero-byte
+  // backup files on disk — the destination was created, then the very first
+  // `readSync` failed. Killing every other node process changed nothing, so
+  // the handle holding the lock was this process's own.
+  //
+  // Share flags govern who may OPEN a file; they do not defeat a byte-range
+  // lock the database engine itself holds. POSIX has no equivalent, which is
+  // why no amount of testing here would have found it — and why the fix is to
+  // stop reading the file while it is open at all, rather than to look for a
+  // cleverer way to read it.
+  //
+  // `reopen` is optional so a caller that owns the connection object (tests,
+  // direct API users) keeps the old single-connection behaviour; `openGraph`
+  // supplies it because it owns the connection's lifetime and can hand the
+  // replacement back to its own caller.
+  let active = conn;
+  if (reopen) {
+    await conn.close();
+  }
+  let backupPath: string;
+  try {
+    backupPath = ensureBackup(dbPath, pending);
+  } catch (err) {
+    // A bare `EBUSY: resource busy or locked, read` told the one user who hit
+    // this nothing: not that a schema migration was in progress, not that the
+    // failing step was a safety backup, not what to do next. Whatever the
+    // cause, the message has to carry all three.
+    const cols = pending.map((m) => `${m.table}.${m.column}`).join(", ");
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `egr could not back up the graph database before migrating its schema, so it stopped rather than ` +
+        `alter the file without a safety net.\n` +
+        `  database: ${dbPath}\n` +
+        `  pending:  ${cols}\n` +
+        `  cause:    ${detail}\n` +
+        `On Windows this is usually another process holding the graph open — most often an editor's MCP ` +
+        `server (\`egr mcp\`). Close it and retry. If nothing else is using it, delete the .engram directory ` +
+        `and re-index: the graph is derived from your repository, so rebuilding costs only the index time.`,
+    );
+  }
+  if (reopen) {
+    active = reopen();
+  }
 
   for (const { table, column, type, needsAlter } of pendingInternal) {
     // Only issue the `ALTER TABLE ... ADD IF NOT EXISTS` when the column is
@@ -599,14 +659,14 @@ export async function migrateSchemaColumns(conn: GraphConnection): Promise<Schem
     // column that's already there: the backfill below is what actually does
     // the work in that case.
     if (needsAlter) {
-      await conn.execute(`ALTER TABLE ${table} ADD IF NOT EXISTS ${column} ${type} DEFAULT NULL`);
+      await active.execute(`ALTER TABLE ${table} ADD IF NOT EXISTS ${column} ${type} DEFAULT NULL`);
     }
 
     const backfill = KNOWN_HISTORICAL_PROVIDER_BACKFILL.get(`${table}.${column}`);
     if (backfill !== undefined) {
-      await conn.execute(backfill.apply);
+      await active.execute(backfill.apply);
     }
   }
 
-  return { migrated: pending, backupPath };
+  return { migrated: pending, backupPath, conn: active };
 }

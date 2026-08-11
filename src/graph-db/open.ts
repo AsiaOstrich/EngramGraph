@@ -84,7 +84,13 @@ export async function openGraph(loc?: string | GraphLocationOptions): Promise<Gr
   const conn = GraphConnection.open(path);
   await initSchema(conn);
 
-  const migration = await migrateSchemaColumns(conn);
+  // The `reopen` factory lets the migration close this connection before it
+  // copies the database file. On Windows the engine's own handle blocks that
+  // read (`EBUSY … read`, two zero-byte backups on disk), and share flags do
+  // not help because the lock is a byte-range lock, not a sharing mode. This
+  // is the only place that owns the connection's lifetime, so it is the only
+  // place that can hand a replacement back to the caller.
+  const migration = await migrateSchemaColumns(conn, () => GraphConnection.open(path));
   if (migration.migrated.length > 0) {
     const cols = migration.migrated.map((m) => `${m.table}.${m.column}`).join(", ");
     process.stderr.write(
@@ -94,5 +100,5 @@ export async function openGraph(loc?: string | GraphLocationOptions): Promise<Gr
     );
   }
 
-  return conn;
+  return migration.conn;
 }

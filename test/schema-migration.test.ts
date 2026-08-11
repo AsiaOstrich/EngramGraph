@@ -378,7 +378,12 @@ describe("migrateSchemaColumns — end-to-end against a simulated pre-migration 
     const pending = await detectPendingColumnMigrations(conn);
     expect(pending).toEqual([]);
     const report = await migrateSchemaColumns(conn);
-    expect(report).toEqual({ migrated: [], backupPath: null });
+    // `toMatchObject`, not `toEqual`: the report also carries the connection to
+    // continue with, which is the same object here because nothing migrated.
+    // It exists because a migration that DOES run has to close this connection
+    // before backing the file up — see `migrateSchemaColumns`.
+    expect(report).toMatchObject({ migrated: [], backupPath: null });
+    expect(report.conn).toBe(conn);
   });
 
   it("CHECKPOINTs before backing up: the pre-migration backup file is independently openable and reflects the OLD schema+data", async () => {
