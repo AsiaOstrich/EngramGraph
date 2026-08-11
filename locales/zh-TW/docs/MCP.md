@@ -68,6 +68,9 @@ command/args/env 都一樣：
 | `implementers` | `specId` | 宣告 `// implements <specId>` 的檔案及其定義的函式。「哪些程式碼實作了這個 spec？」讀取 `IMPLEMENTS(Module→Spec)` + `DEFINES`。 |
 | `implemented_specs` | `moduleId` | 一個檔案宣告自己實作了哪些 spec。「這段程式碼受哪個 spec 規範？」`moduleId` 是該檔案被索引時的路徑。讀取 `IMPLEMENTS(Module→Spec)`。 |
 | `related` | `seedId`、`depth?`、`limit?` | 從某個種子 id 出發、結構上重要的節點（對所有邊型跑 seeded PageRank，橫跨 `Function`/`Spec`/`Module`/`Decision`）。「有什麼跟 X 相關？」 |
+| `blindspots` | — | 解析不完全或失敗的檔案（來自 parse-health manifest）——圖可能缺少節點／邊的地方。當查詢回報 `indexHealth.possiblyIncomplete` 時用它查出**缺的是什麼**。`manifestPresent` 用來區分「沒有問題」與「從未量測過」。 |
+| `signatures` | — | 同一批檔案改以**根本原因**分組而非逐一列出——把「584 個檔案」變成「1 個問題」。當 `blindspots` 回傳很長的清單時使用。 |
+| `doctor` | — | 哪些語言可用、不可用的原因、這台機器上有哪些是自行編譯的、哪些指令需要網路。**不開啟圖**，所以在「索引本身壞掉」時仍然回答得出來。 |
 
 每個工具都回傳一個 JSON 文字內容區塊；失敗時回傳 `error: <message>` 並帶 `isError: true`。
 

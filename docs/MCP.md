@@ -62,6 +62,9 @@ the command/args/env are the same:
 | `implementers` | `specId` | Files declaring `// implements <specId>` and the functions they define. "Which code implements this spec?" Reads `IMPLEMENTS(Module→Spec)` + `DEFINES`. |
 | `implemented_specs` | `moduleId` | Specs a file declares it implements. "Which spec governs this code?" `moduleId` is the file's indexed path. Reads `IMPLEMENTS(Module→Spec)`. |
 | `related` | `seedId`, `depth?`, `limit?` | Structurally important nodes around a seed id (seeded PageRank over all edge types, crosses `Function`/`Spec`/`Module`/`Decision`). "What's connected to X?" |
+| `blindspots` | — | Files that parsed partially or failed, from the parse-health manifest — where the graph may be missing nodes/edges. Use after a query reports `indexHealth.possiblyIncomplete` to find out WHAT is missing. `manifestPresent` distinguishes "nothing wrong" from "never measured". |
+| `signatures` | — | The same files grouped by root cause instead of listed individually — turns "584 files" into "1 problem". Use when `blindspots` returns a long list. |
+| `doctor` | — | Which languages are available and why any are not, what was compiled on this machine, which commands need network. Does not open the graph, so it answers when indexing itself is what is broken. |
 
 Every tool returns a text content block of JSON; on failure it returns
 `error: <message>` with `isError: true`.

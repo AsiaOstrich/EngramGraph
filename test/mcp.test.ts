@@ -48,7 +48,9 @@ describe("EngramGraph MCP server", () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "blindspots",
       "call_chain",
+      "doctor",
       "impact_analysis",
       "implemented_specs",
       "implementers",
@@ -56,6 +58,7 @@ describe("EngramGraph MCP server", () => {
       "index_docs",
       "ingest_feedback",
       "related",
+      "signatures",
     ]);
   });
 

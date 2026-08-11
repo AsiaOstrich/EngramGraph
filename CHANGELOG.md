@@ -4,6 +4,20 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-08-11
+
+**An agent could be told the answer might be incomplete, and had no way to ask what was missing.**
+
+`indexHealth.possiblyIncomplete` has been attached to MCP query results since 0.8.0, but the three commands that answer the follow-up question — `blindspots`, `signatures`, `doctor` — existed only in the CLI. So an assistant receiving that flag could relay it to a human and stop. Surfacing health to a machine consumer is pointless if the next question has no tool.
+
+### Added
+
+- **`blindspots`** (MCP) — files that parsed partially or failed, from the parse-health manifest. The natural follow-up to `indexHealth.possiblyIncomplete`. Carries `manifestPresent`, because `blindspots: []` alone cannot distinguish "nothing wrong" from "nothing was ever measured".
+- **`signatures`** (MCP) — the same files grouped by root cause rather than listed one by one; turns "584 files" into "1 problem".
+- **`doctor`** (MCP) — which languages are available and why any are not, what was compiled on this machine, which commands need network. Does not open the graph, so it still answers when indexing itself is what is broken.
+
+Started without a `manifestPath`, `blindspots` and `signatures` return an explicit error saying so — not an empty success. A tool that cannot see must not return the same shape as a tool that looked and found nothing.
+
 ## [0.10.1] — 2026-08-11
 
 **Both fixes here are for damage 0.10.0 did, and both were found by the person it was released for.**

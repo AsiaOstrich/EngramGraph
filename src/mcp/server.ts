@@ -16,6 +16,8 @@ import { z } from "zod";
 import pkg from "../../package.json" with { type: "json" };
 import type { GraphConnection } from "../graph-db/connection.js";
 import { indexProject, callChain, definitionFiles, implementers, implementedSpecs, readIndexHealth } from "../code-graph/index.js";
+import { cmdBlindspots, cmdSignatures, cmdDoctor } from "../cli/run.js";
+import { existsSync } from "node:fs";
 import { readManifest, upsertRun, writeManifest } from "../code-graph/parse-manifest.js";
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType, CONFIDENCE_LABELS } from "../sage/index.js";
@@ -246,6 +248,81 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
     async ({ seedId, depth, limit }) => {
       try {
         return ok(await related(conn, seedId, depth ?? 2, limit ?? 10));
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  // --- Diagnostics (XSPEC-373 B6) ---
+  //
+  // These three existed only as CLI commands, so an agent that received
+  // `possiblyIncomplete: true` on a query had no way to ask what was missing.
+  // The whole point of surfacing index health to a machine consumer is that it
+  // can then act on it; without these it could only relay the warning to a
+  // human and stop.
+
+  server.registerTool(
+    "blindspots",
+    {
+      title: "Blindspots (where the graph may be incomplete)",
+      description:
+        "Files that parsed partially or failed outright, from the parse-health manifest — the places the graph may be missing nodes/edges. Use this after a query returns `indexHealth.possiblyIncomplete` to find out WHAT is missing.",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        if (!manifestPath) {
+          return fail(
+            "blindspots needs the parse-health manifest, and this server was started without a manifestPath. " +
+              "Nothing is wrong with the graph — this tool simply cannot see it. Start the server with manifestPath set.",
+          );
+        }
+        // `manifestPresent` separates "indexed, nothing wrong" from "never
+        // indexed": cmdBlindspots returns all-zeros for both, and an agent
+        // reading `blindspots: []` would otherwise conclude the graph is clean
+        // when in fact nothing has ever been measured (XSPEC-373).
+        return ok({ ...cmdBlindspots(manifestPath), manifestPresent: existsSync(manifestPath) });
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    "signatures",
+    {
+      title: "Unparsed files grouped by cause",
+      description:
+        "Files that failed or partially parsed, grouped by root cause rather than listed one by one — turns '584 files' into '1 problem'. Use after `blindspots` when the list is long.",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        if (!manifestPath) {
+          return fail(
+            "signatures needs the parse-health manifest, and this server was started without a manifestPath. " +
+              "Nothing is wrong with the graph — this tool simply cannot see it. Start the server with manifestPath set.",
+          );
+        }
+        return ok({ ...cmdSignatures(manifestPath), manifestPresent: existsSync(manifestPath) });
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    "doctor",
+    {
+      title: "What this installation can do on this machine",
+      description:
+        "Which languages are available and why any are not, what had to be compiled here, and which commands need network access. Answers WITHOUT opening the graph, so it still works when indexing is what is broken.",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        return ok(cmdDoctor(conn.path));
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }
