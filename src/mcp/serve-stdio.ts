@@ -23,7 +23,7 @@ export async function startMcpStdio(dbPath?: string): Promise<void> {
   // corrupts the database rather than refusing cleanly. Held for READING, any
   // number of terminal queries work alongside it.
   //
-  // The cost is that the three writing tools cannot run here; they say so
+  // The cost is that the four writing tools cannot run here; they say so
   // (see `createMcpServer`) and point at the CLI. Querying is what an
   // assistant needs a long-lived connection for; indexing is what the user
   // and the freshness hooks already do.
