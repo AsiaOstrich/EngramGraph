@@ -50,6 +50,7 @@ All standards are in `.standards/`. Installed standards:
 - `.standards/behavior-snapshot.ai.yaml` — behavior-snapshot
 - `.standards/changelog.ai.yaml` — changelog
 - `.standards/checkin-standards.ai.yaml` — checkin-standards
+- `.standards/class-level-fix.ai.yaml` — class-level-fix
 - `.standards/code-review.ai.yaml` — code-review
 - `.standards/commit-message.ai.yaml` — commit-message
 - `.standards/context-aware-loading.ai.yaml` — context-aware-loading
@@ -102,7 +103,7 @@ All standards are in `.standards/`. Installed standards:
 - `.standards/integration-testing.ai.yaml` — integration-testing
 - `.standards/system-testing.ai.yaml` — system-testing
 - `.standards/e2e-testing.ai.yaml` — e2e-testing
-- `.standards/class-level-fix.ai.yaml` — class-level-fix
+- `.standards/agent-dispatch.ai.yaml` — agent-dispatch
 <!-- UDS:STANDARDS:END -->
 
 ## Important Notes
