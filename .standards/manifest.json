@@ -2,7 +2,7 @@
   "version": "3.4.0",
   "upstream": {
     "repo": "AsiaOstrich/universal-dev-standards",
-    "version": "6.6.0",
+    "version": "6.7.0",
     "installed": "2026-08-17"
   },
   "format": "ai",
@@ -339,9 +339,9 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/ai-response-navigation.ai.yaml": {
-      "hash": "sha256:046d8e9fc74e0e921a795d6e2decde7107c494f3798c2607c80a228806573780",
-      "size": 6389,
-      "installedAt": "2026-08-17T02:55:12.371Z"
+      "hash": "sha256:71f6ff37f3874b18a0ecc2860d3f15301c220627f71d0a3a11cf8920796c1167",
+      "size": 8342,
+      "installedAt": "2026-08-17T07:53:11.294Z"
     },
     ".standards/virtual-organization-standards.ai.yaml": {
       "hash": "sha256:2f634b60db4ffe62a77b374d07bd788785cada6333ce2b6332409734fe073214",
