@@ -31,79 +31,85 @@ See `.standards/` for detailed coding standards.
 
 <!-- UDS:STANDARDS:START -->
 <!-- WARNING: This block is managed by UDS (universal-dev-standards). DO NOT manually edit. Use 'npx uds install' or 'npx uds update' to modify. -->
-## Installed Standards
+## Standards Reference
 
-All standards are in `.standards/`. Installed standards:
+**IMPORTANT**: When performing related tasks, you MUST read and follow the standards in `.standards/`:
 
-- `.standards/acceptance-criteria-traceability.ai.yaml` — acceptance-criteria-traceability
-- `.standards/acceptance-test-driven-development.ai.yaml` — acceptance-test-driven-development
-- `.standards/accessibility-standards.ai.yaml` — accessibility-standards
-- `.standards/adr-standards.ai.yaml` — adr-standards
-- `.standards/ai-agreement-standards.ai.yaml` — ai-agreement-standards
-- `.standards/ai-command-behavior.ai.yaml` — ai-command-behavior
-- `.standards/ai-friendly-architecture.ai.yaml` — ai-friendly-architecture
-- `.standards/ai-instruction-standards.ai.yaml` — ai-instruction-standards
-- `.standards/ai-response-navigation.ai.yaml` — ai-response-navigation
-- `.standards/anti-hallucination.ai.yaml` — anti-hallucination
-- `.standards/api-design-standards.ai.yaml` — api-design-standards
-- `.standards/behavior-driven-development.ai.yaml` — behavior-driven-development
-- `.standards/behavior-snapshot.ai.yaml` — behavior-snapshot
-- `.standards/changelog.ai.yaml` — changelog
-- `.standards/checkin-standards.ai.yaml` — checkin-standards
-- `.standards/class-level-fix.ai.yaml` — class-level-fix
-- `.standards/code-review.ai.yaml` — code-review
-- `.standards/commit-message.ai.yaml` — commit-message
-- `.standards/context-aware-loading.ai.yaml` — context-aware-loading
-- `.standards/database-standards.ai.yaml` — database-standards
-- `.standards/deployment-standards.ai.yaml` — deployment-standards
-- `.standards/developer-memory.ai.yaml` — developer-memory
-- `.standards/documentation-lifecycle.ai.yaml` — documentation-lifecycle
-- `.standards/documentation-structure.ai.yaml` — documentation-structure
-- `.standards/documentation-writing-standards.ai.yaml` — documentation-writing-standards
-- `.standards/error-codes.ai.yaml` — error-codes
-- `.standards/feature-discovery-standards.ai.yaml` — feature-discovery-standards
-- `.standards/feature-manifest-standard.ai.yaml` — feature-manifest-standard
-- `.standards/flow-based-testing.ai.yaml` — flow-based-testing
-- `.standards/forward-derivation-standards.ai.yaml` — forward-derivation-standards
-- `.standards/full-coverage-testing.ai.yaml` — full-coverage-testing
-- `.standards/git-workflow.ai.yaml` — git-workflow
-- `.standards/git-worktree.ai.yaml` — git-worktree
-- `.standards/knowledge-graph-memory.ai.yaml` — knowledge-graph-memory
-- `.standards/logging.ai.yaml` — logging
-- `.standards/mock-boundary.ai.yaml` — mock-boundary
-- `.standards/model-selection.ai.yaml` — model-selection
-- `.standards/mutation-testing.ai.yaml` — mutation-testing
-- `.standards/packaging-standards.ai.yaml` — packaging-standards
-- `.standards/performance-standards.ai.yaml` — performance-standards
-- `.standards/project-context-memory.ai.yaml` — project-context-memory
-- `.standards/project-structure.ai.yaml` — project-structure
-- `.standards/push-standards.ai.yaml` — push-standards
-- `.standards/refactoring-standards.ai.yaml` — refactoring-standards
-- `.standards/requirement-engineering.ai.yaml` — requirement-engineering
-- `.standards/retrospective-standards.ai.yaml` — retrospective-standards
-- `.standards/reverse-engineering-standards.ai.yaml` — reverse-engineering-standards
-- `.standards/security-standards.ai.yaml` — security-standards
-- `.standards/security-testing.ai.yaml` — security-testing
-- `.standards/self-review-protocol.ai.yaml` — self-review-protocol
-- `.standards/spec-driven-development.ai.yaml` — spec-driven-development
-- `.standards/structured-task-definition.ai.yaml` — structured-task-definition
-- `.standards/systematic-debugging.ai.yaml` — systematic-debugging
-- `.standards/test-completeness-dimensions.ai.yaml` — test-completeness-dimensions
-- `.standards/test-driven-development.ai.yaml` — test-driven-development
-- `.standards/test-governance.ai.yaml` — test-governance
-- `.standards/testing.ai.yaml` — testing
-- `.standards/user-journey-testing.ai.yaml` — user-journey-testing
-- `.standards/verification-evidence.ai.yaml` — verification-evidence
-- `.standards/versioning.ai.yaml` — versioning
-- `.standards/virtual-organization-standards.ai.yaml` — virtual-organization-standards
-- `.standards/english.ai.yaml` — english
-- `.standards/github-flow.ai.yaml` — github-flow
-- `.standards/squash-merge.ai.yaml` — squash-merge
-- `.standards/unit-testing.ai.yaml` — unit-testing
-- `.standards/integration-testing.ai.yaml` — integration-testing
-- `.standards/system-testing.ai.yaml` — system-testing
-- `.standards/e2e-testing.ai.yaml` — e2e-testing
-- `.standards/agent-dispatch.ai.yaml` — agent-dispatch
+**Core Standards:**
+- `.standards/acceptance-criteria-traceability.ai.yaml`
+- `.standards/acceptance-test-driven-development.ai.yaml`
+- `.standards/accessibility-standards.ai.yaml`
+- `.standards/adr-standards.ai.yaml`
+- `.standards/agent-dispatch.ai.yaml`
+- `.standards/ai-agreement-standards.ai.yaml`
+- `.standards/ai-command-behavior.ai.yaml`
+- `.standards/ai-friendly-architecture.ai.yaml`
+- `.standards/ai-instruction-standards.ai.yaml`
+- `.standards/ai-response-navigation.ai.yaml`
+- `.standards/anti-hallucination.ai.yaml`
+- `.standards/api-design-standards.ai.yaml`
+- `.standards/behavior-driven-development.ai.yaml`
+- `.standards/behavior-snapshot.ai.yaml`
+- `.standards/changelog.ai.yaml`
+- `.standards/checkin-standards.ai.yaml`
+- `.standards/class-level-fix.ai.yaml`
+- `.standards/code-review.ai.yaml`
+- `.standards/commit-message.ai.yaml`
+- `.standards/context-aware-loading.ai.yaml`
+- `.standards/database-standards.ai.yaml`
+- `.standards/deployment-standards.ai.yaml`
+- `.standards/developer-memory.ai.yaml`
+- `.standards/documentation-lifecycle.ai.yaml`
+- `.standards/documentation-structure.ai.yaml`
+- `.standards/documentation-writing-standards.ai.yaml`
+- `.standards/error-codes.ai.yaml`
+- `.standards/feature-discovery-standards.ai.yaml`
+- `.standards/feature-manifest-standard.ai.yaml`
+- `.standards/flow-based-testing.ai.yaml`
+- `.standards/forward-derivation-standards.ai.yaml`
+- `.standards/full-coverage-testing.ai.yaml`
+- `.standards/git-workflow.ai.yaml`
+- `.standards/git-worktree.ai.yaml`
+- `.standards/knowledge-graph-memory.ai.yaml`
+- `.standards/logging.ai.yaml`
+- `.standards/mock-boundary.ai.yaml`
+- `.standards/model-selection.ai.yaml`
+- `.standards/mutation-testing.ai.yaml`
+- `.standards/packaging-standards.ai.yaml`
+- `.standards/performance-standards.ai.yaml`
+- `.standards/project-context-memory.ai.yaml`
+- `.standards/project-structure.ai.yaml`
+- `.standards/push-standards.ai.yaml`
+- `.standards/refactoring-standards.ai.yaml`
+- `.standards/requirement-checklist.md`
+- `.standards/requirement-document-template.md`
+- `.standards/requirement-engineering.ai.yaml`
+- `.standards/requirement-template.md`
+- `.standards/retrospective-standards.ai.yaml`
+- `.standards/reverse-engineering-standards.ai.yaml`
+- `.standards/security-standards.ai.yaml`
+- `.standards/security-testing.ai.yaml`
+- `.standards/self-review-protocol.ai.yaml`
+- `.standards/spec-driven-development.ai.yaml`
+- `.standards/structured-task-definition.ai.yaml`
+- `.standards/systematic-debugging.ai.yaml`
+- `.standards/test-completeness-dimensions.ai.yaml`
+- `.standards/test-driven-development.ai.yaml`
+- `.standards/test-governance.ai.yaml`
+- `.standards/testing.ai.yaml`
+- `.standards/user-journey-testing.ai.yaml`
+- `.standards/verification-evidence.ai.yaml`
+- `.standards/versioning.ai.yaml`
+- `.standards/virtual-organization-standards.ai.yaml`
+
+**Options:**
+- `.standards/options/english.ai.yaml`
+- `.standards/options/github-flow.ai.yaml`
+- `.standards/options/squash-merge.ai.yaml`
+- `.standards/options/unit-testing.ai.yaml`
+- `.standards/options/integration-testing.ai.yaml`
+- `.standards/options/system-testing.ai.yaml`
+- `.standards/options/e2e-testing.ai.yaml`
 <!-- UDS:STANDARDS:END -->
 
 ## Important Notes

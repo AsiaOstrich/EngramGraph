@@ -1,9 +1,9 @@
 {
-  "version": "3.3.0",
+  "version": "3.4.0",
   "upstream": {
     "repo": "AsiaOstrich/universal-dev-standards",
-    "version": "6.5.0",
-    "installed": "2026-08-14"
+    "version": "6.6.0",
+    "installed": "2026-08-17"
   },
   "format": "ai",
   "contentMode": "minimal",
@@ -13,6 +13,7 @@
     "acceptance-test-driven-development",
     "accessibility-standards",
     "adr-standards",
+    "agent-dispatch",
     "ai-agreement",
     "ai-command-behavior",
     "ai-friendly-architecture",
@@ -79,8 +80,7 @@
     "ai/options/testing/unit-testing.ai.yaml",
     "ai/options/testing/integration-testing.ai.yaml",
     "ai/options/testing/system-testing.ai.yaml",
-    "ai/options/testing/e2e-testing.ai.yaml",
-    "ai/standards/agent-dispatch.ai.yaml"
+    "ai/options/testing/e2e-testing.ai.yaml"
   ],
   "extensions": [],
   "integrations": [
@@ -164,9 +164,9 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/spec-driven-development.ai.yaml": {
-      "hash": "sha256:1c67fdac01bd7d0fc8f3faa95e350846aeb2fc183398918f8bb3232a82cd34c3",
-      "size": 6985,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:626b1ae7510b0111041c4aa865576aec5e739e374d2dd4dcee2273e18db59871",
+      "size": 8636,
+      "installedAt": "2026-08-17T02:55:12.371Z"
     },
     ".standards/code-review.ai.yaml": {
       "hash": "sha256:35ab2486a6ecf63581281f84611d508edadfb3f86e698af7ce84d9dc6dc9afd4",
@@ -339,9 +339,9 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/ai-response-navigation.ai.yaml": {
-      "hash": "sha256:bd07e2641f8dfbddacd3a0e80064d5b1d4aaca7628204818b236c2df8e0fc91f",
-      "size": 4130,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:046d8e9fc74e0e921a795d6e2decde7107c494f3798c2607c80a228806573780",
+      "size": 6389,
+      "installedAt": "2026-08-17T02:55:12.371Z"
     },
     ".standards/virtual-organization-standards.ai.yaml": {
       "hash": "sha256:2f634b60db4ffe62a77b374d07bd788785cada6333ce2b6332409734fe073214",
@@ -469,8 +469,8 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     "AGENTS.md": {
-      "hash": "sha256:2c66ce325c008cd5f31fdb32af2f1130013fedaf7021e3f608918fe3ffdc041c",
-      "size": 5868,
+      "hash": "sha256:c422d1edaa6f05b53d090b258803307b877616363df1df198965058a5ac258fd",
+      "size": 4480,
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/class-level-fix.ai.yaml": {
@@ -488,11 +488,10 @@
   "commandHashes": {},
   "integrationBlockHashes": {
     "AGENTS.md": {
-      "blockHash": "sha256:b2df42a0c0a6c5c7a0507a8ed3c0a658ab6550d389a338b6a7cab6c9493ca355",
-      "blockSize": 4843,
-      "fullHash": "sha256:2c66ce325c008cd5f31fdb32af2f1130013fedaf7021e3f608918fe3ffdc041c",
-      "fullSize": 5868,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "blockHash": "sha256:d56fa237a80850beb48bcc133bad53cb6ffcf656bec9d2baa3566f8f922c1ba1",
+      "blockSize": 3455,
+      "fullHash": "sha256:c422d1edaa6f05b53d090b258803307b877616363df1df198965058a5ac258fd",
+      "fullSize": 4480
     }
   }
 }
