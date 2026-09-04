@@ -6,7 +6,19 @@ export default defineConfig({
     environment: "node",
     // Kuzu native bindings + temp DB files: avoid parallel DB-file contention.
     pool: "forks",
-    testTimeout: 30_000,
+    // 30s locally, 120s on CI.
+    //
+    // 🔴 The number is measured, not guessed. The slowest test on a dev machine
+    //    is 3.4s (scip-java-merge, gap-fill) — 9x under the 30s budget. The
+    //    first CI run this repo ever had timed out 16 tests at that same 30s,
+    //    so CI hardware is running these roughly an order of magnitude slower:
+    //    2 cores, `pool: "forks"`, and every fork loading the Kuzu native
+    //    bindings from cold. 120s keeps ~4x margin over the observed CI cost.
+    //
+    // ⚠️ Local stays at 30s on purpose. Raising both would hide a test that
+    //    genuinely became slow — the budget is meant to be felt while writing,
+    //    and only relaxed for the machine that is demonstrably slower.
+    testTimeout: process.env.CI ? 120_000 : 30_000,
     // XSPEC-073 G2 — coverage was never collected here at all.
     //
     // `include` IS PART OF THE MEASUREMENT, NOT A DETAIL.
