@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { cmdDoctor } from "../src/cli/run.js";
 import { GRAMMARS } from "../language-support.js";
+import { assertDistIsFresh } from "./helpers/dist-freshness.js";
 
 /**
  * `egr doctor` — the channel that actually reaches users.
@@ -26,6 +27,9 @@ import { GRAMMARS } from "../language-support.js";
 
 const ROOT = join(__dirname, "..");
 const CLI = join(ROOT, "dist", "cli", "index.js");
+// dist/ 比 src/ 舊時,這個檔會啟動上一個版本然後全部通過。
+// （這個檔一直是這樣寫的,只是在 2026-09-04 之前沒有人注意到那個性質。）
+assertDistIsFresh(ROOT, CLI);
 
 function runDoctor(args: string[] = []): string {
   return execFileSync(process.execPath, [CLI, "doctor", ...args], {

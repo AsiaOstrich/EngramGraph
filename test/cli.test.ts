@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { GraphConnection } from "../src/graph-db/connection.js";
 import { initSchema } from "../src/graph-db/schema.js";
 import { cmdIndex, cmdCallers, cmdImpact, cmdFeedback, cmdTop } from "../src/cli/run.js";
+import { assertDistIsFresh } from "./helpers/dist-freshness.js";
 
 // kuzu + tree-sitter both load (cmdIndex → indexProject). Single shared conn,
 // no awaited close (teardown caveat).
@@ -68,6 +69,9 @@ describe("egr CLI entry (spawn)", () => {
   //    `dist/` 且關掉 stdin,**它在同一次 CI 上是過的**——現成的對照組。
   //    `dist/` 由 `prepare` 的 tsup 產生,`npm install` 就有;而且那才是實際出貨的東西。
   const CLI = join(process.cwd(), "dist", "cli", "index.js");
+  // dist/ 比 src/ 舊時,下面每一支都會啟動上一個版本然後通過。
+  assertDistIsFresh(process.cwd(), CLI);
+
   const run = (args: string[]) =>
     spawnSync(process.execPath, [CLI, ...args], {
       encoding: "utf8",

@@ -8,6 +8,7 @@ import { GraphConnection } from "../src/graph-db/connection.js";
 import { initSchema, clearGraph, NODE_TABLE_DDL, REL_TABLE_DDL } from "../src/graph-db/schema.js";
 import { cmdIndex, ingestScipOverlay } from "../src/cli/run.js";
 import { loadScipPocFixtureSources } from "./fixtures/scip-poc/load-fixture.js";
+import { assertDistIsFresh } from "./helpers/dist-freshness.js";
 
 /**
  * XSPEC-333 R3 — CLI-level integration coverage for `egr index --scip <path>`
@@ -205,6 +206,9 @@ describe("egr CLI entry (spawn): index --scip end-to-end", () => {
   //    `dist/` 且關掉 stdin,**它在同一次 CI 上是過的**——現成的對照組。
   //    `dist/` 由 `prepare` 的 tsup 產生,`npm install` 就有;而且那才是實際出貨的東西。
   const CLI = join(process.cwd(), "dist", "cli", "index.js");
+  // dist/ 比 src/ 舊時,下面每一支都會啟動上一個版本然後通過。
+  assertDistIsFresh(process.cwd(), CLI);
+
   const run = (args: string[], env: Record<string, string | undefined> = {}) =>
     spawnSync(process.execPath, [CLI, ...args], {
       encoding: "utf8",
