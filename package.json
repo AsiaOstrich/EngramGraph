@@ -49,7 +49,9 @@
     "typecheck": "tsc --noEmit",
     "audit:ship": "node scripts/check-shipped-advisories.mjs",
     "dev": "node --experimental-strip-types --watch src/api/dev-server.ts",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "check:error-exit": "node scripts/check-error-exit.mjs",
+    "check:error-exit:self-test": "node scripts/check-error-exit.mjs --self-test"
   },
   "keywords": [
     "engram",

@@ -26,3 +26,7 @@ jobs:
       # 「CI 綠而發版紅」變成可能，而那正是這支 workflow 要消除的落差。
       - run: npm install --legacy-peer-deps
       - run: npm test
+      # 錯誤訊息單一出口。self-test 先跑：一個壞掉的判別式對每個檔都回綠，
+      # 而那與一次乾淨的通過在輸出上一模一樣。
+      - run: npm run check:error-exit:self-test
+      - run: npm run check:error-exit
