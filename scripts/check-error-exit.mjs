@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025-2026 AsiaOstrich
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // 錯誤訊息單一出口閘門　　可攜版（複製到任何專案，只改下面的 CONFIG）
@@ -167,8 +166,13 @@ function selfTest() {
       () => readsHttpResponses("export const add = (a, b) => a + b;") === false,
     ],
     [
-      "分母臂：走訪拿得到檔案（0 與『全部通過』的輸出相同）",
-      () => CONFIG.notApplicable !== null || walk(CONFIG.scanDirs).length >= CONFIG.minFilesScanned,
+      // ⚠️ 尚未設定、或宣告不適用時，這一臂沒有東西可量。它會**明說自己被跳過**，
+      //    不會靜靜回綠——「跳過」與「通過」在輸出上要分得出來。
+      CONFIG.configured && !CONFIG.notApplicable
+        ? "分母臂：走訪拿得到檔案（0 與『全部通過』的輸出相同）"
+        : "分母臂：跳過（尚未設定或已宣告不適用，沒有東西可走訪）",
+      () =>
+        !CONFIG.configured || CONFIG.notApplicable !== null || walk(CONFIG.scanDirs).length >= CONFIG.minFilesScanned,
     ],
   ];
   let failed = 0;
