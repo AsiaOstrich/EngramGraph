@@ -25,6 +25,28 @@ jobs:
       # --legacy-peer-deps 與 publish.yml 一致：不一致的安裝方式會讓
       # 「CI 綠而發版紅」變成可能，而那正是這支 workflow 要消除的落差。
       - run: npm install --legacy-peer-deps
+
+      # 🔴 ryugraph 的 ALGO 擴充是從 extension.ryugraph.io 下載的,而那個主機不可靠。
+      #    `god-nodes` / `communities` / `related` 三個指令要它,
+      #    而在 CI 上那個下載會靜靜地掛住——不是報錯,是等到測試逾時為止。
+      #    2026-09-04 首次上線後 12 支測試因此紅,而日誌裡一個網路錯誤都沒有。
+      #
+      #    ⚠️ **這一段不是新發明的**:`publish.yml` 從很久以前就在做同一件事,
+      #    註解也寫著同樣的理由。那份知識住在發版流程裡,而我建這支 CI 時沒有帶上它。
+      #    版本號 25.9.0 與路徑 linux_amd64 與那邊保持一致——**兩處要一起改**。
+      - name: Build ryugraph ALGO extension from source
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake
+          cd node_modules/ryugraph/ryu-source
+          make extension-release EXTENSION_LIST=algo NUM_THREADS="$(nproc)"
+          mkdir -p "$HOME/.ryu/extension/25.9.0/linux_amd64/algo"
+          cp extension/algo/build/libalgo.ryu_extension "$HOME/.ryu/extension/25.9.0/linux_amd64/algo/"
+
+      # 明確建置,不倚賴 `prepare` 有沒有觸發——publish.yml 也是這樣做的。
+      # 幾支 CLI 測試會啟動 dist/,而 `assertDistIsFresh` 會在 dist 比 src 舊時拒絕執行。
+      - run: npm run build
+
       - run: npm test
       # 錯誤訊息單一出口。self-test 先跑：一個壞掉的判別式對每個檔都回綠，
       # 而那與一次乾淨的通過在輸出上一模一樣。
