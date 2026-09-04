@@ -197,11 +197,20 @@ describe("cmdIndex --scip (direct call, real C# fixture)", () => {
 });
 
 describe("egr CLI entry (spawn): index --scip end-to-end", () => {
+  // 🔴 用 `node dist/cli/index.js`,不要用 `npx tsx src/cli/index.ts`。
+  //    `tsx` **不在這個 repo 的相依裡**——本機的 `npx` 從快取拿得到,而 CI 上每次都要去
+  //    registry 下載,加上 spawnSync 預設把 stdin 接成 pipe,npx 一旦要問就永遠等下去。
+  //    症狀是「印一個版本號跑滿 120 秒」,讀起來像效能問題,實際是網路加一個沒人回答的提問。
+  //    ⚠️ 這不是我推論出來的:同一個 repo 的 `doctor.test.ts` 用 `process.execPath` +
+  //    `dist/` 且關掉 stdin,**它在同一次 CI 上是過的**——現成的對照組。
+  //    `dist/` 由 `prepare` 的 tsup 產生,`npm install` 就有;而且那才是實際出貨的東西。
+  const CLI = join(process.cwd(), "dist", "cli", "index.js");
   const run = (args: string[], env: Record<string, string | undefined> = {}) =>
-    spawnSync("npx", ["tsx", "src/cli/index.ts", ...args], {
+    spawnSync(process.execPath, [CLI, ...args], {
       encoding: "utf8",
       cwd: process.cwd(),
       env: { ...process.env, ...env },
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
   let dbDir: string;

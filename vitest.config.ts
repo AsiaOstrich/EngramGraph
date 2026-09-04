@@ -19,6 +19,13 @@ export default defineConfig({
     //    genuinely became slow — the budget is meant to be felt while writing,
     //    and only relaxed for the machine that is demonstrably slower.
     testTimeout: process.env.CI ? 120_000 : 30_000,
+    // 🔴 hook 有**自己的**預算,預設 10s,而上面那一行動不到它。
+    //    2026-09-04 的第一次修正只調了 testTimeout,於是 structural-memory 的
+    //    `beforeAll`(建一個 Kuzu DB + initSchema + 十來個 CREATE)在 CI 上撞上
+    //    10 秒而不是 120 秒——**13 支失敗裡有 11 支是這一個原因**,
+    //    而錯誤訊息寫的是 `Hook timed out in 10000ms`,跟測試逾時長得不一樣。
+    //    調一個預算而漏掉另一個,結果與完全沒調在「還是紅」這件事上無從分辨。
+    hookTimeout: process.env.CI ? 120_000 : 10_000,
     // XSPEC-073 G2 — coverage was never collected here at all.
     //
     // `include` IS PART OF THE MEASUREMENT, NOT A DETAIL.
