@@ -1,0 +1,28 @@
+# 在 2026-09-04 之前，這個 repo 的測試**只在 `release: published` 時跑**。
+# 也就是說：測試壞掉這件事，最早會在**發版當下**才被知道——
+# 那是所有時刻裡最貴的一個，而且那時人已經在準備出貨了。
+#
+# 這一支把同樣的檢查搬到推送與 PR，讓紅燈出現在還便宜的時候。
+# publish.yml 保留它自己的那一份，兩者不互相取代：
+# 這裡證明「這次改動沒弄壞東西」，那裡證明「要出貨的這一版沒壞」。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g npm@latest
+      # --legacy-peer-deps 與 publish.yml 一致：不一致的安裝方式會讓
+      # 「CI 綠而發版紅」變成可能，而那正是這支 workflow 要消除的落差。
+      - run: npm install --legacy-peer-deps
+      - run: npm test
