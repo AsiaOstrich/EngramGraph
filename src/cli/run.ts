@@ -40,19 +40,29 @@ import {
   writeManifest,
   type ParseHealthSummary,
 } from "../code-graph/parse-manifest.js";
-import { walkFiles } from "./walk.js";
+import { walkFiles, summarizeUnindexed, type UnindexedSummary } from "./walk.js";
 import { unavailableGrammars } from "../code-graph/grammar-registry.js";
 import { GRAMMARS, compiledFromSourceOn, currentPlatform } from "../../language-support.js";
 import type { SupportedLanguage } from "../code-graph/types.js";
 
 const EGR_VERSION = (pkg as { version: string }).version;
 
-const CODE_EXTS = [
-  ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".cs",
-  ".py", ".go", ".java", ".kt", ".kts", ".rs",
-  ".cpp", ".cc", ".cxx", ".hpp", ".h", ".hh",
-  ".rb", ".php", ".dart",
-] as const;
+/**
+ * Extensions `egr index` walks for source code. Derived from
+ * `language-support.js`'s `GRAMMARS[].extensions` (XSPEC-414 R1) rather than
+ * hand-maintained — this used to be a second, independently-typed list of the
+ * same facts `GRAMMARS` already states, which is exactly the drift XSPEC-365
+ * R4 built the registry to prevent everywhere else. See
+ * `test/language-support.test.ts`'s "CODE_EXTS is derived from
+ * language-support.js" test, which fails on a structural check (does this
+ * declaration reference `GRAMMARS`, does it spell out extension literals) —
+ * not a value-equality check — specifically so reverting to a hand-typed
+ * list (even one that happens to still be correct) is caught, not just a
+ * hand-typed list that drifted out of sync.
+ */
+export const CODE_EXTS: readonly string[] = Object.freeze(
+  GRAMMARS.flatMap((g) => [...g.extensions]),
+);
 
 export interface IndexResultSummary {
   /**
@@ -86,6 +96,16 @@ export interface IndexResultSummary {
   skippedSymlinkDirs?: string[];
   /** Files matched by extension but unreadable (XSPEC-373 B7). Absent when none. */
   unreadableFiles?: Array<{ path: string; reason: string }>;
+  /**
+   * Source-looking files this run saw but did not index because their
+   * extension isn't covered by any supported language (XSPEC-414 R1) —
+   * `.git`, `node_modules` and binary files are excluded, same as `code`'s
+   * own walk. Unlike `skippedSymlinkDirs`/`unreadableFiles`, this field is
+   * ALWAYS present (even when `count` is 0): it is a standing denominator
+   * question ("how much of this tree did we not even try to index?"), not an
+   * exceptional condition worth hiding on the happy path.
+   */
+  unindexedCode: UnindexedSummary;
 }
 
 /**
@@ -328,7 +348,10 @@ export async function cmdIndex(
   // on-disk manifest, while `code` (the 7 numeric counts) is what the compact
   // summary surfaces — keeping the per-file array out of `--json` output.
   const { parseHealth, ...code } = await indexProject(conn, codeFiles);
-  const result: IndexResultSummary = { code };
+  // Seen-but-not-indexed accounting (XSPEC-414 R1). Derived from the SAME
+  // walk `codeFiles` came from, so "code.files" and "unindexedCode.count"
+  // describe the same tree, not two walks that could disagree.
+  const result: IndexResultSummary = { code, unindexedCode: summarizeUnindexed(codeWalk.unindexed) };
   // Directory symlinks are neither descended into nor, previously, recorded
   // (XSPEC-373 B3). Surfaced from the code walk, which covers the whole tree;
   // the docs walk below re-walks the same directories and would only repeat it.

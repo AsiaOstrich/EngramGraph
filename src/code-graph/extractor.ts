@@ -34,12 +34,15 @@
 // so "Dart's grammar isn't built for this platform" surfaced as "`egr` cannot
 // index anything". `grammar-registry.ts` loads each grammar on first use and
 // records the failure instead of propagating it; see its header.
+import { extname } from "node:path";
+
 import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
 import type {
   ExtractOptions,
   ProjectFile,
   SkippedLanguage,
+  SkippedUnrecognizedExtension,
   SupportedLanguage,
 } from "./types.js";
 import { tagsQuerySourceFor } from "./queries/index.js";
@@ -214,17 +217,40 @@ const CALLS_CONFIDENCE: Record<CallResolutionTier, number> = {
  * `.rb` -> ruby, `.php` -> php, `.dart` -> dart (XSPEC-333 R2c batch 3, the
  * last mainstream-language batch). No extension-ambiguity questions like the
  * `.h` case above for any of the three: each extension is unambiguous.
+ *
+ * **Returns `undefined` for an extension this engine has no grammar for**
+ * (XSPEC-414 R1), rather than defaulting to JavaScript. Before this, ANY
+ * unmatched extension — `.swift`, `.sh`, a typo, a future language nobody
+ * added a branch for yet — silently fell through to `javascript` and got
+ * parsed with the JS grammar, producing garbage-but-plausible-looking
+ * Function/Class nodes instead of no nodes at all. That is wrong data, which
+ * is worse than missing data: a caller has no signal to notice. `.js`/`.jsx`/
+ * `.mjs`/`.cjs` are therefore checked explicitly below rather than left to
+ * fall through to a default — they must keep resolving to `"javascript"`
+ * (this is real, existing behaviour that must not change), but a file this
+ * function does not recognize now says so instead of guessing. Callers that
+ * process one file at a time now surface that as an error
+ * ({@link collectExtraction}); callers that process many files (
+ * {@link extractProject}) skip the file and report it instead of aborting.
  */
 // Exported (XSPEC-333 R3 Java PoC) for the same reason as `parserFor` below:
 // `scip-ingest.ts` needs the same file-extension -> language inference
 // `ProjectFile.language` already falls back to, so `ScipSourceFile` can offer
 // the identical optional-`language`-with-extension-fallback convention
 // instead of a second, SCIP-only inference rule.
-export function detectLanguage(filePath: string): SupportedLanguage {
+export function detectLanguage(filePath: string): SupportedLanguage | undefined {
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".tsx")) return "tsx";
   if (lower.endsWith(".ts") || lower.endsWith(".mts") || lower.endsWith(".cts")) {
     return "typescript";
+  }
+  if (
+    lower.endsWith(".js") ||
+    lower.endsWith(".jsx") ||
+    lower.endsWith(".mjs") ||
+    lower.endsWith(".cjs")
+  ) {
+    return "javascript";
   }
   if (lower.endsWith(".cs")) return "csharp";
   if (lower.endsWith(".py")) return "python";
@@ -245,7 +271,7 @@ export function detectLanguage(filePath: string): SupportedLanguage {
   if (lower.endsWith(".rb")) return "ruby";
   if (lower.endsWith(".php")) return "php";
   if (lower.endsWith(".dart")) return "dart";
-  return "javascript";
+  return undefined;
 }
 
 
@@ -310,6 +336,18 @@ export interface Extraction {
 export function collectExtraction(source: string, opts: ExtractOptions): Extraction {
   const filePath = toPosixPath(opts.filePath);
   const language = opts.language ?? detectLanguage(filePath);
+  // XSPEC-414 R1: `detectLanguage` no longer defaults an unrecognized
+  // extension to javascript, so this single-file API — which has no batch to
+  // skip-and-continue within — must fail loudly instead of silently parsing
+  // the file with the wrong grammar. Batch callers (`extractProject`) check
+  // `detectLanguage`'s result themselves, BEFORE calling this function, so
+  // they skip such files and never reach this throw.
+  if (!language) {
+    throw new Error(
+      `collectExtraction: cannot detect a supported language for "${filePath}" — unrecognized ` +
+        `file extension. Pass opts.language explicitly to force one.`,
+    );
+  }
   const tree = parserFor(language).parse(source);
 
   // Parse-health (XSPEC-334 R1b): tree-sitter never throws on malformed
@@ -516,6 +554,12 @@ export interface ProjectExtraction {
   parseHealth: FileParseHealth[];
   /** Languages skipped for want of a grammar (XSPEC-365 R2). Empty is normal. */
   skippedLanguages: SkippedLanguage[];
+  /**
+   * Files whose extension is not recognized at all (XSPEC-414 R1). These are
+   * skipped — NOT parsed as JavaScript, which is what happened before this
+   * field existed. Empty is normal.
+   */
+  skippedUnrecognized: SkippedUnrecognizedExtension[];
 }
 
 /**
@@ -549,8 +593,19 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
   // source — sending the reader to inspect code when the actual fix is a
   // toolchain. See SkippedLanguage's doc comment.
   const skipped = new Map<SupportedLanguage, SkippedLanguage>();
+  // Extensions `detectLanguage` doesn't recognize at all (XSPEC-414 R1),
+  // tallied per extension. Checked first, before the grammar-availability
+  // check below: an unrecognized extension isn't a "known language, missing
+  // grammar" situation (SkippedLanguage's territory) — there is no language
+  // to look up a grammar for.
+  const unrecognized = new Map<string, number>();
   for (const f of files) {
     const language = f.language ?? detectLanguage(f.path);
+    if (!language) {
+      const ext = extname(f.path).toLowerCase() || "(none)";
+      unrecognized.set(ext, (unrecognized.get(ext) ?? 0) + 1);
+      continue;
+    }
     if (!isLanguageAvailable(language)) {
       const existing = skipped.get(language);
       if (existing) {
@@ -696,5 +751,6 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
     unresolved,
     parseHealth,
     skippedLanguages: [...skipped.values()],
+    skippedUnrecognized: [...unrecognized.entries()].map(([ext, files]) => ({ ext, files })),
   };
 }

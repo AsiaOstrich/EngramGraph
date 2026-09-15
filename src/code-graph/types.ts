@@ -89,6 +89,20 @@ export interface SkippedLanguage {
   files: number;
 }
 
+/**
+ * One file extension `detectLanguage` did not recognize at all (XSPEC-414
+ * R1) — e.g. `.swift` on an installation with no Swift grammar at all, not
+ * merely one that failed to load (that's {@link SkippedLanguage}). Such files
+ * are skipped rather than parsed with the wrong grammar (the old behaviour:
+ * anything unmatched fell back to `javascript`).
+ */
+export interface SkippedUnrecognizedExtension {
+  /** The file extension, e.g. `.swift`. `"(none)"` for an extension-less file. */
+  ext: string;
+  /** How many files in this run were skipped for this reason. */
+  files: number;
+}
+
 /** Summary of what {@link indexProject} wrote (cross-file CALLS resolution). */
 export interface ProjectIndexResult {
   files: number;
@@ -106,4 +120,9 @@ export interface ProjectIndexResult {
   parseHealth: FileParseHealth[];
   /** Languages skipped for want of a grammar (XSPEC-365 R2). Empty is normal. */
   skippedLanguages: SkippedLanguage[];
+  /**
+   * Files whose extension is not recognized at all (XSPEC-414 R1). Empty is
+   * normal. See {@link SkippedUnrecognizedExtension}.
+   */
+  skippedUnrecognized: SkippedUnrecognizedExtension[];
 }

@@ -133,6 +133,18 @@ interface FileScope {
 
 function buildFileScope(file: ScipSourceFile): FileScope {
   const language = file.language ?? detectLanguage(file.relativePath);
+  // XSPEC-414 R1: `detectLanguage` no longer defaults an unrecognized
+  // extension to javascript. In practice every `ScipSourceFile` reaching this
+  // function came from `cli/run.ts`'s `ingestScipOverlay`, whose file list is
+  // itself filtered through `walkFiles(dir, CODE_EXTS)` — so this branch is
+  // not expected to be hit — but failing loudly here is still strictly better
+  // than `parserFor(undefined)` throwing an unrelated-looking error.
+  if (!language) {
+    throw new Error(
+      `buildFileScope: cannot detect a supported language for "${file.relativePath}" — unrecognized ` +
+        `file extension. Pass file.language explicitly to force one.`,
+    );
+  }
   const tree = parserFor(language).parse(file.source);
   const { definitions } = runTagQuery(languageFor(language), language, tagsQuerySourceFor(language), tree.rootNode);
   return qualifyFunctions(file.relativePath, definitions);

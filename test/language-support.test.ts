@@ -10,6 +10,7 @@ import {
   compiledFromSourceOn,
 } from "../language-support.js";
 import { detectLanguage } from "../src/code-graph/extractor.js";
+import { CODE_EXTS } from "../src/cli/run.js";
 import type { SupportedLanguage } from "../src/code-graph/types.js";
 
 /**
@@ -146,10 +147,12 @@ describe("the SupportedLanguage union and the runtime registry agree", () => {
 });
 
 describe("registry extensions agree with detectLanguage()", () => {
+  // Every extension the registry lists must detect as that language — this
+  // holds regardless of what detectLanguage() does with an UNLISTED
+  // extension (XSPEC-414 R1 changed that: it now returns `undefined` instead
+  // of defaulting to "javascript" — see the "unrecognized extensions" and
+  // ".js/.jsx/.mjs/.cjs still map to javascript" tests below for that half).
   for (const grammar of GRAMMARS) {
-    // `javascript` is detectLanguage's fallback for anything unmatched, so
-    // its listed extensions are asserted like every other language's, but an
-    // unlisted extension landing on it is expected behaviour, not drift.
     it(`${grammar.label}: every listed extension detects as "${grammar.language}"`, () => {
       for (const ext of grammar.extensions) {
         expect(detectLanguage(`some/file${ext}`), `extension ${ext}`).toBe(
@@ -167,16 +170,51 @@ describe("registry extensions agree with detectLanguage()", () => {
     // src/cli/run.ts's CODE_EXTS decides which files reach the extractor at
     // all. A language in the registry whose extension the walker skips is
     // supported on paper and dead in practice.
-    const runSource = readFileSync(join(ROOT, "src", "cli", "run.ts"), "utf8");
-    const block = /const CODE_EXTS = \[([\s\S]*?)\] as const;/.exec(runSource);
-    expect(block, "CODE_EXTS block not found in src/cli/run.ts").not.toBeNull();
-
-    const walked = new Set(
-      [...(block?.[1] ?? "").matchAll(/"(\.[a-z]+)"/g)].map((m) => m[1]),
-    );
     const registered = new Set(GRAMMARS.flatMap((g) => [...g.extensions]));
+    expect([...CODE_EXTS].sort()).toEqual([...registered].sort());
+  });
 
-    expect([...walked].sort()).toEqual([...registered].sort());
+  // XSPEC-414 R1: CODE_EXTS used to be a hand-typed literal array kept in
+  // sync with GRAMMARS by hand — two independently-maintained lists of the
+  // same facts. The test above alone is NOT enough to catch that: a
+  // hand-typed list that happens to still be complete passes it too, and
+  // that is exactly the failure mode ("two lists exist to keep in sync", not
+  // merely "someone forgot to update one of them") R1 closes. So this test
+  // inspects HOW `src/cli/run.ts` declares CODE_EXTS, not just its resulting
+  // value: it must be computed from `GRAMMARS`, and must not spell out
+  // extensions as string literals of its own.
+  it("CODE_EXTS is derived from language-support.js, not a hand-maintained literal", () => {
+    const runSource = readFileSync(join(ROOT, "src", "cli", "run.ts"), "utf8");
+    const block = /export const CODE_EXTS[\s\S]*?;\n/.exec(runSource);
+    expect(block, "CODE_EXTS declaration not found in src/cli/run.ts").not.toBeNull();
+    const decl = block![0];
+
+    expect(decl, "CODE_EXTS must be computed from GRAMMARS, not a separate literal").toMatch(
+      /GRAMMARS/,
+    );
+    expect(
+      /"\.[a-zA-Z]/.test(decl),
+      `CODE_EXTS's declaration spells out an extension as a string literal — ` +
+        `this is the hand-maintained-list shape XSPEC-414 R1 removed:\n${decl}`,
+    ).toBe(false);
+  });
+});
+
+describe("detectLanguage() and unrecognized extensions (XSPEC-414 R1)", () => {
+  it("returns undefined for an extension with no grammar, instead of defaulting to javascript", () => {
+    for (const path of ["main.swift", "build.sh", "Makefile.mk", "notes.xyz"]) {
+      expect(detectLanguage(path), path).toBeUndefined();
+    }
+  });
+
+  it("returns undefined for a file with no extension at all", () => {
+    expect(detectLanguage("Makefile")).toBeUndefined();
+  });
+
+  it("still detects .js/.jsx/.mjs/.cjs as javascript — the one fallback behaviour that must not change", () => {
+    for (const ext of [".js", ".jsx", ".mjs", ".cjs"]) {
+      expect(detectLanguage(`some/file${ext}`), ext).toBe("javascript");
+    }
   });
 });
 

@@ -416,7 +416,30 @@ async function main(): Promise<void> {
             (s.unreadableFiles.length > 3 ? "; …" : "") +
             `. Not included in any count above.`
           : "";
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}${symlinked}${unreadable}`;
+        // Seen-but-not-indexed source files (XSPEC-414 R1) — always printed
+        // (even at 0), unlike the conditional lines above: this is a standing
+        // denominator question ("how much of this tree did we not even try to
+        // index?"), not an exceptional condition worth hiding on a clean run.
+        const uc = s.unindexedCode;
+        const unindexed =
+          uc.count > 0
+            ? `\nunindexed: ${uc.count} source file(s) seen but not covered by any supported language — ` +
+              `top extensions: ${uc.topExtensions.map((e) => `${e.ext} (${e.count})`).join(", ")}`
+            : `\nunindexed: 0 source file(s) seen but not covered by any supported language`;
+        // Files whose extension `detectLanguage` doesn't recognize at all
+        // (XSPEC-414 R1) — distinct from `skipped` above (a KNOWN language
+        // whose grammar failed to load). Normally empty for `egr index`
+        // itself (CODE_EXTS already filters to recognized extensions before
+        // any file reaches this far); surfaced here anyway because `code` is
+        // the same shape MCP's `index_code` returns, and there it is not
+        // normally empty — an MCP client can hand `index_code` any path.
+        const su = s.code.skippedUnrecognized ?? [];
+        const skippedUnrecognized = su.length
+          ? "\nskipped: " +
+            su.map((u) => `${u.files} ${u.ext} file(s)`).join(", ") +
+            " — unrecognized extension, not parsed as any language."
+          : "";
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${unindexed}`;
       });
       break;
     }

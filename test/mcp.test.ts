@@ -93,6 +93,32 @@ describe("EngramGraph MCP server", () => {
     expect(chain.callers.map((c) => c.name)).toContain("a");
   });
 
+  // XSPEC-414 R1: `index_code` used to run ANY file through detectLanguage's
+  // old default (unmatched extension -> "javascript"), so an MCP client
+  // indexing a Swift/C/Bash file got it silently parsed with the JS grammar
+  // instead of skipped — wrong data in the graph, with no signal that
+  // anything was wrong. This is the MCP-side half of R1's Scenario.
+  it("index_code skips a file with an unrecognized extension instead of parsing it as JavaScript, and reports it", async () => {
+    const indexed = (await callJson(client, "index_code", {
+      files: [
+        { path: "unsupported.swift", source: 'func greet() {\n  print("hi")\n}\n' },
+      ],
+    })) as { files: number; skippedUnrecognized: Array<{ ext: string; files: number }> };
+
+    // Not counted as an indexed file...
+    expect(indexed.files).toBe(0);
+    // ...and reported, not silently dropped.
+    expect(indexed.skippedUnrecognized).toEqual([{ ext: ".swift", files: 1 }]);
+
+    // No JavaScript-shaped node exists for it in the graph.
+    const chain = (await callJson(client, "call_chain", { symbol: "greet", direction: "both" })) as {
+      callers: Array<{ name: string }>;
+      callees: Array<{ name: string }>;
+    };
+    expect(chain.callers).toEqual([]);
+    expect(chain.callees).toEqual([]);
+  });
+
   it("index_docs + impact_analysis returns the impact chain", async () => {
     await callJson(client, "index_docs", {
       docs: [
