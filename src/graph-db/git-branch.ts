@@ -14,12 +14,36 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 
+/**
+ * Env vars git itself sets when it invokes a hook (pre-commit, post-commit,
+ * etc.): `GIT_DIR`/`GIT_WORK_TREE` name the repo the hook is running FOR,
+ * and `GIT_INDEX_FILE`/`GIT_COMMON_DIR` go with them. Left in `process.env`,
+ * a `git` subprocess spawned from inside that hook with an explicit `cwd`
+ * pointing somewhere else (a different repo entirely — exactly what this
+ * function is FOR: resolving isolation for whatever `cwd` names) silently
+ * ignores `cwd` and resolves against the HOOK's repo instead, because git
+ * treats `GIT_DIR` as authoritative over `cwd`-based discovery whenever it is
+ * set. Found via `resolveDbPath`/`cmdGc` returning the outer EngramGraph
+ * repo's own `.git/engram` for a temp fixture repo, reproducible with zero
+ * other changes by setting `GIT_DIR`/`GIT_WORK_TREE` before a plain
+ * `npm test` run — i.e. exactly what running `git commit` (which triggers
+ * this repo's husky pre-commit → `npm test`) does on every machine, not
+ * something specific to a linked worktree.
+ */
+const GIT_ENV_OVERRIDE = {
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_COMMON_DIR: undefined,
+};
+
 function git(cwd: string, args: string[]): string | null {
   try {
     return execFileSync("git", args, {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      env: { ...process.env, ...GIT_ENV_OVERRIDE },
     }).trim();
   } catch {
     return null;

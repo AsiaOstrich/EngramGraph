@@ -11,8 +11,30 @@ import { initSchema, clearGraph } from "../src/graph-db/schema.js";
 import { indexProject } from "../src/code-graph/index.js";
 import { cmdGc } from "../src/cli/run.js";
 
+// `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/`GIT_COMMON_DIR`: git itself sets
+// these when it invokes a hook (pre-commit, in particular — this repo's own
+// husky pre-commit runs `npm test`). Left inherited, a `git` subprocess
+// spawned here with an explicit `cwd` pointing at a throwaway fixture repo
+// silently resolves against the HOOK's repo instead — git treats `GIT_DIR`
+// as authoritative over `cwd`-based discovery whenever it is set. Same root
+// cause, same fix, as `src/graph-db/git-branch.ts`'s own `git()` helper;
+// found here first (a `git commit --allow-empty` a few lines below this
+// failing against the WRONG repo) while validating XSPEC-414 R1, which does
+// not otherwise touch this file.
+const GIT_ENV_OVERRIDE = {
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_COMMON_DIR: undefined,
+};
+
 const git = (cwd: string, args: string[]) =>
-  execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    env: { ...process.env, ...GIT_ENV_OVERRIDE },
+  });
 
 function initRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "engram-iso-"));
