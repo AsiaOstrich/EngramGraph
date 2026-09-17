@@ -28,7 +28,7 @@ jobs:
           $v = node -p "require('../package.json').dependencies.ryugraph"
           Write-Host "ryugraph spec from package.json: $v"
           npm install "ryugraph@$v" --no-audit --no-fund
-          node -p "require('ryugraph/package.json').version"
+          node -p "JSON.parse(require('fs').readFileSync('node_modules/ryugraph/package.json','utf8')).version"
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
