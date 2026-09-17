@@ -28,6 +28,7 @@
  */
 
 import type { GraphConnection } from "../graph-db/connection.js";
+import { ALGO_EXTENSION_VERSION, algoLoadStatement, currentBundledAlgo } from "./algo-extension.js";
 import { NODE_TABLES, REL_TABLES } from "../graph-db/schema.js";
 
 const PROJECTED_GRAPH = "egr_structural";
@@ -128,32 +129,58 @@ const ALGO_OFFLINE_HELP = [
 ].join("\n");
 
 /**
- * INSTALL (once per process) + LOAD (every call) the ryugraph ALGO extension.
+ * Load the ryugraph ALGO extension for this connection.
  *
- * `INSTALL ALGO` fetches the extension over the network the first time it runs
- * on a machine. That is ryugraph's design, not a choice this project makes,
- * but until now the failure surfaced as a bare `IO exception: Failed to
- * download extension` with no indication that (a) only three commands are
- * affected, (b) everything else works offline, or (c) there is a supported way
- * to supply the extension locally. This repo's own release workflow has built
- * it from source since the download host proved unreliable — that knowledge
- * lived in CI and never reached anyone running the tool.
+ * First choice (XSPEC-416): the prebuilt extension from this platform's
+ * `@asiaostrich/engramgraph-algo-*` package, loaded by path. No INSTALL, no
+ * network — the case a corporate intranet needs. If that package is present
+ * but its file will not load, the error says so: falling back to a download
+ * would hide a broken package behind the very failure it exists to prevent.
+ *
+ * Otherwise `INSTALL ALGO` (once per process) + `LOAD EXTENSION ALGO` (every
+ * call), which downloads on first use. When that fails, the message names the
+ * package this platform should have had, first — an npm mirror that did not
+ * sync optional dependencies looks exactly like "no network" otherwise.
  */
 async function ensureAlgoExtension(conn: GraphConnection): Promise<void> {
+  const bundled = currentBundledAlgo();
+  if (bundled.path) {
+    try {
+      await conn.execute(algoLoadStatement(bundled.path));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `${ALGO_BACKED_COMMANDS} need ryugraph's ALGO extension. ${bundled.pkg} is installed but its extension did not load:\n` +
+          `  ${message}\n  file: ${bundled.path}\n\n` +
+          `Reinstall engramgraph so npm refetches ${bundled.pkg}; it must match ryugraph extension version ${ALGO_EXTENSION_VERSION}.`,
+        { cause: err },
+      );
+    }
+    return;
+  }
+
   if (!algoInstalled) {
     try {
       await conn.execute(`INSTALL ALGO;`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `${ALGO_BACKED_COMMANDS} need ryugraph's ALGO extension, and installing it failed:\n` +
-          `  ${message}\n\n${ALGO_OFFLINE_HELP}`,
-        { cause: err },
-      );
+      const missing = bundled.pkg
+        ? `${bundled.pkg} is not installed, so ${ALGO_BACKED_COMMANDS} fell back to downloading ryugraph's ALGO extension, and that failed.\n` +
+          `  ${message}\n\n` +
+          `engramgraph lists ${bundled.pkg} as an optional dependency, so a normal install includes it. If it is missing, ` +
+          `your npm mirror or proxy may not have synced it — check that the mirror serves ${bundled.pkg}@${ALGO_EXTENSION_VERSION}, then reinstall engramgraph.\n\n`
+        : `No prebuilt ALGO extension exists for ${process.platform}-${process.arch}, so ${ALGO_BACKED_COMMANDS} need to download it, and that failed:\n` +
+          `  ${message}\n\n`;
+      throw new Error(`${missing}${ALGO_OFFLINE_HELP}`, { cause: err });
     }
     algoInstalled = true;
   }
   await conn.execute(`LOAD EXTENSION ALGO;`);
+}
+
+/** Test hook: forget that INSTALL ALGO ran in this process. */
+export function resetAlgoStateForTests(): void {
+  algoInstalled = false;
 }
 
 /**
