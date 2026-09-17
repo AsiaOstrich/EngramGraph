@@ -12,9 +12,22 @@ Every command opened the graph for writing, even a pure query, because opening r
 
 This was reachable in ordinary use. An editor's MCP server holds the graph for as long as the editor is open; a `post-commit` hook or a shell-startup freshness check indexes in the background; you run `egr` in a terminal. Any two of those overlapping was enough.
 
+### Added
+
+- **The algorithm extension installs with the package** (rc.4). `god-nodes`, `communities` and `related` need ryugraph's ALGO extension, which until now was downloaded from `extension.ryugraph.io` on first use — so on a network that cannot reach it they did not work at all. It now ships prebuilt as `@asiaostrich/engramgraph-algo-<platform>`, an optional dependency npm installs only on the matching platform, and loads from there with no network and nothing written to your home directory. Platforms: Windows x64, Linux x64, macOS arm64 and x64. Linux arm64 is not included: ryugraph's own `linux-arm64` engine file is currently an x86-64 binary (predictable-labs/ryugraph#48), so there is nothing correct to build against. Everywhere else, the download still works as before.
+- **`egr index` names what it skipped** (rc.4). Files with an extension no grammar handles are counted and reported by extension in the summary and in `--json` (`unindexedCode`), instead of silently lowering the file count.
+- **`egr index` says what to do next** (rc.4) when most calls did not resolve (points at `--scip`) and when documents were found but none were recognised as specs or none are implemented in code (states the naming rule and the `// implements` comment).
+
+### Fixed
+
+- **An existing graph could stop opening at all after the extension file moved** (rc.4). Loading the extension writes its absolute path into the graph's write-ahead log, which is replayed on every open; egr exits without a checkpoint, so the record stayed. After a Node version switch, a reinstall, or a cleared `~/.ryu`, every command on that graph — including ones that never use the extension — failed with `Failed to load library`. 0.11.0's download path had the same defect. egr now checkpoints right after loading. A graph already in that state opens again once the file is back at the path in the error.
+- **MCP `index_code` parsed files with no grammar as JavaScript** (rc.4), producing plausible and wrong nodes. They are now skipped and reported.
+- **Git-branch isolation followed the caller's `GIT_DIR`** (rc.4) instead of the directory it was given, whenever one was set in the environment — as it is inside every git hook.
+- **`--help` and the CLI docs state that the skip list is fixed and `.gitignore` is not read** (rc.4); the help text is generated from the list itself.
+
 ### Changed
 
-- **Query commands open read-only** — `callers`, `callees`, `implementers`, `implemented-by`, `impact`, `top`, `god-nodes`, `communities`, `related`, `blindspots`, `signatures`. A read-only open can be refused; refusal is all it can do. Measured: five concurrent read-only opens all succeed and the graph is intact; a writer and a reader refuse each other cleanly with the graph intact; only writer-versus-writer corrupts.
+- **Query commands open read-only** — `callers`, `callees`, `implementers`, `implemented-by`, `impact`, `top`, `blindspots`, `signatures`. (`god-nodes`, `communities` and `related` were on this list in rc.2 and are not: they load the algorithm extension and build a projected graph first, and both are writes. Corrected in rc.3; this entry was not.) A read-only open can be refused; refusal is all it can do. Measured: five concurrent read-only opens all succeed and the graph is intact; a writer and a reader refuse each other cleanly with the graph intact; only writer-versus-writer corrupts.
 - **The MCP stdio server holds the graph read-only.** Held for writing, it made every terminal `egr` command fail for as long as the editor was open. Verified end-to-end: with the server running, `top`, `implementers`, `blindspots` and a full `egr index` all work.
 - **`index_code`, `index_docs` and `ingest_feedback` over MCP now refuse by name** and point at the CLI equivalent, rather than failing at a lower layer with a lock error an assistant cannot act on.
 - **Read-only `openGraph` neither creates nor migrates.** Both are writes. A missing graph now says so and names `egr index`, instead of silently producing an empty one.

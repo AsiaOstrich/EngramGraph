@@ -1,6 +1,6 @@
 {
   "name": "engramgraph",
-  "version": "0.12.0-rc.3",
+  "version": "0.12.0-rc.4",
   "description": "Open-source code + knowledge graph memory engine (SAGE + CodeGraph). AsiaOstrich is only a reference consumer.",
   "license": "MIT",
   "author": "AsiaOstrich",
@@ -83,6 +83,10 @@
     "tree-sitter-typescript": "0.23.2"
   },
   "optionalDependencies": {
+    "@asiaostrich/engramgraph-algo-darwin-arm64": "25.9.0",
+    "@asiaostrich/engramgraph-algo-darwin-x64": "25.9.0",
+    "@asiaostrich/engramgraph-algo-linux-x64": "25.9.0",
+    "@asiaostrich/engramgraph-algo-win32-x64": "25.9.0",
     "@vokturz/tree-sitter-dart": "1.0.0"
   },
   "overrides": {
