@@ -1,0 +1,63 @@
+# Spike (2026-09-17): on Windows, with the extension host blocked, does a file placed in
+# ryugraph's cache path let INSTALL ALGO succeed without the network? Reuses the build
+# from run 35175835976 instead of rebuilding for 37 minutes.
+name: ALGO extension Windows cache spike
+
+on:
+  push:
+    branches: [spike/algo-extension-windows]
+    paths: [".github/workflows/algo-extension-windows-cache-spike.yml", "scripts/spike/algo-cache-probe.mjs"]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  cache-offline:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install ryugraph only
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force spikework | Out-Null
+          Set-Location spikework
+          npm init -y | Out-Null
+          npm install ryugraph@25.9.1 --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          name: libalgo-win_amd64
+          path: built
+          run-id: 35175835976
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Block the extension host (simulate an intranet)
+        shell: pwsh
+        run: |
+          Add-Content -Path "$env:SystemRoot\System32\drivers\etc\hosts" -Value "`n0.0.0.0 extension.ryugraph.io"
+          ipconfig /flushdns | Out-Null
+          try { Invoke-WebRequest -Uri "https://extension.ryugraph.io/" -TimeoutSec 10 -UseBasicParsing | Out-Null; Write-Host "HOST STILL REACHABLE — block failed" ; exit 1 } catch { Write-Host "host blocked: $($_.Exception.Message)" }
+      - name: Control arm — blocked, nothing in cache (must fail)
+        shell: pwsh
+        working-directory: spikework
+        run: |
+          $h = Join-Path $env:RUNNER_TEMP "home-control"; New-Item -ItemType Directory -Force $h | Out-Null
+          $env:USERPROFILE = $h; $env:HOME = $h
+          node ../scripts/spike/algo-cache-probe.mjs control
+      - name: Experiment arm — blocked, file placed in the cache path
+        shell: pwsh
+        working-directory: spikework
+        run: |
+          $h = Join-Path $env:RUNNER_TEMP "home-cached"
+          $f = Get-ChildItem -Recurse -Path ../built -Filter "libalgo.ryu_extension" | Select-Object -First 1
+          if (-not $f) { throw "artifact file not found" }
+          $dest = Join-Path $h ".ryu\extension\25.9.0\win_amd64\algo"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item $f.FullName $dest
+          Write-Host "placed: $(Join-Path $dest 'libalgo.ryu_extension')"
+          $env:USERPROFILE = $h; $env:HOME = $h
+          node ../scripts/spike/algo-cache-probe.mjs cached
