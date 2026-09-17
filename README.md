@@ -10,7 +10,7 @@
 > [SAGE](https://arxiv.org/abs/2605.12061) self-evolving graph memory with
 > CodeGraph structural code understanding.
 
-**License:** MIT · **Runtime:** Node.js ≥ 22 · **Graph DB:** [Kuzu](https://kuzudb.com/) (embedded, Cypher) · **No LLM required** (deterministic) · Offline except `god-nodes` / `communities` / `related`, which download one graph-algorithm extension on first use ([details](#troubleshooting-misleading-native-binary-errors))
+**License:** MIT · **Runtime:** Node.js ≥ 22 · **Graph DB:** [Kuzu](https://kuzudb.com/) (embedded, Cypher) · **No LLM required** (deterministic) · **Works offline** — the graph-algorithm extension behind `god-nodes` / `communities` / `related` is installed with the package on Windows x64, Linux x64/arm64 and macOS ([details](#troubleshooting-misleading-native-binary-errors))
 
 EngramGraph is a general-purpose engine. The defaults ("single repo + generic
 markdown + git signals") work out of the box for any project; project-specific
@@ -218,7 +218,7 @@ text doesn't always describe the real cause:
 | `gyp ERR! find VS unknown version "undefined" found at ...\18\BuildTools` | **node-gyp 11.x** doesn't recognise Visual Studio 2026. Install the C++ workload into **Build Tools 2022**, or upgrade node-gyp to 12.x |
 | A wall of `node-gyp` output ending in `npm error code 1`, on Windows/macOS | The Dart grammar failed to compile. Expected without a C/C++ toolchain, and survivable — every other language still works |
 | `Dart support is not enabled in this installation` (at index time) | The above, seen from the other end. `egr` is working; the Dart grammar isn't built here |
-| `IO exception: Failed to download extension: algo` | `god-nodes`, `communities` and `related` need ryugraph's ALGO extension, which `INSTALL ALGO` fetches from `extension.ryugraph.io` on first use. **This is the only part of egr that reaches the network** — every other command works offline. The error now prints the offline build steps; see also `docs/CLI.md` |
+| `... is not installed, so god-nodes, communities, related fell back to downloading` | `god-nodes`, `communities` and `related` need ryugraph's ALGO extension. It ships prebuilt as an optional dependency, `@asiaostrich/engramgraph-algo-<platform>`, so a normal install needs no network. This message means that package is missing — most often an internal npm mirror that did not sync optional dependencies. Make the mirror serve the package the message names, then reinstall `engramgraph`. Only when no package exists for your platform does egr download the extension from `extension.ryugraph.io`; the error then prints the offline build steps |
 
 If you hit something not covered here, please check
 [predictable-labs/ryugraph's issues](https://github.com/predictable-labs/ryugraph/issues)
