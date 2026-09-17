@@ -18,7 +18,7 @@ status: complete
 > [SAGE](https://arxiv.org/abs/2605.12061) 自演化图谱记忆与
 > CodeGraph 结构化代码理解。
 
-**许可：** MIT · **运行环境：** Node.js ≥ 22 · **图数据库：** [Kuzu](https://kuzudb.com/)（嵌入式、Cypher）· **无需 LLM**（确定性）· 除 `god-nodes`／`communities`／`related` 首次使用时会下载一个图算法扩展外，全部可离线使用
+**许可：** MIT · **运行环境：** Node.js ≥ 22 · **图数据库：** [Kuzu](https://kuzudb.com/)（嵌入式、Cypher）· **无需 LLM**（确定性）· **可完全离线使用**——`god-nodes`／`communities`／`related` 所需的图算法扩展，在 Windows x64、Linux x64 与 macOS 上会随包一起安装
 
 EngramGraph 是通用引擎。默认行为（“单一 repo + 通用 markdown + git 信号”）对任何项目
 开箱即用；项目专属行为则通过可插拔的 adapter 提供。
@@ -156,7 +156,7 @@ Linux 上的原生二进制文件加载失败，会通过 Node 的 `dlopen` 呈�
 | `gyp ERR! find VS unknown version "undefined" found at ...\18\BuildTools` | **node-gyp 11.x** 不认识 Visual Studio 2026。请改把 C++ 工作负载装进 **Build Tools 2022**，或把 node-gyp 升到 12.x |
 | Windows/macOS 上一整屏 `node-gyp` 输出、最后是 `npm error code 1` | Dart 语法编译失败。没有 C/C++ 工具链时这是预期结果，而且可以承受——其他语言全部照常运行 |
 | 索引时出现 `Dart support is not enabled in this installation` | 同一件事的另一端。`egr` 是正常的，只是这台机器没有构建 Dart 语法 |
-| `IO exception: Failed to download extension: algo` | `god-nodes`、`communities`、`related` 需要 ryugraph 的 ALGO 扩展，`INSTALL ALGO` 会在首次使用时从 `extension.ryugraph.io` 下载。**这是 egr 唯一会联网的部分**——其余命令全部可离线运行。该错误现在会打印离线构建步骤；另见 `docs/CLI.md` |
+| `... is not installed, so god-nodes, communities, related fell back to downloading` | `god-nodes`、`communities`、`related` 需要 ryugraph 的 ALGO 扩展。它以可选依赖 `@asiaostrich/engramgraph-algo-<平台>` 预先编译好随包安装，一般安装不需联网。出现这条消息代表那个包不在——最常见的原因是公司内部 npm 镜像没有同步可选依赖。请让镜像提供消息中点名的包，再重新安装 `engramgraph`。只有你的平台没有预编译包时，egr 才会从 `extension.ryugraph.io` 下载，失败时会打印离线构建步骤 |
 
 如果你遇到的问题不在上表范围内，请先查看
 [predictable-labs/ryugraph 的 issues](https://github.com/predictable-labs/ryugraph/issues)，

@@ -1,0 +1,143 @@
+# XSPEC-416 R2 — build the ryugraph ALGO extension per platform and (optionally) publish
+# it as @asiaostrich/engramgraph-algo-<platform>.
+#
+# Runs ONLY when started by hand. It is not part of engramgraph's release: the extension
+# depends on ryugraph's extension version, not on engramgraph's code, and that version
+# has not changed across the 11 releases since 2026-06-12. Re-run it when
+# test/algo-extension-bundled.test.ts reports that RYU_EXTENSION_VERSION moved.
+#
+# linux-arm64 is not built: ryugraph 25.9.1 ships an x86-64 engine under that name
+# (predictable-labs/ryugraph#48), measured on the first run — see algo-extension.ts.
+#
+# Every platform, on the machine that built it:
+#   1. compat — the extension must not demand a newer platform than the engine
+#   2. load   — control arm must fail, loading by forward-slash path must work
+# Publishing happens only from main with publish=true, via OIDC trusted publishing.
+name: ALGO extension packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to npm after every platform passes (main only)"
+        type: boolean
+        default: false
+  push:
+    branches: [feat/xspec-416-algo-platform-packages]
+    paths:
+      - .github/workflows/algo-packages.yml
+      - scripts/algo-*.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.key }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: win32-x64, os: windows-latest, platform: win32, engine: ryujs-win32-x64.node }
+          - { key: linux-x64, os: ubuntu-24.04, platform: linux, engine: ryujs-linux-x64.node }
+          - { key: darwin-arm64, os: macos-15, platform: darwin, engine: ryujs-darwin-arm64.node }
+          - { key: darwin-x64, os: macos-15-intel, platform: darwin, engine: ryujs-darwin-x64.node }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    env:
+      # The engine supports macOS 11.0; an extension built without this asks for the host's version.
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install ryugraph only (source + prebuilt engine)
+        shell: bash
+        run: |
+          mkdir -p algowork && cd algowork
+          npm init -y > /dev/null
+          V=$(node -p "require('../package.json').dependencies.ryugraph")
+          # --foreground-scripts: ryugraph's install script copies prebuilt/ryujs-<platform>.node to ryujs.node,
+          # and npm hides its output by default — on linux-arm64 that copy did not happen and nothing said why.
+          npm install "ryugraph@$V" --no-audit --no-fund --foreground-scripts
+          node -p "JSON.parse(require('fs').readFileSync('node_modules/ryugraph/package.json','utf8')).version"
+          ls -l node_modules/ryugraph/*.node node_modules/ryugraph/prebuilt/ || true
+          test -f node_modules/ryugraph/ryujs.node || { echo "ryugraph engine (ryujs.node) was not installed on this runner"; exit 1; }
+
+      - name: Setup MSVC
+        if: matrix.platform == 'win32'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install cmake (Linux)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake
+
+      - name: Build ALGO extension
+        shell: bash
+        working-directory: algowork/node_modules/ryugraph/ryu-source
+        run: |
+          start=$(date +%s)
+          make extension-release EXTENSION_LIST=algo NUM_THREADS=4
+          echo "build seconds: $(( $(date +%s) - start ))"
+
+      - name: Locate the built file
+        id: file
+        shell: bash
+        run: |
+          f=$(find algowork/node_modules/ryugraph/ryu-source/extension/algo -name libalgo.ryu_extension | head -1)
+          test -n "$f" || { echo "libalgo.ryu_extension not found"; exit 1; }
+          echo "path=$f" >> "$GITHUB_OUTPUT"
+          ls -l "$f"
+
+      - name: Compatibility — no newer platform than the engine
+        shell: bash
+        run: node scripts/algo-compat-check.mjs ${{ matrix.platform }} "${{ steps.file.outputs.path }}" algowork/node_modules/ryugraph/prebuilt/${{ matrix.engine }}
+
+      - name: Load by path (control + experiment)
+        shell: bash
+        working-directory: algowork
+        run: node ../scripts/algo-load-check.mjs "$GITHUB_WORKSPACE/${{ steps.file.outputs.path }}"
+
+      - name: Assemble package
+        shell: bash
+        env:
+          ALGO_RYUGRAPH_DIR: algowork/node_modules/ryugraph
+        run: node scripts/algo-package.mjs ${{ matrix.key }} "${{ steps.file.outputs.path }}" "pkg/${{ matrix.key }}" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: algo-${{ matrix.key }}
+          path: pkg/${{ matrix.key }}
+          if-no-files-found: error
+
+  publish:
+    name: publish to npm
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC trusted publishing + provenance
+    steps:
+      # No `registry-url`: it writes an empty auth token that suppresses OIDC (see publish.yml).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g npm@latest && npm --version
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: algo-*
+          path: pkg
+      - name: Publish each platform package
+        shell: bash
+        run: |
+          for d in pkg/algo-*; do
+            echo "::group::$(node -p "require('./$d/package.json').name")"
+            (cd "$d" && npm publish --access public)
+            echo "::endgroup::"
+          done
