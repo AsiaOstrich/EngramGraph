@@ -103,7 +103,7 @@ function looksBinary(path: string): boolean {
 // and "target" (Maven's build-output dir; Gradle's default is "build",
 // already skipped below alongside the pre-existing "dist" entry for the
 // same "generic build-output dir name" reason).
-const SKIP_DIRS = new Set([
+export const SKIP_DIRS: ReadonlySet<string> = new Set([
   "node_modules", "dist", ".engram", ".git", "coverage", "bin", "obj",
   "__pycache__", ".venv", "venv", "vendor", "target", "build",
 ]);

@@ -20,7 +20,9 @@ import { toPosixPath } from "../code-graph/path-utils.js";
 import { readIndexHealth, definitionFiles, type IndexHealth } from "../code-graph/index.js";
 import { manifestPathForDb } from "../code-graph/parse-manifest.js";
 import { unresolvedIdClusters } from "../knowledge-graph/parser.js";
+import { callResolutionHint, knowledgeNamingHint } from "./index-hints.js";
 import { READ_ONLY_COMMANDS } from "./read-only-commands.js";
+import { SKIP_DIRS } from "./walk.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
 
@@ -40,7 +42,9 @@ Commands:
                                   does not run those tools itself) to
                                   upgrade/fill CALLS edges tree-sitter alone
                                   can't resolve; <path>'s SCIP document paths
-                                  must be relative to this same <dir>
+                                  must be relative to this same <dir>.
+                                  Skips a fixed list of directories (see
+                                  below); .gitignore is NOT read
   callers <symbol> [--depth N]    Functions that (transitively) call <symbol>
   callees <symbol> [--depth N]    Functions that <symbol> (transitively) calls
   implementers <spec-id>          Files (+ functions) that implement a spec (spec→code)
@@ -78,8 +82,11 @@ Graph DB selection (highest first): ENGRAM_DB env > --graph > --isolation
 git-branch (per current branch) > default ./.engram/graph.db.
 Env ENGRAM_ISOLATION=git-branch enables per-branch isolation without the flag.
 
+Directories index never walks (fixed; .gitignore is NOT read):
+  ${[...SKIP_DIRS].join(", ")}
+
 Connect a coding assistant (MCP): claude mcp add egr -- npx egr-mcp
-  then confirm with: claude mcp list   (Codex/Cursor/Windsurf: see docs/MCP.md)
+  then confirm with: claude mcp list   (Codex/Cursor/Windsurf, and Windows: see docs/MCP.md)
 Run "egr doctor" if a language seems to be missing from your graph.`;
 
 const VERSION = (pkg as { version: string }).version;
@@ -439,7 +446,12 @@ async function main(): Promise<void> {
             su.map((u) => `${u.files} ${u.ext} file(s)`).join(", ") +
             " — unrecognized extension, not parsed as any language."
           : "";
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${unindexed}`;
+        // Next steps, only when the counts above show they would change something
+        // (consumer feedback on 0.11.0 — see index-hints.ts).
+        const hints =
+          callResolutionHint(s.code, Boolean(s.scip)) +
+          knowledgeNamingHint(s.knowledge, s.code.implements, clusters.length > 0);
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${unindexed}${hints}`;
       });
       break;
     }

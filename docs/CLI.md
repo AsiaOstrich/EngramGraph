@@ -48,6 +48,8 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
   .kt .kts .rs .cpp .cc .cxx .hpp .h .hh .rb .php .dart` (`.d.ts` excluded).
 - Skipped directories: `node_modules`, `dist`, `.engram`, `.git`, `coverage`,
   `bin`, `obj`, `__pycache__`, `.venv`, `venv`, `vendor`, `target`, `build`.
+  This list is fixed: `.gitignore` is **not** read. A generated or vendored
+  directory under another name (e.g. `packages/`) is indexed like any other.
 - `--clean`: drop the graph's data before indexing. Indexing is otherwise an
   upsert (MERGE) that never deletes, so a node removed from the code lingers;
   `--clean` rebuilds from scratch to prune it.

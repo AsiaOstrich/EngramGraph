@@ -167,3 +167,22 @@ describe("docs/MCP.md tool table stays in sync with src/mcp/server.ts", () => {
     });
   }
 });
+
+// Consumer feedback on 0.11.0: "does index honour .gitignore?" The answer is a
+// fixed skip list, which now appears in three places — walk.ts (the one that
+// runs), `egr --help` (generated from it) and docs/CLI.md (hand-written, in
+// three languages). The hand-written copies are the ones that drift.
+describe("docs/CLI.md skipped-directory list matches walk.ts SKIP_DIRS", () => {
+  it("names exactly the directories the walker skips, in every locale", async () => {
+    const { SKIP_DIRS } = await import("../src/cli/walk.js");
+    const expected = [...SKIP_DIRS].sort();
+    for (const file of ["docs/CLI.md", "locales/zh-TW/docs/CLI.md", "locales/zh-CN/docs/CLI.md"]) {
+      const text = readFileSync(join(ROOT, file), "utf8");
+      const start = text.search(/Skipped directories:|略過的目錄：|跳过的目录：/);
+      expect(start, `${file}: skipped-directory line not found`).toBeGreaterThanOrEqual(0);
+      const block = text.slice(start, text.indexOf("\n- ", start + 1));
+      const named = [...block.matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "").filter((n) => !n.includes(".gitignore") && !n.includes("packages/"));
+      expect(named.sort(), file).toEqual(expected);
+    }
+  });
+});

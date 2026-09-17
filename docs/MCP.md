@@ -33,6 +33,16 @@ claude mcp add egr --env ENGRAM_DB=/abs/path/.engram/graph.db -- npx egr-mcp
 
 Verify with `claude mcp list` → `egr … ✓ Connected`.
 
+**Windows (PowerShell, not WSL).** Reported working on Windows 11 with a global
+install (`npm i -g engramgraph`), launching the bin through `cmd /c`:
+
+```powershell
+claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- cmd /c egr-mcp
+```
+
+The `npx egr-mcp` form above has **not** been verified on native Windows. If it
+does not connect there, use the global install and the command above.
+
 ### Codex / Cursor / Windsurf (and other MCP clients)
 
 Add a stdio server to the client's MCP config. The shape varies per client, but

@@ -18,7 +18,7 @@ status: complete
 > [SAGE](https://arxiv.org/abs/2605.12061) 自演化图谱记忆与
 > CodeGraph 结构化代码理解。
 
-**许可：** MIT · **运行环境：** Node.js ≥ 22 · **图数据库：** [Kuzu](https://kuzudb.com/)（嵌入式、Cypher）· **无需 LLM**（确定性）
+**许可：** MIT · **运行环境：** Node.js ≥ 22 · **图数据库：** [Kuzu](https://kuzudb.com/)（嵌入式、Cypher）· **无需 LLM**（确定性）· 除 `god-nodes`／`communities`／`related` 首次使用时会下载一个图算法扩展外，全部可离线使用
 
 EngramGraph 是通用引擎。默认行为（“单一 repo + 通用 markdown + git 信号”）对任何项目
 开箱即用；项目专属行为则通过可插拔的 adapter 提供。

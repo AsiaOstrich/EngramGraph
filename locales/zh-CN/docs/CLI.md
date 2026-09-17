@@ -52,6 +52,8 @@ egr <command> [args] [options]
   .kt .kts .rs .cpp .cc .cxx .hpp .h .hh .rb .php .dart`（排除 `.d.ts`）。
 - 跳过的目录：`node_modules`、`dist`、`.engram`、`.git`、`coverage`、`bin`、
   `obj`、`__pycache__`、`.venv`、`venv`、`vendor`、`target`、`build`。
+  这份清单是固定的：**不会**读 `.gitignore`。以其他名称存放的生成物或第三方目录
+  （例如 `packages/`）会和其他目录一样被索引。
 - `--clean`：索引前先清空图谱数据。索引本是 upsert（MERGE）从不删除，代码里被移除的节点
   会残留；`--clean` 从头重建以清掉它。
 

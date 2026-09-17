@@ -39,6 +39,16 @@ claude mcp add egr --env ENGRAM_DB=/abs/path/.engram/graph.db -- npx egr-mcp
 
 用 `claude mcp list` 验证 → `egr … ✓ Connected`。
 
+**Windows（PowerShell，非 WSL）。** 有用户在 Windows 11 上以全局安装
+（`npm i -g engramgraph`）、通过 `cmd /c` 启动 bin，实测可连接：
+
+```powershell
+claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- cmd /c egr-mcp
+```
+
+上方 `npx egr-mcp` 的写法**尚未**在原生 Windows 上验证。若在那里连不上，
+请改用全局安装与上面这条命令。
+
 ### Codex / Cursor / Windsurf（及其他 MCP 客户端）
 
 在客户端的 MCP 配置中加入一个 stdio server。各客户端格式略有不同，但

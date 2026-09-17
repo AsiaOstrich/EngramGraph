@@ -117,6 +117,14 @@ const ALGO_OFFLINE_HELP = [
   ``,
   `<platform> is e.g. linux_amd64, win_amd64, osx_arm64 — the error above names`,
   `the exact path this install expected. Building needs cmake and a C++ compiler.`,
+  ``,
+  `On Windows the directory is under %USERPROFILE%, not ~ — in PowerShell:`,
+  ``,
+  `  New-Item -ItemType Directory -Force "$env:USERPROFILE\.ryu\extension\<ryugraph-version>\win_amd64\algo"`,
+  `  Copy-Item libalgo.ryu_extension "$env:USERPROFILE\.ryu\extension\<ryugraph-version>\win_amd64\algo\"`,
+  ``,
+  `A libalgo.ryu_extension built for the same <ryugraph-version> and platform on any`,
+  `machine can be copied in this way; the build steps above have not been verified on Windows.`,
 ].join("\n");
 
 /**

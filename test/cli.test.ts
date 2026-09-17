@@ -117,4 +117,31 @@ describe("egr CLI entry (spawn)", () => {
       rmSync(work, { recursive: true, force: true });
     }
   });
+
+  // Consumer feedback on 0.11.0: the counts were right and said nothing about
+  // what to do next. Asserted on the shipped dist for the same reason as above —
+  // index-hints.test.ts stays green if index.ts stops printing `${hints}`.
+  it("index prints next-step hints when calls go unlinked and docs go unnamed", () => {
+    const work = mkdtempSync(join(tmpdir(), "engram-cli-hints-"));
+    try {
+      const repo = join(work, "repo");
+      mkdirSync(repo, { recursive: true });
+      // one function, three calls to functions that do not exist in the repo
+      writeFileSync(join(repo, "app.ts"), "export function run() { alpha(); beta(); gamma(); }\n");
+      writeFileSync(join(repo, "notes.md"), "# Meeting notes\n\nNothing to see.\n");
+      writeFileSync(join(repo, "SPEC-1.md"), "# SPEC-1 Login\n\nUsers can log in.\n");
+      const r = spawnSync(process.execPath, [CLI, "index", repo, "--docs"], {
+        encoding: "utf8",
+        cwd: work,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, ENGRAM_DB: join(work, "g.db") },
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain("--scip");
+      expect(r.stdout).toMatch(/not recognised as a spec or decision/);
+      expect(r.stdout).toContain("// implements SPEC-42");
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
 });
