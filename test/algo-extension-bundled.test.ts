@@ -31,14 +31,25 @@ describe("algoPackageFor", () => {
   it("maps each ryugraph prebuilt platform to its package", () => {
     expect(algoPackageFor("win32", "x64")).toBe("@asiaostrich/engramgraph-algo-win32-x64");
     expect(algoPackageFor("linux", "x64")).toBe("@asiaostrich/engramgraph-algo-linux-x64");
-    expect(algoPackageFor("linux", "arm64")).toBe("@asiaostrich/engramgraph-algo-linux-arm64");
     expect(algoPackageFor("darwin", "arm64")).toBe("@asiaostrich/engramgraph-algo-darwin-arm64");
     expect(algoPackageFor("darwin", "x64")).toBe("@asiaostrich/engramgraph-algo-darwin-x64");
   });
 
   it("returns null for a platform nothing is built for", () => {
     expect(algoPackageFor("win32", "arm64")).toBeNull();
+    expect(algoPackageFor("linux", "arm64")).toBeNull();
     expect(algoPackageFor("freebsd", "x64")).toBeNull();
+  });
+});
+
+describe("linux-arm64 stays out only while ryugraph's arm64 engine is really x86-64", () => {
+  it("the two prebuilt engine files are still identical — when this fails, add linux-arm64 back", () => {
+    const arm = readFileSync(join(ROOT, "node_modules/ryugraph/prebuilt/ryujs-linux-arm64.node"));
+    const x64 = readFileSync(join(ROOT, "node_modules/ryugraph/prebuilt/ryujs-linux-x64.node"));
+    expect(
+      arm.equals(x64),
+      "ryugraph now ships a distinct linux-arm64 engine: add linux-arm64 to ALGO_PLATFORM_PACKAGES and the algo-packages.yml matrix (XSPEC-416)",
+    ).toBe(true);
   });
 });
 
@@ -53,7 +64,7 @@ describe("R4 — the extension version is pinned to the engine", () => {
     ).toBe(m?.[1]);
   });
 
-  it("optionalDependencies pin either none or all five platform packages, at that version", () => {
+  it("optionalDependencies pin either none or every platform package, at that version", () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
       optionalDependencies?: Record<string, string>;
     };

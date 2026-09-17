@@ -6,6 +6,9 @@
 # has not changed across the 11 releases since 2026-06-12. Re-run it when
 # test/algo-extension-bundled.test.ts reports that RYU_EXTENSION_VERSION moved.
 #
+# linux-arm64 is not built: ryugraph 25.9.1 ships an x86-64 engine under that name
+# (predictable-labs/ryugraph#48), measured on the first run — see algo-extension.ts.
+#
 # Every platform, on the machine that built it:
 #   1. compat — the extension must not demand a newer platform than the engine
 #   2. load   — control arm must fail, loading by forward-slash path must work
@@ -37,7 +40,6 @@ jobs:
         include:
           - { key: win32-x64, os: windows-latest, platform: win32, engine: ryujs-win32-x64.node }
           - { key: linux-x64, os: ubuntu-24.04, platform: linux, engine: ryujs-linux-x64.node }
-          - { key: linux-arm64, os: ubuntu-24.04-arm, platform: linux, engine: ryujs-linux-arm64.node }
           - { key: darwin-arm64, os: macos-15, platform: darwin, engine: ryujs-darwin-arm64.node }
           - { key: darwin-x64, os: macos-15-intel, platform: darwin, engine: ryujs-darwin-x64.node }
     runs-on: ${{ matrix.os }}

@@ -10,7 +10,7 @@
 > [SAGE](https://arxiv.org/abs/2605.12061) self-evolving graph memory with
 > CodeGraph structural code understanding.
 
-**License:** MIT · **Runtime:** Node.js ≥ 22 · **Graph DB:** [Kuzu](https://kuzudb.com/) (embedded, Cypher) · **No LLM required** (deterministic) · **Works offline** — the graph-algorithm extension behind `god-nodes` / `communities` / `related` is installed with the package on Windows x64, Linux x64/arm64 and macOS ([details](#troubleshooting-misleading-native-binary-errors))
+**License:** MIT · **Runtime:** Node.js ≥ 22 · **Graph DB:** [Kuzu](https://kuzudb.com/) (embedded, Cypher) · **No LLM required** (deterministic) · **Works offline** — the graph-algorithm extension behind `god-nodes` / `communities` / `related` is installed with the package on Windows x64, Linux x64 and macOS ([details](#troubleshooting-misleading-native-binary-errors))
 
 EngramGraph is a general-purpose engine. The defaults ("single repo + generic
 markdown + git signals") work out of the box for any project; project-specific

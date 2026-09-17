@@ -18,7 +18,7 @@ status: complete
 > [SAGE](https://arxiv.org/abs/2605.12061) 自演化圖譜記憶與
 > CodeGraph 結構化程式碼理解。
 
-**授權：** MIT · **執行環境：** Node.js ≥ 22 · **圖譜資料庫：** [Kuzu](https://kuzudb.com/)（嵌入式、Cypher）· **無需 LLM**（確定性）· **可完全離線使用**——`god-nodes`／`communities`／`related` 所需的圖演算法擴充，在 Windows x64、Linux x64／arm64 與 macOS 上會隨套件一起安裝
+**授權：** MIT · **執行環境：** Node.js ≥ 22 · **圖譜資料庫：** [Kuzu](https://kuzudb.com/)（嵌入式、Cypher）· **無需 LLM**（確定性）· **可完全離線使用**——`god-nodes`／`communities`／`related` 所需的圖演算法擴充，在 Windows x64、Linux x64 與 macOS 上會隨套件一起安裝
 
 EngramGraph 是通用引擎。預設行為（「單一 repo + 通用 markdown + git 訊號」）對任何專案
 開箱即用；專案專屬行為則透過可插拔的 adapter 提供。

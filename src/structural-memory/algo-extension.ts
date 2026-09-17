@@ -28,11 +28,18 @@ import { dirname, join } from "node:path";
 /** Must equal ryugraph's RYU_EXTENSION_VERSION — enforced by test/algo-extension-bundled.test.ts. */
 export const ALGO_EXTENSION_VERSION = "25.9.0";
 
-/** One package per platform ryugraph ships a prebuilt engine for. */
+/**
+ * One package per platform where ryugraph's engine actually runs.
+ *
+ * linux-arm64 is deliberately absent: ryugraph 25.9.1 ships the x86-64 engine under
+ * the arm64 filename (byte-identical files; predictable-labs/ryugraph#48), so
+ * engramgraph cannot run there and an extension package would load into nothing.
+ * test/algo-extension-bundled.test.ts turns red the day those two files differ,
+ * which is the signal to add it back.
+ */
 export const ALGO_PLATFORM_PACKAGES: Readonly<Record<string, string>> = {
   "win32-x64": "@asiaostrich/engramgraph-algo-win32-x64",
   "linux-x64": "@asiaostrich/engramgraph-algo-linux-x64",
-  "linux-arm64": "@asiaostrich/engramgraph-algo-linux-arm64",
   "darwin-arm64": "@asiaostrich/engramgraph-algo-darwin-arm64",
   "darwin-x64": "@asiaostrich/engramgraph-algo-darwin-x64",
 };
