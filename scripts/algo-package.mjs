@@ -53,7 +53,9 @@ async function main() {
   const pkg = packageJsonFor(platformKey, constants, sourceRun);
   mkdirSync(outDir, { recursive: true });
   copyFileSync(extensionFile, join(outDir, "libalgo.ryu_extension"));
-  copyFileSync(join(ROOT, "node_modules/ryugraph/LICENSE"), join(outDir, "LICENSE"));
+  // The ryugraph the extension was built from — in CI that is a separate install, not this repo's node_modules.
+  const ryugraphDir = process.env.ALGO_RYUGRAPH_DIR ?? join(ROOT, "node_modules/ryugraph");
+  copyFileSync(join(ryugraphDir, "LICENSE"), join(outDir, "LICENSE"));
   writeFileSync(join(outDir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
   writeFileSync(
     join(outDir, "algo-extension.json"),

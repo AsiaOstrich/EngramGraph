@@ -3,7 +3,7 @@
  * If its parser drifts from algo-extension.ts, the packages it builds would not be the
  * ones engramgraph looks for, and nothing else would notice.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -39,6 +39,25 @@ describe("scripts/algo-package.mjs", () => {
       expect(pkg.cpu).toEqual(["x64"]);
       expect(readFileSync(join(out, "LICENSE"), "utf8")).toMatch(/MIT License/);
       expect(readFileSync(join(out, "libalgo.ryu_extension"), "utf8")).toBe("not a real extension");
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it("takes the LICENSE from the ryugraph the extension was built from, when told", () => {
+    // In CI ryugraph is installed in a separate directory, not this repo's node_modules.
+    const work = mkdtempSync(join(tmpdir(), "engram-algo-pkg-"));
+    try {
+      const fakeRyu = join(work, "ryu");
+      mkdirSync(fakeRyu, { recursive: true });
+      writeFileSync(join(fakeRyu, "LICENSE"), "MIT License\nfrom the build's own ryugraph\n");
+      writeFileSync(join(work, "x"), "ext");
+      const r = spawnSync(process.execPath, [join(ROOT, "scripts/algo-package.mjs"), "linux-x64", join(work, "x"), join(work, "o")], {
+        encoding: "utf8",
+        env: { ...process.env, ALGO_RYUGRAPH_DIR: fakeRyu },
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(readFileSync(join(work, "o", "LICENSE"), "utf8")).toContain("from the build's own ryugraph");
     } finally {
       rmSync(work, { recursive: true, force: true });
     }

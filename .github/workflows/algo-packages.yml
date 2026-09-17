@@ -58,8 +58,12 @@ jobs:
           mkdir -p algowork && cd algowork
           npm init -y > /dev/null
           V=$(node -p "require('../package.json').dependencies.ryugraph")
-          npm install "ryugraph@$V" --no-audit --no-fund
+          # --foreground-scripts: ryugraph's install script copies prebuilt/ryujs-<platform>.node to ryujs.node,
+          # and npm hides its output by default — on linux-arm64 that copy did not happen and nothing said why.
+          npm install "ryugraph@$V" --no-audit --no-fund --foreground-scripts
           node -p "JSON.parse(require('fs').readFileSync('node_modules/ryugraph/package.json','utf8')).version"
+          ls -l node_modules/ryugraph/*.node node_modules/ryugraph/prebuilt/ || true
+          test -f node_modules/ryugraph/ryujs.node || { echo "ryugraph engine (ryujs.node) was not installed on this runner"; exit 1; }
 
       - name: Setup MSVC
         if: matrix.platform == 'win32'
@@ -99,6 +103,8 @@ jobs:
 
       - name: Assemble package
         shell: bash
+        env:
+          ALGO_RYUGRAPH_DIR: algowork/node_modules/ryugraph
         run: node scripts/algo-package.mjs ${{ matrix.key }} "${{ steps.file.outputs.path }}" "pkg/${{ matrix.key }}" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
       - uses: actions/upload-artifact@v4
