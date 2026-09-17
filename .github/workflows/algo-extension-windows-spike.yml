@@ -1,0 +1,78 @@
+# Spike (2026-09-17): can ryugraph's ALGO extension be built on Windows and loaded
+# from an arbitrary path there? Decides whether EngramGraph can bundle it so
+# intranet Windows users need no network. Runs only on its own branch.
+name: ALGO extension Windows spike
+
+on:
+  push:
+    branches: [spike/algo-extension-windows]
+  workflow_dispatch:
+
+jobs:
+  build-and-load:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install ryugraph only (no native grammar builds)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force spikework | Out-Null
+          Set-Location spikework
+          npm init -y | Out-Null
+          $v = node -p "require('../package.json').dependencies.ryugraph"
+          Write-Host "ryugraph spec from package.json: $v"
+          npm install "ryugraph@$v" --no-audit --no-fund
+          node -p "require('ryugraph/package.json').version"
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Tool versions
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          make --version
+
+      - name: Build ALGO extension
+        shell: pwsh
+        working-directory: spikework/node_modules/ryugraph/ryu-source
+        run: |
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          make extension-release EXTENSION_LIST=algo NUM_THREADS=4
+          if ($LASTEXITCODE -ne 0) { throw "build failed with exit code $LASTEXITCODE" }
+          Write-Host "build seconds: $($sw.Elapsed.TotalSeconds)"
+          Get-ChildItem -Recurse -Filter "libalgo*" | ForEach-Object { Write-Host "$($_.FullName)  $($_.Length) bytes" }
+
+      - name: Load from an arbitrary path (control + two path spellings)
+        shell: pwsh
+        working-directory: spikework
+        run: |
+          $ext = Get-ChildItem -Recurse -Path node_modules/ryugraph/ryu-source/extension/algo -Filter "libalgo.ryu_extension" | Select-Object -First 1
+          if (-not $ext) { throw "libalgo.ryu_extension not found after build" }
+          $dest = Join-Path $env:RUNNER_TEMP "carried-in"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item $ext.FullName $dest
+          $emptyHome = Join-Path $env:RUNNER_TEMP "empty-home"
+          New-Item -ItemType Directory -Force $emptyHome | Out-Null
+          $env:USERPROFILE = $emptyHome
+          $env:HOME = $emptyHome
+          node ../scripts/spike/algo-load-probe.mjs (Join-Path $dest "libalgo.ryu_extension")
+          $code = $LASTEXITCODE
+          Write-Host "empty home items after probe: $((Get-ChildItem -Force $emptyHome | Measure-Object).Count)"
+          exit $code
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: libalgo-win_amd64
+          path: spikework/node_modules/ryugraph/ryu-source/extension/algo/build/**/libalgo*
+          if-no-files-found: warn
