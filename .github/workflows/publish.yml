@@ -54,11 +54,10 @@ jobs:
             const lock = require('./package-lock.json');
             const pkg = require('./package.json');
             const declared = { ...pkg.dependencies, ...pkg.optionalDependencies };
-            const rows = Object.keys(declared).map((name) => ({
-              name,
-              range: declared[name],
-              locked: (lock.packages['node_modules/' + name] || {}).version || null,
-            }));
+            const rows = Object.keys(declared).map((name) => {
+              const entry = lock.packages['node_modules/' + name] || {};
+              return { name, range: declared[name], locked: entry.version || null, os: entry.os || null, cpu: entry.cpu || null };
+            });
             require('fs').writeFileSync('locked-versions.json', JSON.stringify(rows, null, 2));
             console.log('Recorded ' + rows.length + ' runtime dependencies from the lockfile.');
           "
@@ -86,8 +85,19 @@ jobs:
             const rows = require('./locked-versions.json');
             let drifted = 0;
             let unreadable = 0;
+            let otherPlatform = 0;
+            // Platform packages (os/cpu in the lockfile) that do not match this
+            // runner are skipped by npm on purpose — the ALGO extension ships one
+            // package per platform. Only those count as expected-absent; a missing
+            // package with no os/cpu, or one for this platform, still fails.
+            const fits = (list, value) => !list || list.includes(value);
             for (const row of rows) {
               const manifest = 'node_modules/' + row.name + '/package.json';
+              if (!existsSync(manifest) && !(fits(row.os, process.platform) && fits(row.cpu, process.arch))) {
+                otherPlatform++;
+                console.log('  ' + row.name + '  for ' + row.os + '/' + row.cpu + ', not ' + process.platform + '/' + process.arch + ' — not installed here, as expected');
+                continue;
+              }
               if (!existsSync(manifest)) {
                 unreadable++;
                 console.log('  ' + row.name + '  ' + row.range + '  pinned=' + row.locked + '  NOT INSTALLED');
@@ -105,7 +115,7 @@ jobs:
               process.exitCode = 1;
             }
             console.log('');
-            console.log(drifted + ' of ' + rows.length + ' runtime dependencies resolved to a version this repo does not pin.');
+            console.log(drifted + ' of ' + (rows.length - otherPlatform) + ' runtime dependencies for this platform resolved to a version this repo does not pin (' + otherPlatform + ' belong to other platforms).');
             console.log(drifted === 0
               ? 'Consumers install exactly what the lockfile tests.'
               : 'The suite below runs against THOSE versions — the ones users actually get.');
