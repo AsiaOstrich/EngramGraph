@@ -9,9 +9,11 @@
  *   - on Windows a backslash path is a parser error — only forward slashes load;
  *   - a path containing an apostrophe breaks a single-quoted statement.
  */
+import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { GraphConnection } from "../src/graph-db/connection.js";
 import { initSchema } from "../src/graph-db/schema.js";
@@ -181,6 +183,42 @@ describe("ensureAlgoExtension with a bundled package (real ryugraph)", () => {
     expect(statements.some((s) => /INSTALL\s+ALGO/i.test(s)), `INSTALL ran: ${statements.join(" | ")}`).toBe(false);
     expect(statements.some((s) => s.startsWith("LOAD EXTENSION \"") && s.includes("o'brien-algo"))).toBe(true);
   });
+
+  it("a graph still opens after the package that loaded ALGO is gone", async () => {
+    if (!cached) {
+      if (process.env.CI) throw new Error(`no ALGO extension in ~/.ryu/extension/${ALGO_EXTENSION_VERSION} — ci.yml should have built one`);
+      return;
+    }
+    const pkgDir = join(dir, "node_modules", "@asiaostrich", "moved-algo");
+    mkdirSync(pkgDir, { recursive: true });
+    const extFile = join(pkgDir, "libalgo.ryu_extension");
+    copyFileSync(cached, extFile);
+    setBundledAlgoResolver(() => ({ pkg: "@asiaostrich/engramgraph-algo-test", path: extFile.replace(/\\/g, "/") }));
+
+    await godNodes(conn, 5);
+
+    // Copy the files while the connection is still open: that is what egr leaves
+    // on disk when it exits. Closing first would checkpoint and hide the defect.
+    const snap = join(dir, "snapshot");
+    mkdirSync(snap);
+    for (const f of readdirSync(dir).filter((n) => n.startsWith("graph.db"))) copyFileSync(join(dir, f), join(snap, f));
+    // Remove every package this connection loaded from, not just this one: a
+    // second LOAD of an already-loaded library writes no new record, so the WAL
+    // may still name the previous test's directory.
+    rmSync(join(dir, "node_modules"), { recursive: true, force: true });
+
+    // Reopen in a fresh process. In this one the library is still loaded, so a
+    // replayed load finds it in memory and the missing file never matters.
+    const ryugraph = pathToFileURL(join(ROOT, "node_modules/ryugraph/index.mjs")).href;
+    const script =
+      `import ryu from ${JSON.stringify(ryugraph)};` +
+      `const c = new ryu.Connection(new ryu.Database(${JSON.stringify(join(snap, "graph.db"))}));` +
+      `const r = await c.query("MATCH (f:Function) RETURN count(f) AS n");` +
+      `console.log(JSON.stringify(await r.getAll()));`;
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" });
+    expect(child.status, `reopen failed:\n${child.stderr}`).toBe(0);
+    expect(JSON.parse(child.stdout.trim())[0]?.n).toBe(2);
+  });
 });
 
 describe("ensureAlgoExtension without a bundled package", () => {
@@ -227,5 +265,22 @@ describe("ensureAlgoExtension without a bundled package", () => {
 
     expect(err?.message).not.toContain("@asiaostrich/engramgraph-algo-");
     expect(err?.message).toMatch(/no prebuilt/i);
+  });
+
+  it("a load by name from ~/.ryu is checkpointed too — its WAL record names the cached file's absolute path", async () => {
+    setBundledAlgoResolver(() => ({ pkg: null, path: null }));
+    const statements: string[] = [];
+    const fake = {
+      execute: async (cypher: string) => {
+        statements.push(cypher);
+      },
+      query: async () => [],
+    } as unknown as GraphConnection;
+
+    await godNodes(fake, 5);
+
+    const load = statements.findIndex((s) => /^LOAD EXTENSION ALGO/i.test(s));
+    expect(load, statements.join(" | ")).toBeGreaterThanOrEqual(0);
+    expect(statements[load + 1]).toBe("CHECKPOINT;");
   });
 });

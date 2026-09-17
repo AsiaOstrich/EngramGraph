@@ -156,6 +156,7 @@ async function ensureAlgoExtension(conn: GraphConnection): Promise<void> {
         { cause: err },
       );
     }
+    await forgetLoadedExtensionPath(conn);
     return;
   }
 
@@ -176,6 +177,30 @@ async function ensureAlgoExtension(conn: GraphConnection): Promise<void> {
     algoInstalled = true;
   }
   await conn.execute(`LOAD EXTENSION ALGO;`);
+  await forgetLoadedExtensionPath(conn);
+}
+
+/**
+ * Checkpoint right after a LOAD EXTENSION, so the graph does not remember where
+ * the extension file was.
+ *
+ * ryugraph writes the load — with the file's absolute path, even for a load by
+ * name from `~/.ryu` — into the WAL, and replays it every time the database
+ * opens. egr exits without checkpointing, so that record stays. Once the file
+ * moves (a Node version switch, a reinstall, a new global prefix, a cleared
+ * `~/.ryu`), every command on that graph fails with "Failed to load library",
+ * including ones that never use ALGO. Measured 2026-09-17: reproduced with a
+ * bare ryugraph script; a CHECKPOINT after the load removed the record and the
+ * graph reopened with the file gone. Closing the connection hides the defect,
+ * because close checkpoints too.
+ *
+ * A read-only connection writes no such record (measured the same day: the file
+ * removed, the graph reopened) and cannot checkpoint — trying would replace the
+ * read-only refusal a caller should see with an IO error.
+ */
+async function forgetLoadedExtensionPath(conn: GraphConnection): Promise<void> {
+  if (conn.readOnly) return;
+  await conn.execute(`CHECKPOINT;`);
 }
 
 /** Test hook: forget that INSTALL ALGO ran in this process. */
