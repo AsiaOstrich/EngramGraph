@@ -256,7 +256,9 @@ describe("egr CLI entry (spawn): index --scip end-to-end", () => {
 
   it("--help documents --scip", () => {
     const r = run(["--help"]);
-    expect(r.status).toBe(0);
+    // Intermittent: exit 1 twice in a pre-commit hook and once in a plain full
+    // run (2026-09-17), never on a rerun. Carry everything the next one leaves.
+    expect(r.status, `signal=${r.signal} error=${r.error}\nstderr:\n${r.stderr}\nstdout:\n${r.stdout}`).toBe(0);
     expect(r.stdout).toContain("--scip");
     expect(r.stdout.toLowerCase()).toContain("scip-dotnet");
   });
