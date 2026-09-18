@@ -112,6 +112,13 @@ export interface ProjectIndexResult {
   calls: number;
   /** IMPLEMENTS edges (Module → Spec) from `// implements` comments. */
   implements: number;
+  /**
+   * IMPORTS edges (Module → Module) resolved from `#include`/`source`/`.`
+   * (XSPEC-414 R2/R4) — see `extractor.ts`'s `ProjectExtraction.imports`
+   * doc comment for the resolution policy (same-directory match, else a
+   * globally-unique basename match, else dropped).
+   */
+  imports: number;
   /** Calls whose callee name matched >1 function across the repo (skipped). */
   ambiguous: number;
   /** Calls whose callee name matched no known function (skipped). */

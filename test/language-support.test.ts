@@ -123,9 +123,12 @@ describe("the SupportedLanguage union and the runtime registry agree", () => {
     kotlin: true,
     rust: true,
     cpp: true,
+    c: true,
     ruby: true,
     php: true,
     dart: true,
+    swift: true,
+    bash: true,
   };
 
   it("has no language in the union that is missing from the registry", () => {
@@ -202,7 +205,11 @@ describe("registry extensions agree with detectLanguage()", () => {
 
 describe("detectLanguage() and unrecognized extensions (XSPEC-414 R1)", () => {
   it("returns undefined for an extension with no grammar, instead of defaulting to javascript", () => {
-    for (const path of ["main.swift", "build.sh", "Makefile.mk", "notes.xyz"]) {
+    // Originally "main.swift"/"build.sh" — both gained real grammars in
+    // XSPEC-414 R3/R4 (see "registry extensions agree with detectLanguage()"
+    // above for their now-positive assertions), so this uses extensions
+    // still outside this engine's language set.
+    for (const path of ["main.zig", "build.lua", "Makefile.mk", "notes.xyz"]) {
       expect(detectLanguage(path), path).toBeUndefined();
     }
   });

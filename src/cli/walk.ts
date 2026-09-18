@@ -38,6 +38,7 @@ import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } fr
 import { extname, join, relative } from "node:path";
 
 import { toPosixPath } from "../code-graph/path-utils.js";
+import type { SupportedLanguage } from "../code-graph/types.js";
 
 export { toPosixPath };
 
@@ -70,19 +71,70 @@ const BINARY_PROBE_BYTES = 8000;
  * hard-failure tracking above, which only applies to files that already
  * matched a known extension.
  */
-function looksBinary(path: string): boolean {
+/**
+ * A shebang line naming an interpreter this engine treats as Bash (XSPEC-414
+ * R4 OQ2): `#!/bin/bash`, `#!/bin/sh`, `#!/usr/bin/env bash`,
+ * `#!/usr/bin/env sh` (and the quoted-interpreter-path variants of each).
+ * Any OTHER shebang (`#!/usr/bin/env python3`, `#!/usr/bin/node`, ...) is
+ * deliberately out of this spec's scope — see this function's doc comment on
+ * {@link probeUnmatchedFile} for where the result of this check is used.
+ */
+function detectShebangLanguage(buf: Buffer, bytesRead: number): SupportedLanguage | undefined {
+  // "#!" as the first two bytes, same ASCII-byte check style as the NUL
+  // scan above — no need to decode the buffer just to rule this out.
+  if (bytesRead < 3 || buf[0] !== 0x23 /* # */ || buf[1] !== 0x21 /* ! */) return undefined;
+  const newline = buf.subarray(0, bytesRead).indexOf(0x0a);
+  const line = buf.subarray(0, newline === -1 ? bytesRead : newline).toString("utf8");
+  const match = /^#!\s*(\S+)(?:\s+(\S+))?/.exec(line);
+  if (!match) return undefined;
+  const interpreter = match[1]!;
+  const base = interpreter.split("/").pop() ?? "";
+  // `#!/usr/bin/env bash` / `#!/usr/bin/env sh` — the interpreter name is the
+  // FIRST word of `env`'s own argument, not `env` itself.
+  if (base === "env") {
+    const target = (match[2] ?? "").split(/\s+/)[0] ?? "";
+    return target === "bash" || target === "sh" ? "bash" : undefined;
+  }
+  // `#!/bin/bash` / `#!/bin/sh` (or any other absolute path ending in one of
+  // these two interpreter names).
+  return base === "bash" || base === "sh" ? "bash" : undefined;
+}
+
+/** {@link probeUnmatchedFile}'s result. */
+interface UnmatchedFileProbe {
+  /** True when the file looks binary (a NUL byte, or the file could not be opened/read at all). */
+  binary: boolean;
+  /**
+   * Set only when `checkShebang` was requested AND the file's first line is
+   * a Bash/sh shebang (see {@link detectShebangLanguage}). `undefined`
+   * otherwise, including for every binary file (checked first, short-circuits).
+   */
+  shebangLanguage?: SupportedLanguage;
+}
+
+/**
+ * Combines the binary check above with, optionally, a shebang check — over
+ * the SAME single read (XSPEC-414 R4 OQ2: "R1 走訪本來就讀前 8000 bytes 判斷
+ * 二進位，檔頭判斷沿用同一次讀取，不要多讀一次檔"). Splitting these into two
+ * separate `readSync` calls per file would double the I/O for every
+ * extension-less file `egr index` walks over, for no benefit — the shebang
+ * line, if any, is always within the same first 8000 bytes the binary check
+ * already reads.
+ */
+function probeUnmatchedFile(path: string, checkShebang: boolean): UnmatchedFileProbe {
   let fd: number;
   try {
     fd = openSync(path, "r");
   } catch {
-    return true;
+    return { binary: true };
   }
   try {
     const buf = Buffer.alloc(BINARY_PROBE_BYTES);
     const bytesRead = readSync(fd, buf, 0, BINARY_PROBE_BYTES, 0);
-    return buf.subarray(0, bytesRead).includes(0);
+    if (buf.subarray(0, bytesRead).includes(0)) return { binary: true };
+    return { binary: false, shebangLanguage: checkShebang ? detectShebangLanguage(buf, bytesRead) : undefined };
   } catch {
-    return true;
+    return { binary: true };
   } finally {
     closeSync(fd);
   }
@@ -109,7 +161,12 @@ export const SKIP_DIRS: ReadonlySet<string> = new Set([
 ]);
 
 export interface WalkResult {
-  files: Array<{ path: string; source: string }>;
+  /**
+   * `language` is set only for an extension-less shebang script matched via
+   * `detectShebangScripts` (XSPEC-414 R4 OQ2) — every extension-matched file
+   * omits it, letting `detectLanguage()` infer from the path as before.
+   */
+  files: Array<{ path: string; source: string; language?: SupportedLanguage }>;
   /**
    * Directory symlinks encountered and NOT descended into (XSPEC-373 B3).
    *
@@ -142,8 +199,8 @@ export interface WalkResult {
    * `files` is (same `SKIP_DIRS`, same directory-symlink handling), MINUS
    * `.d.ts` files (an existing, deliberate exclusion — declaration files
    * carry no runtime code — not a coverage gap) and binary files (see
-   * {@link looksBinary}: a repo's images/archives/etc. are not "unsupported
-   * source code", they're not source code at all).
+   * {@link probeUnmatchedFile}: a repo's images/archives/etc. are not
+   * "unsupported source code", they're not source code at all).
    *
    * This is a walk-time, extension-only signal: it says nothing about
    * whether `detectLanguage` would recognize the extension either — it is
@@ -161,9 +218,25 @@ export interface WalkResult {
  * Returns a result object rather than a bare array so callers cannot quietly
  * drop the skip list — an optional out-parameter would be omitted by every
  * caller that did not already know to ask, which is the failure this is fixing.
+ *
+ * `detectShebangScripts` (XSPEC-414 R4 OQ2, default `false`) additionally
+ * collects an extension-LESS file whose first line is a Bash/sh shebang
+ * (`#!/bin/bash`, `#!/usr/bin/env sh`, ...) as a `language: "bash"` file —
+ * on top of, not instead of, whatever `exts` already matches by name. Opt-in
+ * rather than always-on because `cli/run.ts`'s `cmdIndex` also calls this
+ * function for its DOCS walk (`walkFiles(dir, [".md"])`): without the flag,
+ * every extension-less file in a repo (a `Makefile`, a git hook, a Python
+ * script with no `.py`) would be probed for a shebang on that call too and,
+ * if it happened to be a shell script, silently fed to `indexKnowledgeDocs`
+ * as if it were a markdown document. Only the CODE walk passes `true`.
  */
-export function walkFiles(root: string, exts: readonly string[]): WalkResult {
-  const files: Array<{ path: string; source: string }> = [];
+export function walkFiles(
+  root: string,
+  exts: readonly string[],
+  opts: { detectShebangScripts?: boolean } = {},
+): WalkResult {
+  const detectShebangScripts = opts.detectShebangScripts ?? false;
+  const files: Array<{ path: string; source: string; language?: SupportedLanguage }> = [];
   const skippedSymlinkDirs: string[] = [];
   const unreadable: Array<{ path: string; reason: string }> = [];
   const unindexed: Array<{ path: string; ext: string }> = [];
@@ -203,7 +276,24 @@ export function walkFiles(root: string, exts: readonly string[]): WalkResult {
       // (declaration files carry no runtime code), not something a user needs
       // told about as unsupported.
       if (isDts) continue;
-      if (looksBinary(full)) continue;
+      // XSPEC-414 R4 OQ2: an extension-less file gets ONE extra chance —
+      // check its shebang in the SAME read the binary probe below already
+      // does — before falling through to the generic "unindexed" bucket.
+      // `extname` is empty for a genuinely extension-less name (a dotfile
+      // like `.bashrc` has `extname === ".bashrc"`, i.e. no separate "no
+      // extension" case to worry about colliding with a real extension).
+      const hasNoExtension = detectShebangScripts && extname(entry.name) === "";
+      const probe = probeUnmatchedFile(full, hasNoExtension);
+      if (probe.binary) continue;
+      if (probe.shebangLanguage) {
+        const path = toPosixPath(relative(root, full));
+        try {
+          files.push({ path, source: readFileSync(full, "utf8"), language: probe.shebangLanguage });
+        } catch (err) {
+          unreadable.push({ path, reason: err instanceof Error ? err.message : String(err) });
+        }
+        continue;
+      }
       unindexed.push({
         path: toPosixPath(relative(root, full)),
         ext: extname(entry.name).toLowerCase() || "(none)",

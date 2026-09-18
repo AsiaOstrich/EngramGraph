@@ -95,20 +95,26 @@ describe("EngramGraph MCP server", () => {
 
   // XSPEC-414 R1: `index_code` used to run ANY file through detectLanguage's
   // old default (unmatched extension -> "javascript"), so an MCP client
-  // indexing a Swift/C/Bash file got it silently parsed with the JS grammar
-  // instead of skipped — wrong data in the graph, with no signal that
-  // anything was wrong. This is the MCP-side half of R1's Scenario.
+  // indexing a file in a language `egr` has no grammar for got it silently
+  // parsed with the JS grammar instead of skipped — wrong data in the graph,
+  // with no signal that anything was wrong. This is the MCP-side half of
+  // R1's Scenario. Originally written against `.swift` as the example
+  // unrecognized extension; Swift gained real support in XSPEC-414 R3, so
+  // this now uses `.zig` (Zig — still outside this engine's language set) to
+  // keep testing "an extension with no grammar at all", not something that
+  // happens to be Swift. Swift/C/Bash's own MCP-path coverage lives in
+  // `test/swift.test.ts` / `test/c.test.ts` / `test/bash.test.ts`.
   it("index_code skips a file with an unrecognized extension instead of parsing it as JavaScript, and reports it", async () => {
     const indexed = (await callJson(client, "index_code", {
       files: [
-        { path: "unsupported.swift", source: 'func greet() {\n  print("hi")\n}\n' },
+        { path: "unsupported.zig", source: 'fn greet() void {\n  print("hi");\n}\n' },
       ],
     })) as { files: number; skippedUnrecognized: Array<{ ext: string; files: number }> };
 
     // Not counted as an indexed file...
     expect(indexed.files).toBe(0);
     // ...and reported, not silently dropped.
-    expect(indexed.skippedUnrecognized).toEqual([{ ext: ".swift", files: 1 }]);
+    expect(indexed.skippedUnrecognized).toEqual([{ ext: ".zig", files: 1 }]);
 
     // No JavaScript-shaped node exists for it in the graph.
     const chain = (await callJson(client, "call_chain", { symbol: "greet", direction: "both" })) as {

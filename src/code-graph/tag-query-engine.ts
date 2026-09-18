@@ -53,11 +53,54 @@ export interface CallSiteCapture {
   node: Parser.SyntaxNode;
 }
 
+/**
+ * A module-relationship reference — C's `#include "foo.h"` / `#include
+ * <foo.h>`, Bash's `source lib.sh` / `. lib.sh` (XSPEC-414 R2/R4). `target`
+ * is the raw captured text with the language's own include punctuation
+ * stripped ({@link cleanImportTarget}) — still relative/unresolved; turning
+ * it into an actual Module→Module edge requires the whole file batch
+ * (`extractor.ts`'s `extractProject` does that), which this per-file query
+ * step has no access to.
+ */
+export interface ImportCapture {
+  target: string;
+  node: Parser.SyntaxNode;
+}
+
 export interface TagQueryResult {
   /** Sorted by byte position ascending — i.e. document / pre-order. */
   definitions: DefinitionCapture[];
   /** Sorted by byte position ascending. */
   callSites: CallSiteCapture[];
+  /** Unresolved, in document order. Empty for every language that doesn't capture `@reference.import`. */
+  imports: ImportCapture[];
+}
+
+/**
+ * Strip the punctuation an include/source target is written with, leaving a
+ * bare path string. Handles C's `#include "foo.h"` (double-quoted) and
+ * `#include <foo.h>` (angle-bracket "system" convention, kept — not
+ * special-cased away — because it costs nothing: a system header's bare name
+ * essentially never coincides with a path inside the indexed project, so it
+ * naturally fails to resolve to any Module rather than needing to be
+ * recognized and excluded up front) as well as Bash's `source lib.sh` / `.
+ * lib.sh` (a bare word, no punctuation at all — left unchanged; also covers
+ * a quoted Bash path, `source "lib.sh"`, the same way as C's quoted form).
+ */
+export function cleanImportTarget(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if (
+      (first === '"' && last === '"') ||
+      (first === "'" && last === "'") ||
+      (first === "<" && last === ">")
+    ) {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
 }
 
 /**
@@ -93,6 +136,7 @@ export function runTagQuery(
 
   const definitions: DefinitionCapture[] = [];
   const callSites: CallSiteCapture[] = [];
+  const imports: ImportCapture[] = [];
 
   for (const match of query.matches(root)) {
     let defKind: "function" | "class" | null = null;
@@ -102,6 +146,9 @@ export function runTagQuery(
 
     for (const capture of match.captures) {
       switch (capture.name) {
+        case "reference.import":
+          imports.push({ target: cleanImportTarget(capture.node.text), node: capture.node });
+          break;
         case "definition.function":
           defKind = "function";
           defNode = capture.node;
@@ -129,6 +176,8 @@ export function runTagQuery(
     }
   }
 
+  imports.sort((a, b) => a.node.startIndex - b.node.startIndex);
+
   // Query match order is not documented to be strictly document-ordered
   // across distinct patterns; sort explicitly so downstream logic that
   // depends on document order (scope-nesting reconstruction, "last
@@ -137,7 +186,7 @@ export function runTagQuery(
   definitions.sort((a, b) => a.node.startIndex - b.node.startIndex);
   callSites.sort((a, b) => a.node.startIndex - b.node.startIndex);
 
-  return { definitions, callSites };
+  return { definitions, callSites, imports };
 }
 
 /**
@@ -333,11 +382,21 @@ export function findEnclosingFunction(
 // implements XSPEC-NNN" comment in a .dart file would silently produce zero
 // IMPLEMENTS edges -- the same silent-gap shape Java's discovery predicted
 // this Set would need to absorb one day.
+// XSPEC-414 R3: `tree-sitter-swift`'s `//`/`///` line comment (doc or plain,
+// both fold into the same "comment" node, unlike Dart's own line/doc split)
+// is already covered by "comment" — but its `/* ... */` BLOCK comment is a
+// DIFFERENT, fourth node type, "multiline_comment" (confirmed against a real
+// parse; NOT named "block_comment", the name Java/Rust use for their own
+// distinct block-comment node). Without this, a Swift file writing `/*
+// implements XSPEC-NNN */` would silently produce zero IMPLEMENTS edges —
+// caught by `test/comment-capture-per-grammar.test.ts`'s walked (not
+// hand-enumerated) per-grammar check before it could ship as a silent gap.
 const COMMENT_NODE_TYPES = new Set([
   "comment",
   "line_comment",
   "block_comment",
   "documentation_comment",
+  "multiline_comment",
 ]);
 
 export function collectComments(root: Parser.SyntaxNode): string[] {

@@ -133,6 +133,39 @@ export const GRAMMARS = Object.freeze([
     prebuilds: ALL_PLATFORMS,
   },
   {
+    /**
+     * Deliberately does NOT list `.h` (XSPEC-414 R2 OQ1) — `.h` stays under
+     * "cpp" above, unchanged, so `detectLanguage()`'s default for an isolated
+     * `.h` file (no project context) is still C++, exactly as before this
+     * language existed. `extractProject` (`src/code-graph/extractor.ts`)
+     * applies a *batch-level* override on top of that default: when the
+     * files being indexed together contain no unambiguous C++ source
+     * (`.cpp`/`.cc`/`.cxx`/`.hpp`/`.hh`), every `.h` in that same batch is
+     * treated as C instead. That override lives in `extractProject`, not
+     * here, because it needs the whole file set this table has no way to
+     * see — see that function's doc comment for the exact rule and its
+     * known MCP-batching caveat.
+     *
+     * `tree-sitter-c@0.23.6` (peer `^0.22.1`) was chosen the same way as
+     * every grammar in this table — by actually requiring it and calling
+     * `Parser.setLanguage()` under this repo's pinned `tree-sitter@0.22.4`,
+     * not by trusting the peer range: 0.23.2 through 0.23.6 all loaded and
+     * parsed a real snippet cleanly, 0.24.0 and 0.24.1 (peer `^0.22.4`,
+     * despite being the closer-looking match on paper) both threw inside
+     * `setLanguage` (`Cannot read properties of undefined (reading
+     * 'length')`) — the same "peer declarations are not evidence" lesson
+     * XSPEC-365 already recorded for Dart's candidates. 0.23.6 is the
+     * newest version on the working side of that empirically-found line,
+     * and ships all six platform prebuilds (verified from the installed
+     * package's own `prebuilds/` directory, not assumed).
+     */
+    language: "c",
+    label: "C",
+    extensions: [".c"],
+    package: "tree-sitter-c",
+    prebuilds: ALL_PLATFORMS,
+  },
+  {
     language: "ruby",
     label: "Ruby",
     extensions: [".rb"],
@@ -170,6 +203,43 @@ export const GRAMMARS = Object.freeze([
     extensions: [".dart"],
     package: "@vokturz/tree-sitter-dart",
     prebuilds: Object.freeze(["linux-x64"]),
+  },
+  {
+    /**
+     * `tree-sitter-swift@0.7.1` (peer `^0.22.1`) — actually loaded and used
+     * to parse a real snippet against this repo's pinned `tree-sitter@0.22.4`
+     * before being trusted, same discipline as every entry in this table.
+     * Ships all six platform prebuilds (read off the installed package's own
+     * `prebuilds/` directory, not assumed from its README).
+     */
+    language: "swift",
+    label: "Swift",
+    extensions: [".swift"],
+    package: "tree-sitter-swift",
+    prebuilds: ALL_PLATFORMS,
+  },
+  {
+    /**
+     * `tree-sitter-bash@0.23.3` (peer `^0.21.1`, the same proven line as
+     * `tree-sitter-rust`/`tree-sitter-cpp` above) — actually loaded and used
+     * to parse a real script against this repo's pinned `tree-sitter@0.22.4`
+     * before being trusted. The newest release, 0.25.1, jumps its peer to
+     * `^0.25.0` (the same kind of break-pattern jump XSPEC-333's grammars.d.ts
+     * already documents for several other languages) and was not tried empty-
+     * handed against a stated-incompatible peer range; 0.23.3 is the newest
+     * version still on the working line. Ships all six platform prebuilds
+     * (read off the installed package's own `prebuilds/` directory).
+     *
+     * Extension-less shebang scripts (`#!/bin/bash`, `#!/usr/bin/env sh`,
+     * XSPEC-414 R4 OQ2) are matched at walk time (`src/cli/walk.ts`), not
+     * through this table's `extensions` list — a shebang script by
+     * definition has no extension for a table keyed on extensions to list.
+     */
+    language: "bash",
+    label: "Bash",
+    extensions: [".sh", ".bash"],
+    package: "tree-sitter-bash",
+    prebuilds: ALL_PLATFORMS,
   },
 ]);
 

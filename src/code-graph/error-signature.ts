@@ -54,9 +54,12 @@ const LANGUAGE_PACKAGE: Record<SupportedLanguage, string> = {
   kotlin: "@tree-sitter-grammars/tree-sitter-kotlin",
   rust: "tree-sitter-rust",
   cpp: "tree-sitter-cpp",
+  c: "tree-sitter-c",
   ruby: "tree-sitter-ruby",
   php: "tree-sitter-php",
   dart: "@vokturz/tree-sitter-dart",
+  swift: "tree-sitter-swift",
+  bash: "tree-sitter-bash",
 };
 
 const SUBTREE_KIND_LIMIT = 6;
