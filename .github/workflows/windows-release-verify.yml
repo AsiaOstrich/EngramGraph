@@ -1,0 +1,82 @@
+name: Windows release verification
+
+# The checklist that used to wait for a person on a company Windows machine
+# before `latest` could move (0.12.0 waited a month). It installs the version
+# under test from npm — what users get, not this checkout — and runs
+# scripts/windows-release-verify.mjs against a real graph.
+#
+# Two conditions are imposed rather than assumed, because they are the ones
+# the hand-run checklist existed to catch:
+#   - no C++ toolchain: npm_config_msvs_version=2019 makes node-gyp reject the
+#     Visual Studio the hosted runner ships (same technique and reasoning as
+#     release-compat-check.yml's windows-no-toolchain job);
+#   - no route to extension.ryugraph.io: the algorithm extension must come
+#     from the platform package, so the download host is blackholed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'npm version or dist-tag to verify'
+        required: false
+        default: 'next'
+  push:
+    branches: ['ci/windows-release-verify']
+    paths:
+      - '.github/workflows/windows-release-verify.yml'
+      - 'scripts/windows-release-verify.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      SPEC: ${{ inputs.version || 'next' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: engramgraph
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Block the ALGO extension download host
+        shell: pwsh
+        run: |
+          Add-Content -Path "$env:SystemRoot\System32\drivers\etc\hosts" -Value "0.0.0.0 extension.ryugraph.io"
+          $r = Resolve-DnsName extension.ryugraph.io -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress }
+          Write-Output "extension.ryugraph.io now resolves to: $($r.IPAddress -join ', ')"
+
+      - name: Resolve the exact version under test
+        id: ver
+        shell: bash
+        run: |
+          v=$(npm view "engramgraph@${SPEC}" version)
+          echo "Verifying engramgraph@${v} (from spec '${SPEC}')"
+          echo "version=${v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install from npm with no usable C++ toolchain
+        shell: bash
+        env:
+          npm_config_msvs_version: '2019'
+        run: npm install -g "engramgraph@${{ steps.ver.outputs.version }}" --no-audit --no-fund
+
+      - name: Run the release checklist
+        shell: bash
+        run: |
+          node engramgraph/scripts/windows-release-verify.mjs \
+            --target "$GITHUB_WORKSPACE/engramgraph" \
+            --expect-version "${{ steps.ver.outputs.version }}" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --json "$RUNNER_TEMP/verify.json"
+
+      - name: Keep the raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-verify-${{ steps.ver.outputs.version }}
+          path: ${{ runner.temp }}/verify.json
+          if-no-files-found: warn
