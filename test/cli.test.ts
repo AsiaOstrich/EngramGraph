@@ -95,14 +95,17 @@ describe("egr CLI entry (spawn)", () => {
   // XSPEC-414 R1：使用者在終端機看到的那一行。`cmd-index-unindexed.test.ts` 只斷言
   // cmdIndex 回傳的物件——把 index.ts 摘要裡的 `${unindexed}` 拿掉，那支照樣全綠
   // （2026-09-15 主 session 突變實測：827/827 通過）。所以要從出貨的 dist 走一遍。
+  // 原本用 .swift/.sh 當範例——這兩者在 XSPEC-414 R3/R4（同一份規格的後續需求）
+  // 已變成真正支援的語言，改用 .zig/.lua（仍在此引擎語言集之外）維持「不支援的
+  // 副檔名」這個測試意圖。
   it("index prints the unindexed source-file line grouped by extension", () => {
     const work = mkdtempSync(join(tmpdir(), "engram-cli-unindexed-"));
     try {
       const repo = join(work, "repo");
       mkdirSync(repo, { recursive: true });
       writeFileSync(join(repo, "app.ts"), "export function add(a: number, b: number) { return a + b; }\n");
-      writeFileSync(join(repo, "main.swift"), 'print("hi")\n');
-      writeFileSync(join(repo, "build.sh"), "#!/bin/bash\necho hi\n");
+      writeFileSync(join(repo, "main.zig"), 'print("hi")\n');
+      writeFileSync(join(repo, "build.lua"), "print('hi')\n");
       const r = spawnSync(process.execPath, [CLI, "index", repo], {
         encoding: "utf8",
         cwd: work,
@@ -111,8 +114,8 @@ describe("egr CLI entry (spawn)", () => {
       });
       expect(r.status, r.stderr).toBe(0);
       expect(r.stdout).toMatch(/unindexed: 2 source file\(s\)/);
-      expect(r.stdout).toContain(".swift (1)");
-      expect(r.stdout).toContain(".sh (1)");
+      expect(r.stdout).toContain(".zig (1)");
+      expect(r.stdout).toContain(".lua (1)");
     } finally {
       rmSync(work, { recursive: true, force: true });
     }

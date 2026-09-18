@@ -81,19 +81,19 @@ missing one language:
 | | Package(s) | Required? | If no prebuilt binary exists for your platform |
 |---|---|---|---|
 | **Graph database** | [`ryugraph`](https://github.com/predictable-labs/ryugraph) | **Yes** | Built from source via `cmake-js`. If that fails you have no working `egr` at all. |
-| **Language grammars** | `tree-sitter` + 12 grammar packages | Per language | Built from source via `node-gyp`. If that fails, **only that language** is unavailable — `egr` installs and indexes everything else. |
+| **Language grammars** | `tree-sitter` + 15 grammar packages | Per language | Built from source via `node-gyp`. If that fails, **only that language** is unavailable — `egr` installs and indexes everything else. |
 
 Prebuilt coverage as of `engramgraph@0.9.1`:
 
 | Platform | Graph DB | Grammars | What you get |
 |---|---|---|---|
-| Linux x64, glibc ≥ 2.38 (Ubuntu 24.04+, Debian 13+) | ✅ prebuilt | ✅ all 13 prebuilt | Everything, no compiler needed |
+| Linux x64, glibc ≥ 2.38 (Ubuntu 24.04+, Debian 13+) | ✅ prebuilt | ✅ all 16 prebuilt | Everything, no compiler needed |
 | macOS ARM64 (Apple Silicon) | ✅ prebuilt | ⚠️ Dart compiles | Everything if you have a C/C++ toolchain; otherwise all languages **except Dart** |
 | macOS x64 (Intel) | ✅ prebuilt | ⚠️ Dart compiles | Same as above |
 | Windows x64 | ✅ prebuilt | ⚠️ Dart compiles | Same as above — see [Windows](#windows-enabling-the-dart-grammar) for the two traps that make this harder than it sounds |
 | Windows ARM64 | ❌ **no prebuilt** | ⚠️ Dart compiles | Needs a toolchain even for the graph database; untested |
 | Linux ARM64 (any glibc) | ❌ **broken upstream** | ⚠️ Dart compiles | Upstream ships the x86-64 binary under the arm64 filename — [predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48) |
-| Linux x64, glibc < 2.38 (Ubuntu 22.04 LTS, Debian 12) | ❌ **broken upstream** | ✅ all 13 prebuilt | `ryugraph`'s binary needs a newer glibc than these still-common LTS distros ship |
+| Linux x64, glibc < 2.38 (Ubuntu 22.04 LTS, Debian 12) | ❌ **broken upstream** | ✅ all 16 prebuilt | `ryugraph`'s binary needs a newer glibc than these still-common LTS distros ship |
 
 **Linux x64 is the only platform that installs with no compiler at all.** Everywhere
 else, `npm install` compiles at least the Dart grammar

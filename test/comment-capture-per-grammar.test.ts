@@ -34,9 +34,15 @@ const CASES: Array<{ language: string; ext: string; source: string; doc?: string
   { language: "kotlin", ext: ".kt", source: "// implements SPEC-1\nfun f() {}\n" },
   { language: "rust", ext: ".rs", source: "// implements SPEC-1\nfn f() {}\n", doc: "/// implements SPEC-2\nfn g() {}\n" },
   { language: "cpp", ext: ".cpp", source: "// implements SPEC-1\nvoid f() {}\n" },
+  { language: "c", ext: ".c", source: "// implements SPEC-1\nvoid f() {}\n" },
   { language: "ruby", ext: ".rb", source: "# implements SPEC-1\ndef f\nend\n" },
   { language: "php", ext: ".php", source: "<?php\n// implements SPEC-1\nfunction f() {}\n" },
   { language: "dart", ext: ".dart", source: "// implements SPEC-1\nvoid f() {}\n", doc: "/// implements SPEC-2\nvoid g() {}\n" },
+  // Swift's `/* */` block comment is "multiline_comment" — a DIFFERENT node
+  // type from its own "//"/"///" line comment ("comment") — see
+  // tag-query-engine.ts's COMMENT_NODE_TYPES doc comment.
+  { language: "swift", ext: ".swift", source: "// implements SPEC-1\nfunc f() {}\n", doc: "/* implements SPEC-2 */\nfunc g() {}\n" },
+  { language: "bash", ext: ".sh", source: "# implements SPEC-1\nf() { :; }\n" },
 ];
 
 const declared = GRAMMARS.map((g: { language: string }) => g.language);

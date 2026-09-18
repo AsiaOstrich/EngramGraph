@@ -325,7 +325,9 @@ export async function cmdIndex(
 ): Promise<IndexResultSummary> {
   if (opts.clean) await clearGraph(conn); // drop existing data so deleted nodes are pruned
   if (opts.scip) await assertCallsSchemaHasProvenanceColumns(conn);
-  const codeWalk = walkFiles(opts.dir, CODE_EXTS);
+  // `detectShebangScripts: true` (XSPEC-414 R4 OQ2) only on the CODE walk —
+  // see `walkFiles`' doc comment for why the docs walk below must NOT opt in.
+  const codeWalk = walkFiles(opts.dir, CODE_EXTS, { detectShebangScripts: true });
   const codeFiles = codeWalk.files;
 
   // Read the PREVIOUS manifest before this run rewrites this dir's section, so

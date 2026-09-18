@@ -5,7 +5,11 @@
  *
  * "GIVEN a directory containing main.swift, build.sh, app.ts WHEN `egr index`
  * THEN app.ts is indexed, and the summary shows 2 unindexed files grouped by
- * .swift/.sh."
+ * .swift/.sh." — the original Scenario's example languages. Both gained real
+ * grammars in this same spec's later requirements (R3/R4), so this file uses
+ * `.zig`/`.lua` instead to keep testing "an unsupported-language file",
+ * which Swift/Bash no longer are. Swift/Bash's own `cmdIndex`-level
+ * coverage lives in `test/swift.test.ts` / `test/bash.test.ts`.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
@@ -25,8 +29,8 @@ describe("cmdIndex reports unindexed source files (XSPEC-414 R1)", () => {
     dir = mkdtempSync(join(tmpdir(), "engram-unindexed-cmd-"));
     src = join(dir, "repo");
     mkdirSync(src, { recursive: true });
-    writeFileSync(join(src, "main.swift"), 'print("hi")\n');
-    writeFileSync(join(src, "build.sh"), "#!/bin/sh\necho hi\n");
+    writeFileSync(join(src, "main.zig"), 'print("hi")\n');
+    writeFileSync(join(src, "build.lua"), "print('hi')\n");
     writeFileSync(join(src, "app.ts"), "export function hello(){ return 1; }\n");
     conn = GraphConnection.open(join(dir, "graph.db"));
     await initSchema(conn);
@@ -42,12 +46,12 @@ describe("cmdIndex reports unindexed source files (XSPEC-414 R1)", () => {
     expect(r.code.functions).toBeGreaterThanOrEqual(1);
   });
 
-  it("reports exactly 2 unindexed files, grouped by .swift and .sh", async () => {
+  it("reports exactly 2 unindexed files, grouped by .zig and .lua", async () => {
     const r = await cmdIndex(conn, { dir: src });
     expect(r.unindexedCode.count).toBe(2);
     const byExt = new Map(r.unindexedCode.topExtensions.map((e) => [e.ext, e.count]));
-    expect(byExt.get(".swift")).toBe(1);
-    expect(byExt.get(".sh")).toBe(1);
+    expect(byExt.get(".zig")).toBe(1);
+    expect(byExt.get(".lua")).toBe(1);
   });
 
   it("`unindexedCode` is present even when nothing is unindexed (always-present field, not conditional like skippedSymlinkDirs)", async () => {

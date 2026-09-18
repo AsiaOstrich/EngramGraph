@@ -198,11 +198,14 @@ export interface UnavailableGrammar {
 /**
  * Every language whose grammar cannot be used in this installation.
  *
- * This *attempts to load all thirteen grammars* — it is the one operation here
- * that is not lazy, because "which languages are unavailable" cannot be
- * answered without trying. Intended for the CLI's startup notice and
- * diagnostics, not for hot paths. Results are memoized, so calling it more
- * than once per process is free.
+ * This *attempts to load every registered grammar* (`GRAMMARS.length` —
+ * deliberately not restated as a literal count here, which would drift the
+ * next time a language is added, same reasoning as `CODE_EXTS` being
+ * derived rather than hand-typed) — it is the one operation here that is not
+ * lazy, because "which languages are unavailable" cannot be answered without
+ * trying. Intended for the CLI's startup notice and diagnostics, not for hot
+ * paths. Results are memoized, so calling it more than once per process is
+ * free.
  */
 export function unavailableGrammars(): UnavailableGrammar[] {
   const out: UnavailableGrammar[] = [];

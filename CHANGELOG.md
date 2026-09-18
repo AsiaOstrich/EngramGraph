@@ -4,6 +4,14 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **C, Swift and Bash** (XSPEC-414 R2–R4). Functions, structs/unions/enums, and `#include`-derived module relationships for C; functions, classes/structs/enums/protocols and extensions (attributed to the type they extend, including across files) for Swift; function definitions, calls and `source`/`.`-derived module relationships for Bash, with external commands (`grep`, `echo`, ...) never entering the graph. `egr doctor` now lists all three. `.h` routes to C++ when the same indexing run has a C++ source file alongside it, and to C otherwise (previously always C++).
+- **`egr index` follows an extension-less shebang script** (`#!/bin/bash`, `#!/usr/bin/env sh`, XSPEC-414 R4) and indexes it as Bash, instead of counting it as an unsupported file.
+- **A new `IMPORTS` (Module → Module) relationship**, resolved from C's `#include` and Bash's `source`/`.` against the files in the same indexing run; `egr index`'s summary and `--json` output report the count.
+
 ## [0.12.0] — 2026-08-11
 
 **Two `egr` processes touching one graph did not refuse each other — they destroyed it.**

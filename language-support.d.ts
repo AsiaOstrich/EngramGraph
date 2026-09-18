@@ -35,9 +35,12 @@ export type LanguageId =
   | "kotlin"
   | "rust"
   | "cpp"
+  | "c"
   | "ruby"
   | "php"
-  | "dart";
+  | "dart"
+  | "swift"
+  | "bash";
 
 export interface Grammar {
   language: LanguageId;

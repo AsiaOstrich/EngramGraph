@@ -6,9 +6,9 @@ a same-file match wins (lexical shadowing), else a globally unique match
 across the whole project, else the call is dropped as ambiguous/unresolved
 (precision over recall — no import-graph resolution, no type inference).
 
-This heuristic is identical across all 10 non-JS/TS languages `egr` supports
-(C#, Python, Go, Java, Kotlin, Rust, C++, Ruby, PHP, Dart) — one tag-query
-extraction step feeds one shared resolver. "We support language X" without a
+This heuristic is identical across all 13 non-JS/TS languages `egr` supports
+(C#, Python, Go, Java, Kotlin, Rust, C++, C, Ruby, PHP, Dart, Swift, Bash) —
+one tag-query extraction step feeds one shared resolver. "We support language X" without a
 number is an empty claim; this page measures, per language, what fraction of
 real cross-file call relationships that shared resolver actually wires up,
 on a real public repo. Format and intent borrowed from
@@ -83,11 +83,22 @@ a good score: picked before running, kept whatever number came out.
 | Ruby | [sinatra/sinatra](https://github.com/sinatra/sinatra) `lib` | 7 | 26 | 42.3% |
 | PHP | [guzzle/guzzle](https://github.com/guzzle/guzzle) `src` | 47 | 153 | 51.6% |
 | Dart | [dart-lang/http](https://github.com/dart-lang/http) `pkgs/http/lib` | 27 | 40 | 30.0% |
+| C | [xml4r/libxml-ruby](https://github.com/xml4r/libxml-ruby) `ext/libxml` | 37 | 62 | 100.0% |
+| Swift | [apple/swift-collections](https://github.com/apple/swift-collections) `Sources/OrderedCollections` | 63 | 354 | 18.9% |
+| Bash | [Homebrew/brew](https://github.com/Homebrew/brew) `Library/Homebrew` (`*.sh`, excl. `vendor/`) | 40 | 40 | 75.0% |
 
 (TypeScript/JavaScript — the engine's pre-existing baseline, not part of this
 batch of 10 — measures at 100% on `src/code-graph` itself, 7/7 candidates;
 too small a sample to be a meaningful separate data point and not the
 subject of this round.)
+
+**C/Swift/Bash (XSPEC-414 R2–R4) were measured the same way, in a later
+round** — not cherry-picked, kept whatever number came out, same as the
+other 10. Bash's corpus is a local Homebrew installation's own `Library/
+Homebrew` checkout (`git -C /opt/homebrew rev-parse HEAD`:
+`b48c7994b5f0eed7bef532efa63cb4e4f763887a`, 2026-07-20) — a shallow/partial
+clone rather than a full `git clone` of `Homebrew/brew`, but public,
+BSD-2-Clause, and the same real upstream project either way.
 
 ## Open questions — systematic, one-glance-obvious causes (not fixed here)
 
@@ -127,3 +138,49 @@ necessarily change the qualitative story (both still hit the same "shared
 interface method name across types" pattern the OOP languages above do, just
 at much smaller N — see `close`/`send`/`call` misses in Ruby, `send`/`close`
 misses in Dart).
+
+**C (100.0%, XSPEC-414 R2) is the ceiling case, and the corpus explains
+why.** `libxml-ruby`'s C extension has almost no naming collisions across
+its 37 files — each wrapper file owns a distinct set of function names
+(`rxml_document_*`, `rxml_node_*`, ...), the Ruby-binding convention this
+codebase follows throughout. This is a property of the corpus's naming
+discipline, not evidence the resolver behaves differently for C than for
+C++ (same shared resolver, same bare-name policy) — a C codebase with
+`leveldb`-style repeated method names (`Close`, `Read`) across many structs
+would hit the same ambiguity C++ does above.
+
+**Swift (18.9%) is dominated by one single shared name: `init`
+(XSPEC-414 R3).** Every constructor in this engine gets the synthetic bare
+name `init` (`queries/swift.ts`'s module doc comment — Swift's grammar gives
+initializers no name field at all), so EVERY type's constructor across the
+whole corpus collides into one ambiguous bucket the same way C#/Java's
+repeated method names do above — confirmed as the dominant miss cause in the
+actual `apple/swift-collections` measurement (`init` accounts for the
+majority of the 287 total misses). This is a direct, structural consequence
+of Swift's own grammar (constructors are anonymous) crossed with this
+engine's bare-name-only resolution policy, not a defect specific to this
+batch's queries — a hypothetical Swift codebase with fewer, more
+distinctively-named types would score higher on this same resolver.
+
+**Bash (75.0%) scores far higher than a naive guess would suggest, because
+Homebrew's own shell code wraps most of its logic in functions
+(XSPEC-414 R4).** Unlike the shell scripts a sysadmin dashes off at the top
+level of a file, `Library/Homebrew/*.sh` is itself a shipped piece of a
+package manager: `odie`/`onoe`/`brew.sh`'s own helpers are almost always
+called from inside another function, so this engine's *enclosing-function-
+only* CALLS attribution (`queries/bash.ts`'s module doc comment — a call
+site with no containing `@definition.function` is silently dropped, the
+same top-level-statement gap every language here already has) actually
+gets to fire for most of them. The 10 misses that remain are dominated by
+**ambiguity, not the top-level gap**: `odie`, `onoe` and `git` are each
+called from 5–12 different files, so — same "bare name matches >1
+candidate, left unresolved on purpose" policy as C#/Java/Kotlin/Rust/C++
+above — they collide the moment more than one file happens to reference
+them, even though every call site here textually resolves to the same
+single definition. This is a materially different failure shape from a
+flatter, top-level-heavy shell-script style (calls dropped for having no
+enclosing function at all, not left ambiguous), and is itself evidence for
+the general point every other Bash-relevant comment in this codebase
+already makes: this engine's coverage on a Bash corpus depends heavily on
+how much of that specific codebase's logic lives inside functions versus
+at a script's top level — a property of the corpus, not of the resolver.

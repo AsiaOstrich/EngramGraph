@@ -14,6 +14,12 @@ import { CODE_EXTS } from "../src/cli/run.js";
  * with (say) Swift files had no way to learn "your index is missing N files"
  * short of noticing the file count looked low. This suite exercises the new
  * `unindexed` accounting the CLI summary (`egr index`) is built on top of.
+ *
+ * Originally used `.swift`/`.sh` as the example unsupported extensions; both
+ * gained real grammars in XSPEC-414 R3/R4 (this very spec), so this file now
+ * uses `.zig`/`.lua` (still outside this engine's language set) to keep
+ * testing "an extension `walkFiles` doesn't collect", not something that is
+ * now a real, indexed language.
  */
 describe("walkFiles unindexed-file accounting (XSPEC-414 R1)", () => {
   let dir: string;
@@ -21,11 +27,11 @@ describe("walkFiles unindexed-file accounting (XSPEC-414 R1)", () => {
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "engram-unindexed-"));
     writeFileSync(join(dir, "app.ts"), "export const x = 1;\n");
-    writeFileSync(join(dir, "main.swift"), "print(\"hi\")\n");
-    writeFileSync(join(dir, "build.sh"), "#!/bin/sh\necho hi\n");
-    // A second .swift file so the "grouped by extension" behaviour has
+    writeFileSync(join(dir, "main.zig"), "print(\"hi\")\n");
+    writeFileSync(join(dir, "build.lua"), "print('hi')\n");
+    // A second .zig file so the "grouped by extension" behaviour has
     // something to actually group.
-    writeFileSync(join(dir, "App.swift"), "print(\"again\")\n");
+    writeFileSync(join(dir, "App.zig"), "print(\"again\")\n");
     // A binary file (PNG-ish: starts with a NUL byte) must NOT be counted —
     // it is not "unsupported source code", it isn't source code at all.
     writeFileSync(join(dir, "logo.png"), Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04]));
@@ -51,9 +57,9 @@ describe("walkFiles unindexed-file accounting (XSPEC-414 R1)", () => {
   it("reports files seen but not covered by exts in `unindexed`", () => {
     const { unindexed } = walkFiles(dir, CODE_EXTS);
     const byPath = new Map(unindexed.map((f) => [f.path, f.ext]));
-    expect(byPath.get("main.swift")).toBe(".swift");
-    expect(byPath.get("App.swift")).toBe(".swift");
-    expect(byPath.get("build.sh")).toBe(".sh");
+    expect(byPath.get("main.zig")).toBe(".zig");
+    expect(byPath.get("App.zig")).toBe(".zig");
+    expect(byPath.get("build.lua")).toBe(".lua");
   });
 
   it("excludes binary files from `unindexed`", () => {
@@ -72,13 +78,16 @@ describe("walkFiles unindexed-file accounting (XSPEC-414 R1)", () => {
     expect(unindexed.some((f) => f.path.includes(".git"))).toBe(false);
   });
 
-  it("`unindexed` count matches the Scenario in XSPEC-414 R1: 2 unindexed files for a swift+sh+ts mix", () => {
-    // A fresh, minimal dir matching the spec's Scenario exactly (this describe
-    // block's shared `dir` has extra fixtures for the other assertions above).
+  it("`unindexed` count matches the Scenario in XSPEC-414 R1: 2 unindexed files for a zig+lua+ts mix", () => {
+    // A fresh, minimal dir matching the spec's Scenario shape exactly (this
+    // describe block's shared `dir` has extra fixtures for the other
+    // assertions above) — the original Scenario used swift+sh, both of
+    // which are now real, indexed languages (see comment at the top of this
+    // file).
     const scenarioDir = mkdtempSync(join(tmpdir(), "engram-unindexed-scenario-"));
     try {
-      writeFileSync(join(scenarioDir, "main.swift"), "print(1)\n");
-      writeFileSync(join(scenarioDir, "build.sh"), "echo hi\n");
+      writeFileSync(join(scenarioDir, "main.zig"), "print(1)\n");
+      writeFileSync(join(scenarioDir, "build.lua"), "print('hi')\n");
       writeFileSync(join(scenarioDir, "app.ts"), "export const x = 1;\n");
       const { files, unindexed } = walkFiles(scenarioDir, CODE_EXTS);
       expect(files.map((f) => f.path)).toEqual(["app.ts"]);

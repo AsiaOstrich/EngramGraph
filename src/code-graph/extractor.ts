@@ -34,7 +34,7 @@
 // so "Dart's grammar isn't built for this platform" surfaced as "`egr` cannot
 // index anything". `grammar-registry.ts` loads each grammar on first use and
 // records the failure instead of propagating it; see its header.
-import { extname } from "node:path";
+import { extname, posix } from "node:path";
 
 import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
@@ -206,13 +206,30 @@ const CALLS_CONFIDENCE: Record<CallResolutionTier, number> = {
  * C header with it typically still produces a usable, mostly-correct parse.
  * The narrow cases where this is NOT a perfect fit — legacy K&R-style
  * function definitions, C11 `_Generic`, or other C-only syntax the C++
- * grammar doesn't recognize — are a documented Open Question (see
- * queries/cpp.ts's module doc comment), not fixed here: this engine has no
- * `tree-sitter-c` grammar installed, and adding a whole separate language
- * purely to special-case `.h` is out of scope for this batch, whose task was
- * Kotlin/Rust/C++. `.hpp`/`.hh` (unambiguously C++-only extensions) share the
- * same mapping for consistency, not because they carry any of `.h`'s
- * ambiguity.
+ * grammar doesn't recognize — were a documented Open Question (see
+ * queries/cpp.ts's module doc comment) at the time this comment was
+ * written: this engine had no `tree-sitter-c` grammar installed, and adding
+ * a whole separate language purely to special-case `.h` was out of scope
+ * for that batch, whose task was Kotlin/Rust/C++. `.hpp`/`.hh`
+ * (unambiguously C++-only extensions) share the same mapping for
+ * consistency, not because they carry any of `.h`'s ambiguity.
+ *
+ * **XSPEC-414 R2 (a later batch, once a `tree-sitter-c` grammar existed)
+ * partially answers the Open Question above, but NOT by changing this
+ * function.** This function's `.h` → C++ default is UNCHANGED — it is what
+ * an isolated `.h` file with no project context still resolves to (verified
+ * by `test/language-support.test.ts`'s "every listed extension detects as
+ * this language" check, which still expects `.h` → `cpp` here). The actual
+ * per-project answer lives one layer up, in `extractProject` below: given a
+ * whole file BATCH (which this per-path function never sees), it overrides
+ * `.h` to `"c"` when that batch has no unambiguous C++ source file
+ * alongside it — see that function's own doc comment for the exact rule.
+ * This split (a stable single-file default here, a smarter batch-aware
+ * override at the one call site that actually has the context to make it)
+ * is deliberate: changing THIS function's default would silently change
+ * every existing caller of `collectExtraction`/`detectLanguage` in
+ * isolation (scip-ingest.ts's per-file fallback included), most of which
+ * have no project-wide view to make OQ1's call correctly either.
  *
  * `.rb` -> ruby, `.php` -> php, `.dart` -> dart (XSPEC-333 R2c batch 3, the
  * last mainstream-language batch). No extension-ambiguity questions like the
@@ -271,6 +288,18 @@ export function detectLanguage(filePath: string): SupportedLanguage | undefined 
   if (lower.endsWith(".rb")) return "ruby";
   if (lower.endsWith(".php")) return "php";
   if (lower.endsWith(".dart")) return "dart";
+  // XSPEC-414 R2: `.c` is unambiguous and always C — unlike `.h` above,
+  // which stays mapped to C++ here (this function has no project context to
+  // apply OQ1's override with; see `extractProject`'s doc comment for where
+  // that override actually lives).
+  if (lower.endsWith(".c")) return "c";
+  if (lower.endsWith(".swift")) return "swift";
+  // XSPEC-414 R4: `.sh`/`.bash` are the two conventional shell-script
+  // extensions. A shebang-only script with NO extension at all is a
+  // separate, walk-time concern (`src/cli/walk.ts`'s `detectShebangLanguage`)
+  // — this function only ever sees a `filePath`, never a file's content, so
+  // it cannot itself read a shebang line.
+  if (lower.endsWith(".sh") || lower.endsWith(".bash")) return "bash";
   return undefined;
 }
 
@@ -283,6 +312,21 @@ export interface RawCall {
   file: string;
 }
 
+/**
+ * An unresolved module-relationship reference (XSPEC-414 R2/R4) — C's
+ * `#include "foo.h"`, Bash's `source lib.sh` / `. lib.sh`. `target` is
+ * {@link cleanImportTarget}'s cleaned (punctuation-stripped) text, still
+ * relative to `file`'s own directory and unresolved against the actual
+ * project file set — {@link extractProject} does that resolution, since it
+ * is the only place with the whole batch of files to resolve against.
+ */
+export interface RawImport {
+  /** File the `#include`/`source` statement appears in. */
+  file: string;
+  /** Cleaned target text, e.g. `"foo.h"` or `"lib.sh"`. */
+  target: string;
+}
+
 /** Per-file extraction before call resolution. */
 export interface Extraction {
   /** Module + Function + Class nodes (+ stub Spec nodes for IMPLEMENTS targets). */
@@ -293,6 +337,8 @@ export interface Extraction {
   implementsEdges: GraphEdge[];
   /** Unresolved call records. */
   rawCalls: RawCall[];
+  /** Unresolved module-relationship references (XSPEC-414 R2/R4). Empty for every language that doesn't capture `@reference.import`. */
+  rawImports: RawImport[];
   /** This file's bare function name → id. */
   names: Map<string, string>;
   /**
@@ -370,12 +416,13 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   const names = new Map<string, string>();
   const rawCalls: RawCall[] = [];
 
-  const { definitions, callSites } = runTagQuery(
+  const { definitions, callSites, imports } = runTagQuery(
     languageFor(language),
     language,
     tagsQuerySourceFor(language),
     tree.rootNode,
   );
+  const rawImports: RawImport[] = imports.map((imp) => ({ file: filePath, target: imp.target }));
   // Scope-qualification (not line numbers) keeps function ids unique — two
   // same-named functions in *different* scopes of one file no longer
   // collide — while staying stable across edits that shift line numbers
@@ -483,7 +530,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     });
   }
 
-  return { nodes, defines, implementsEdges, rawCalls, names, errorNodes, errorExtent, sourceExtent: source.length, signatures };
+  return { nodes, defines, implementsEdges, rawCalls, rawImports, names, errorNodes, errorExtent, sourceExtent: source.length, signatures };
 }
 
 /**
@@ -546,6 +593,17 @@ export interface ProjectExtraction {
   calls: number;
   /** IMPLEMENTS edges (Module → Spec) from `// implements` comments. */
   implements: number;
+  /**
+   * IMPORTS edges (Module → Module) resolved from `#include`/`source`/`.`
+   * (XSPEC-414 R2/R4). Only C and Bash's tag queries currently capture
+   * `@reference.import` — every other language contributes zero. A target
+   * that does not resolve to any file in THIS batch (a system header, an
+   * external dependency, an ambiguous basename match) is silently dropped,
+   * same precision-over-recall policy as CALLS resolution; there is no
+   * separate ambiguous/unresolved counter for imports (a much rarer,
+   * lower-stakes edge than CALLS, not worth a second pair of counters yet).
+   */
+  imports: number;
   /** Calls whose callee name matched >1 function across the repo (skipped). */
   ambiguous: number;
   /** Calls whose callee name matched no known function (skipped). */
@@ -599,8 +657,41 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
   // grammar" situation (SkippedLanguage's territory) — there is no language
   // to look up a grammar for.
   const unrecognized = new Map<string, number>();
+  // XSPEC-414 R2 OQ1: `.h` defaults to C++ in `detectLanguage` (see that
+  // function's doc comment) because an isolated file has no way to know
+  // what kind of project it belongs to. A whole-BATCH signal is available
+  // here, though, and takes precedence: a `.h` file in a batch with NO
+  // unambiguous C++ source (`.cpp`/`.cc`/`.cxx`/`.hpp`/`.hh` — deliberately
+  // excluding `.h` itself, which is the ambiguous extension being decided)
+  // is treated as C instead, matching the far more common "pure C project"
+  // case while leaving a real C++ (or mixed) project's `.h` files exactly as
+  // before ("既有 C++ 專案結果不變").
+  //
+  // This is a per-CALL heuristic, not a whole-repository one: `egr index
+  // <dir>` hands every file under `<dir>` to ONE `extractProject` call, so a
+  // CLI run sees the full batch OQ1 intends. MCP's `index_code` tool funnels
+  // through this same function (`mcp/server.ts` → `indexProject` →
+  // `extractProject`), so it gets the identical batch-aware behavior for
+  // whatever files arrive in ONE tool call — but a caller that submits `.h`
+  // files across SEPARATE `index_code` calls (e.g. one call per file) gives
+  // each call its own, smaller batch: a call containing only a `.h` file
+  // with no sibling C++ source in THAT call defaults to C even if a prior or
+  // later call in the same session indexed real C++ sources. Documented, not
+  // fixed: there is no "whole MCP session" batch boundary this function can
+  // see or accumulate state across.
+  const hasCppSource = files.some((f) => {
+    const lower = f.path.toLowerCase();
+    return (
+      lower.endsWith(".cpp") ||
+      lower.endsWith(".cc") ||
+      lower.endsWith(".cxx") ||
+      lower.endsWith(".hpp") ||
+      lower.endsWith(".hh")
+    );
+  });
   for (const f of files) {
-    const language = f.language ?? detectLanguage(f.path);
+    const isAmbiguousHeader = !f.language && f.path.toLowerCase().endsWith(".h");
+    const language = f.language ?? (isAmbiguousHeader ? (hasCppSource ? "cpp" : "c") : detectLanguage(f.path));
     if (!language) {
       const ext = extname(f.path).toLowerCase() || "(none)";
       unrecognized.set(ext, (unrecognized.get(ext) ?? 0) + 1);
@@ -636,7 +727,12 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
       continue;
     }
     try {
-      const ex = collectExtraction(f.source, { filePath: f.path, language: f.language });
+      // Pass the already-resolved `language` explicitly (not `f.language`,
+      // which is `undefined` for most files) — `collectExtraction` would
+      // otherwise re-derive it via a bare `detectLanguage(f.path)` call with
+      // no batch context, silently discarding the `.h` → C override computed
+      // above for exactly the files that override was meant to change.
+      const ex = collectExtraction(f.source, { filePath: f.path, language });
       extractions.push(ex);
       okFiles.push(f);
       parseHealth.push({
@@ -734,8 +830,53 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
   }
 
   const calls = buildCallEdges(resolved);
+
+  // -- module relationships: #include / source / . (XSPEC-414 R2/R4) --------
+  //
+  // Resolved the same way CALLS is: same-directory-relative match first
+  // (the overwhelmingly common real-world case — `#include "foo.h"` sitting
+  // next to `foo.h`, `source lib.sh` sitting next to `lib.sh`), else a
+  // globally-unique basename match across the whole batch, else dropped
+  // (precision over recall — same policy as CALLS' ambiguous/unresolved
+  // handling, just without a separate pair of counters for it; see
+  // `imports`' doc comment on {@link ProjectExtraction}).
+  const pathSet = new Set(okFiles.map((f) => toPosixPath(f.path)));
+  const basenameIndex = new Map<string, Set<string>>();
+  for (const path of pathSet) {
+    const base = posix.basename(path);
+    let ids = basenameIndex.get(base);
+    if (!ids) {
+      ids = new Set();
+      basenameIndex.set(base, ids);
+    }
+    ids.add(path);
+  }
+  const importEdgeKeys = new Set<string>();
+  const importEdges: GraphEdge[] = [];
+  for (const ex of extractions) {
+    for (const imp of ex.rawImports) {
+      if (!imp.target) continue;
+      const file = toPosixPath(imp.file);
+      // posix.normalize collapses a "../" segment and leaves an
+      // already-clean relative path untouched; posix.join anchors it at the
+      // importing file's own directory, matching how a compiler/shell
+      // resolves a relative #include/source path in practice.
+      const candidate = posix.normalize(posix.join(posix.dirname(file), imp.target));
+      let resolvedPath: string | null = pathSet.has(candidate) ? candidate : null;
+      if (!resolvedPath) {
+        const matches = basenameIndex.get(posix.basename(imp.target));
+        if (matches && matches.size === 1) resolvedPath = [...matches][0]!;
+      }
+      if (!resolvedPath || resolvedPath === file) continue;
+      const key = `${file} ${resolvedPath}`;
+      if (importEdgeKeys.has(key)) continue;
+      importEdgeKeys.add(key);
+      importEdges.push({ label: "IMPORTS", fromLabel: "Module", from: file, toLabel: "Module", to: resolvedPath });
+    }
+  }
+
   return {
-    fragment: { nodes, edges: [...defines, ...calls, ...implementsEdges] },
+    fragment: { nodes, edges: [...defines, ...calls, ...implementsEdges, ...importEdges] },
     // Files the engine actually looked at, which is `parseHealth.length` (one
     // entry per attempted file) rather than `files.length` (everything handed
     // in). The two are equal unless a language was skipped for want of a
@@ -747,6 +888,7 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
     classes: nodes.filter((n) => n.label === "Class").length,
     calls: calls.length,
     implements: implementsEdges.length,
+    imports: importEdges.length,
     ambiguous,
     unresolved,
     parseHealth,
