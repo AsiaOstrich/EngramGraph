@@ -113,6 +113,17 @@ const EXT_TO_LANG: Record<string, SupportedLanguage> = {
   ".rb": "ruby",
   ".php": "php",
   ".dart": "dart",
+  // XSPEC-414 R2/R3/R4. Note ".c" is deliberately absent here as a mapping
+  // to "c" is added right after — this measurement script always forces one
+  // fixed `lang` onto every file it walks (see `measure()`'s `language: lang`
+  // below), so unlike the real engine's `.h` OQ1 batch heuristic, a `.h`
+  // corpus measured with `lang: "cpp"` parses as C++ and one measured with
+  // `lang: "c"` parses as C — this map just needs an unambiguous route to
+  // each, not the project-level disambiguation `extractProject` itself does.
+  ".c": "c",
+  ".swift": "swift",
+  ".sh": "bash",
+  ".bash": "bash",
 };
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "vendor", "target", "build", "dist", "bin", "obj"]);

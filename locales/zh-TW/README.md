@@ -71,19 +71,19 @@ EngramGraph 有**兩個**互相獨立的原生相依，而它們的失敗方式�
 | | 套件 | 是否必要 | 該平台沒有預建二進位檔時 |
 |---|---|---|---|
 | **圖譜資料庫** | [`ryugraph`](https://github.com/predictable-labs/ryugraph) | **是** | 透過 `cmake-js` 從原始碼編譯。編不出來就完全沒有可用的 `egr`。 |
-| **語言文法** | `tree-sitter` ＋ 12 個文法套件 | 逐語言而定 | 透過 `node-gyp` 從原始碼編譯。編不出來**只影響該語言**——`egr` 照樣安裝、照樣索引其他語言。 |
+| **語言文法** | `tree-sitter` ＋ 15 個文法套件 | 逐語言而定 | 透過 `node-gyp` 從原始碼編譯。編不出來**只影響該語言**——`egr` 照樣安裝、照樣索引其他語言。 |
 
 截至 `engramgraph@0.9.1` 的預建二進位檔涵蓋狀況：
 
 | 平台 | 圖譜資料庫 | 語言文法 | 你會得到什麼 |
 |------|-----------|---------|-------------|
-| Linux x64，glibc ≥ 2.38（Ubuntu 24.04+、Debian 13+）| ✅ 已預建 | ✅ 13 個全部已預建 | 全部功能，完全不需要編譯器 |
+| Linux x64，glibc ≥ 2.38（Ubuntu 24.04+、Debian 13+）| ✅ 已預建 | ✅ 16 個全部已預建 | 全部功能，完全不需要編譯器 |
 | macOS ARM64（Apple Silicon）| ✅ 已預建 | ⚠️ Dart 需編譯 | 有 C/C++ 工具鏈就是全部；沒有的話是**除 Dart 以外**的所有語言 |
 | macOS x64（Intel）| ✅ 已預建 | ⚠️ Dart 需編譯 | 同上 |
 | Windows x64 | ✅ 已預建 | ⚠️ Dart 需編譯 | 同上——但請看 [Windows](#windows啟用-dart-文法)，那裡有兩個讓這件事比聽起來難的陷阱 |
 | Windows ARM64 | ❌ **無預建** | ⚠️ Dart 需編譯 | 連圖譜資料庫都需要工具鏈；未經測試 |
 | Linux ARM64（任何 glibc）| ❌ **上游有問題** | ⚠️ Dart 需編譯 | 上游把 x86-64 的二進位檔用 arm64 檔名發布——[predictable-labs/ryugraph#48](https://github.com/predictable-labs/ryugraph/issues/48) |
-| Linux x64，glibc < 2.38（Ubuntu 22.04 LTS、Debian 12）| ❌ **上游有問題** | ✅ 13 個全部已預建 | `ryugraph` 的二進位檔需要比這些仍常見的 LTS 發行版更新的 glibc |
+| Linux x64，glibc < 2.38（Ubuntu 22.04 LTS、Debian 12）| ❌ **上游有問題** | ✅ 16 個全部已預建 | `ryugraph` 的二進位檔需要比這些仍常見的 LTS 發行版更新的 glibc |
 
 **Linux x64 是唯一完全不需要編譯器就能安裝的平台。** 其他每個平台上，`npm install` 至少會編譯 Dart 文法（[`@vokturz/tree-sitter-dart`](https://www.npmjs.com/package/@vokturz/tree-sitter-dart) 只發布 `linux-x64` 的預建二進位檔）。該文法是**選用相依（optional dependency）**：編譯失敗時 npm 會繼續、安裝會成功，而 `egr` 會在你索引時告訴你 Dart 不可用。安裝期也會有一則前置提示先講清楚這件事，不必等編譯器的錯誤刷過去才知道。
 

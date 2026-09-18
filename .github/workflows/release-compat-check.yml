@@ -286,8 +286,16 @@ jobs:
 
           # Every other language must still be there. Losing one is the design;
           # losing several would mean the degradation is over-broad.
-          grep -q "12 available, 1 unavailable" doctor.log \
-            || { echo "::error::expected 12 available / 1 unavailable"; grep "languages:" doctor.log; exit 1; }
+          #
+          # XSPEC-414 R2-R4: C/Swift/Bash raised the total from 13 to 16
+          # languages, and 12 -> 15 available. All three ship win32-x64
+          # prebuilts (verified against the installed packages' own
+          # `prebuilds/` directories, not assumed — see
+          # `language-support.js`'s doc comments), so none of them needs this
+          # runner's disabled toolchain to load: Dart remains the ONLY
+          # casualty here, same as before this batch.
+          grep -q "15 available, 1 unavailable" doctor.log \
+            || { echo "::error::expected 15 available / 1 unavailable"; grep "languages:" doctor.log; exit 1; }
 
       - name: Indexing still works, and says what it skipped
         shell: bash
@@ -297,6 +305,12 @@ jobs:
           printf 'export function a() { return b(); }\nexport function b() { return 1; }\n' > probe/src/a.ts
           printf 'public class C { public string M() { return "x"; } }\n' > probe/src/b.cs
           printf 'void main() { greet(); }\nvoid greet() {}\n' > probe/src/c.dart
+          # XSPEC-414 R2/R3/R4: C, Swift and Bash all ship win32-x64
+          # prebuilts, so they must index cleanly on this same
+          # toolchain-disabled runner — the one thing Dart above cannot do.
+          printf 'int add(int a, int b) { return a + b; }\n' > probe/src/d.c
+          printf 'func greet() -> String { return "hi" }\n' > probe/src/e.swift
+          printf 'log() {\n  echo "hi"\n}\n' > probe/src/f.sh
 
           cd probe
           egr index ./src 2>&1 | tee index.log
@@ -306,6 +320,15 @@ jobs:
           # the grammar versions were pinned.
           grep -qE "code: [2-9][0-9]* files" index.log \
             || { echo "::error::fewer files indexed than expected"; exit 1; }
+          # C/Swift/Bash must NOT be in the "skipped" line — unlike Dart, none
+          # of them needs this runner's disabled toolchain. Matched against
+          # the exact "<label> file(s)" wording `cli/index.ts` renders, not a
+          # bare word (a bare "\bC\b" would also match inside "C#").
+          if grep "skipped:" index.log | grep -qE "(C|Swift|Bash) file\(s\)"; then
+            echo "::error::C/Swift/Bash reported skipped on a runner where their grammar ships a win32-x64 prebuilt"
+            grep "skipped:" index.log
+            exit 1
+          fi
           grep -q "0 failed" index.log \
             || { echo "::error::some files failed to parse"; exit 1; }
 
