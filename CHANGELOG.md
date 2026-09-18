@@ -4,14 +4,6 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- **C, Swift and Bash** (XSPEC-414 R2–R4). Functions, structs/unions/enums, and `#include`-derived module relationships for C; functions, classes/structs/enums/protocols and extensions (attributed to the type they extend, including across files) for Swift; function definitions, calls and `source`/`.`-derived module relationships for Bash, with external commands (`grep`, `echo`, ...) never entering the graph. `egr doctor` now lists all three. `.h` routes to C++ when the same indexing run has a C++ source file alongside it, and to C otherwise (previously always C++).
-- **`egr index` follows an extension-less shebang script** (`#!/bin/bash`, `#!/usr/bin/env sh`, XSPEC-414 R4) and indexes it as Bash, instead of counting it as an unsupported file.
-- **A new `IMPORTS` (Module → Module) relationship**, resolved from C's `#include` and Bash's `source`/`.` against the files in the same indexing run; `egr index`'s summary and `--json` output report the count.
-
 ## [0.12.0] — 2026-08-11
 
 **Two `egr` processes touching one graph did not refuse each other — they destroyed it.**
@@ -21,6 +13,10 @@ Every command opened the graph for writing, even a pure query, because opening r
 This was reachable in ordinary use. An editor's MCP server holds the graph for as long as the editor is open; a `post-commit` hook or a shell-startup freshness check indexes in the background; you run `egr` in a terminal. Any two of those overlapping was enough.
 
 ### Added
+
+- **C, Swift and Bash** (rc.5) (XSPEC-414 R2–R4). Functions, structs/unions/enums, and `#include`-derived module relationships for C; functions, classes/structs/enums/protocols and extensions (attributed to the type they extend, including across files) for Swift; function definitions, calls and `source`/`.`-derived module relationships for Bash, with external commands (`grep`, `echo`, ...) never entering the graph. `egr doctor` now lists all three. `.h` routes to C++ when the same indexing run has a C++ source file alongside it, and to C otherwise (previously always C++).
+- **`egr index` follows an extension-less shebang script** (rc.5) (`#!/bin/bash`, `#!/usr/bin/env sh`, XSPEC-414 R4) and indexes it as Bash, instead of counting it as an unsupported file.
+- **A new `IMPORTS` (Module → Module) relationship** (rc.5), resolved from C's `#include` and Bash's `source`/`.` against the files in the same indexing run; `egr index`'s summary and `--json` output report the count.
 
 - **The algorithm extension installs with the package** (rc.4). `god-nodes`, `communities` and `related` need ryugraph's ALGO extension, which until now was downloaded from `extension.ryugraph.io` on first use — so on a network that cannot reach it they did not work at all. It now ships prebuilt as `@asiaostrich/engramgraph-algo-<platform>`, an optional dependency npm installs only on the matching platform, and loads from there with no network and nothing written to your home directory. Platforms: Windows x64, Linux x64, macOS arm64 and x64. Linux arm64 is not included: ryugraph's own `linux-arm64` engine file is currently an x86-64 binary (predictable-labs/ryugraph#48), so there is nothing correct to build against. Everywhere else, the download still works as before.
 - **`egr index` names what it skipped** (rc.4). Files with an extension no grammar handles are counted and reported by extension in the summary and in `--json` (`unindexedCode`), instead of silently lowering the file count.
