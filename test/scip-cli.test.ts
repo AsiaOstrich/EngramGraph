@@ -256,8 +256,26 @@ describe("egr CLI entry (spawn): index --scip end-to-end", () => {
 
   it("--help documents --scip", () => {
     const r = run(["--help"]);
-    // Intermittent: exit 1 twice in a pre-commit hook and once in a plain full
-    // run (2026-09-17), never on a rerun. Carry everything the next one leaves.
+    // Root-caused 2026-09-18 (was "Intermittent, cause unknown" — the two
+    // stderr-carrying failure captures below are what pinned it down):
+    // `test/packaging.test.ts`'s `packedFiles()` used to run `npm pack
+    // --ignore-scripts` with `cwd` set to THIS repo. npm 10.9.8 runs the
+    // `prepare` script (`tsup && husky`) regardless of `--ignore-scripts` —
+    // reproduced standalone, a bare `npm pack --ignore-scripts` here still
+    // prints `tsup`'s build progress. `tsup.config.ts` has `clean: true`, so
+    // that unwanted rebuild deletes `dist/` before repopulating it, and this
+    // test spawns `dist/cli/index.js` (see `CLI` above) directly — landing a
+    // spawn inside that empty window produces exactly the two captures below
+    // (`Error: Cannot find module '.../dist/cli/index.js'`, `code:
+    // 'MODULE_NOT_FOUND'`), both from a `vitest run` that also ran
+    // `packaging.test.ts` in the same process. Fixed at the source in
+    // `packedFiles()` (it now packs a scratch copy, never this repo's own
+    // `dist/`) — see that function's doc comment and the guard test
+    // immediately below it in `packaging.test.ts`, which fails hard against
+    // the pre-fix implementation. The assertion here still carries the full
+    // failure context rather than a bare boolean: that stderr text is what
+    // pinned down the root cause once it was captured, so it stays in case a
+    // DIFFERENT concurrent-with-a-rebuild failure shape shows up later.
     expect(r.status, `signal=${r.signal} error=${r.error}\nstderr:\n${r.stderr}\nstdout:\n${r.stdout}`).toBe(0);
     expect(r.stdout).toContain("--scip");
     expect(r.stdout.toLowerCase()).toContain("scip-dotnet");
