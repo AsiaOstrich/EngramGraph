@@ -665,3 +665,127 @@ describe("refs check reproduces the DEC-115 H1 baseline categories on one fixtur
     expect(byRaw.has("AsiaOstrich/EngramGraph")).toBe(false);
   });
 });
+
+/**
+ * DEC-115 H1 R4 bug 1: dev-platform's real graph indexes SEVERAL git repos
+ * under separate roots (each sub-project symlinked in, each with its own
+ * `.git`) — round 3's `roots[0]`-only fallback silently missed every real
+ * deletion that lived in any OTHER indexed repo. These fixtures mirror that
+ * shape: a "primary" root with its own (empty, for this path) history, and
+ * a separate sub-repo root with real history, referenced by a path that is
+ * relative to the SUB-repo (no repo-name prefix — the shape a note written
+ * from inside that sub-repo actually uses).
+ */
+describe("refs check multi-repo history (DEC-115 H1 R4 bug 1)", () => {
+  it("finds a deleted file's evidence in a sub-repo root that is NOT the first indexed root", async () => {
+    const primaryRoot = tmpDir("engram-refs-primary-");
+    git(primaryRoot, "init", "-q");
+    git(primaryRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "init", "--allow-empty");
+    const subRepo = gitRepoWithDeletedFile("src/license/index.ts");
+
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/license/index.ts` for details.\n");
+
+    // primaryRoot listed FIRST — round 3 only ever checked roots[0].
+    const result = await checkRefs(conn, [md], { roots: [primaryRoot, subRepo], cwd: primaryRoot });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("missing");
+    expect(result.items[0]!.reason).toMatch(/commit [0-9a-f]+/);
+  });
+
+  it("reports unresolvable when NO indexed root's history has evidence, even across several roots", async () => {
+    const primaryRoot = emptyGitRepo();
+    const subRepo = emptyGitRepo();
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/never/existed.ts` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [primaryRoot, subRepo], cwd: primaryRoot });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+  });
+});
+
+/**
+ * DEC-115 H1 R4 bug 2: `git log -S` (plain pickaxe) matched ANY text
+ * containing the name — a mere mention in a memory note or doc, or a call
+ * site, counted the same as a real definition. The fix restricts evidence
+ * to a DEFINITION shape (`function NAME`, `NAME = (`, `NAME() {`, …) in
+ * source-code files only.
+ */
+describe("refs check symbol definition evidence (DEC-115 H1 R4 bug 2)", () => {
+  it("does not treat a mere mention in a Markdown file as definition evidence — unresolvable, not missing", async () => {
+    const repo = tmpDir("engram-refs-mention-repo-");
+    git(repo, "init", "-q");
+    writeFileSync(join(repo, "notes.md"), "Some notes mentioning myMentionedOnlyFunc in prose, not code.\n");
+    git(repo, "add", "-A");
+    git(repo, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "add notes");
+
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "`myMentionedOnlyFunc()` was called here.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+  });
+
+  it("does not treat a mere call site (no definition shape) in code as definition evidence — unresolvable, not missing", async () => {
+    const repo = tmpDir("engram-refs-call-only-repo-");
+    git(repo, "init", "-q");
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "src", "caller.ts"), "myCalledOnlyFunc();\n");
+    git(repo, "add", "-A");
+    git(repo, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "add");
+    git(repo, "rm", "-q", "src/caller.ts");
+    git(repo, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "delete");
+
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "`myCalledOnlyFunc()` used to run here.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+  });
+
+  it("still finds a real code DEFINITION as evidence (positive control, unchanged from the -S era)", async () => {
+    const repo = gitRepoWithDeletedSymbol("src/oldFn2.ts", "export function myOtherVanishedFunc() { return 2; }");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "`myOtherVanishedFunc()` used to do the other thing.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("missing");
+    expect(result.items[0]!.reason).toMatch(/commit [0-9a-f]+/);
+  });
+});
+
+/** DEC-115 H1 R4: extraction-side symbol-shape tightening. */
+describe("refs check does not extract code-snippet-shaped tokens as symbols (DEC-115 H1 R4)", () => {
+  it.each([
+    ["shell command substitution", "$(dirname $0)"],
+    ["an arrow-function literal", "filter(x => !x.done)"],
+    ["a comparison expression", "fileURLToPath(import.meta.url) === path.resolve(process.argv[1])"],
+    ["a string-literal argument", "createHash('sha256')"],
+  ])("does not extract %s as a symbol call (%s)", async (_label, noise) => {
+    const { conn } = await openFixtureGraph({
+      nodes: [{ label: "Function", id: "src/real.ts#realFn", properties: { name: "realFn", file: "src/real.ts", start_line: 1, confidence: 0.8, provider: "tree-sitter" } }],
+      edges: [],
+    });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", `Noise: \`${noise}\`. Real: \`realFn()\`.\n`);
+
+    const result = await checkRefs(conn, [md], { roots: [], cwd: notesDir });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ kind: "symbol", status: "present", location: "src/real.ts" });
+  });
+});

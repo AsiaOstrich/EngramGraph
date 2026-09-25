@@ -180,6 +180,7 @@ import type { GraphConnection } from "../graph-db/connection.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { manifestPathForDb, readManifest } from "../code-graph/parse-manifest.js";
 import { SKIP_DIRS } from "./walk.js";
+import { GRAMMARS } from "../../language-support.js";
 
 export type RefKind = "path" | "symbol";
 export type RefStatus = "present" | "moved" | "missing" | "unresolvable";
@@ -266,9 +267,26 @@ function looksLikePath(tok: string): boolean {
   return KNOWN_EXT_RE.test(stripped); // has a real extension → path; otherwise a branch name/owner-repo/word-list → not a path
 }
 
+/**
+ * A call-shaped token whose PARENTHESIZED BODY still looks like a plain
+ * argument list — not an inline code snippet quoting an expression.
+ * DEC-115 H1 R4: `$(dirname $0)` (shell substitution), `filter(x => !...)`
+ * (an arrow-function literal, not a call to a symbol named `filter`), and
+ * `fileURLToPath(import.meta.url) === path.resolve(process.argv[1])` (two
+ * expressions joined by a comparison, matched whole by the old permissive
+ * regex) were all extracted as if they named a single project symbol.
+ */
 function looksLikeSymbolCall(tok: string): boolean {
   if (tok.includes("/")) return false;
-  return /^[A-Za-z_$][\w$.]*\([^`]*\)$/.test(tok);
+  if (tok.includes("...")) return false; // ellipsis placeholder
+  if (tok.startsWith("$(")) return false; // shell command substitution
+  const m = /^[A-Za-z_$][\w$.]*\(([^`]*)\)$/.exec(tok);
+  if (!m) return false;
+  const body = m[1]!;
+  if (body.includes("=>")) return false; // an arrow-function literal, not a call
+  if (body.includes("===") || body.includes("!==")) return false; // a comparison expression, not a single call
+  if (/['"]/.test(body)) return false; // a string-literal argument — usually quoted example code, not a symbol reference
+  return true;
 }
 
 interface RawRef {
@@ -507,31 +525,59 @@ function lastSeenCommit(repoRoot: string, relPath: string): string | null {
  * checked by the caller). DEC-115 H1 R3's core rule: `missing` requires
  * EVIDENCE this path once existed, not just its current absence — a rename
  * (checked first, since that's a stronger, more specific claim) or a plain
- * appearance anywhere in `gitRoot`'s history. No evidence at all →
- * `unresolvable`, however plausible the reference looks; DEC-115 H1's own
- * baseline measured most "looks plausible" `missing` guesses as wrong.
- * `gitRoot` is the repo whose history is searched — best-effort when the
- * reference wasn't clearly root-qualified.
+ * appearance anywhere in history. No evidence at all → `unresolvable`,
+ * however plausible the reference looks.
+ *
+ * `candidateRoots` — DEC-115 H1 R4's fix: a reference isn't always clearly
+ * root-qualified (e.g. a note written from inside a sub-repo just says
+ * `src/license/index.ts`, no `vibeops/` prefix), and dev-platform's graph
+ * indexes SEVERAL git repos under separate roots (each sub-project symlinked
+ * in, each with its own `.git`). Checking only ONE root's history — round 3's
+ * bug — silently missed every real deletion in every OTHER indexed repo:
+ * the round-3 rerun found 51 confirmed-real deletions in sub-repos, all
+ * reported `unresolvable` because only one (arbitrary) root was ever
+ * checked. Every candidate root is tried, in order, for both rename and
+ * history evidence; the first hit wins.
  */
-function finishNotFoundInGraph(base: { kind: "path"; raw: string }, gitRoot: string, relPath: string, cache: HistoryCache): PartialItem {
-  const moved = findRenameTarget(gitRoot, relPath);
-  if (moved === "unavailable") {
-    return { ...base, status: "missing", reason: "not found in the graph or on disk under the indexed root; git was unavailable so history could not be checked" };
-  }
-  if (moved) return { ...base, status: "moved", location: moved };
+function finishNotFoundInGraph(base: { kind: "path"; raw: string }, candidateRoots: string[], relPath: string, cache: HistoryCache): PartialItem {
+  let anyUnavailable = false;
 
-  const history = historyPathSet(gitRoot, cache);
-  if (history === "unavailable") {
-    return { ...base, status: "missing", reason: "not found in the graph or on disk under the indexed root; git was unavailable so history could not be checked" };
+  for (const root of candidateRoots) {
+    const moved = findRenameTarget(root, relPath);
+    if (moved === "unavailable") {
+      anyUnavailable = true;
+      continue;
+    }
+    if (moved) return { ...base, status: "moved", location: moved };
   }
-  if (!history.has(relPath)) {
-    return { ...base, status: "unresolvable", reason: "never appears in this indexed root's git history — not enough evidence this was ever a real path here" };
+
+  for (const root of candidateRoots) {
+    const history = historyPathSet(root, cache);
+    if (history === "unavailable") {
+      anyUnavailable = true;
+      continue;
+    }
+    if (history.has(relPath)) {
+      const commit = lastSeenCommit(root, relPath);
+      return {
+        ...base,
+        status: "missing",
+        reason: commit ? `no longer exists; last appears in git history at commit ${commit}` : "no longer exists; found in git history but its last commit could not be determined",
+      };
+    }
   }
-  const commit = lastSeenCommit(gitRoot, relPath);
+
+  if (anyUnavailable) {
+    return {
+      ...base,
+      status: "missing",
+      reason: "not found in the graph or on disk under any indexed root; git was unavailable for at least one of them so history could not be fully checked",
+    };
+  }
   return {
     ...base,
-    status: "missing",
-    reason: commit ? `no longer exists; last appears in git history at commit ${commit}` : "no longer exists; found in git history but its last commit could not be determined",
+    status: "unresolvable",
+    reason: "never appears in any indexed root's git history — not enough evidence this was ever a real path here",
   };
 }
 
@@ -539,7 +585,7 @@ function finishNotFoundInGraph(base: { kind: "path"; raw: string }, gitRoot: str
 async function resolveRelPathInRoot(conn: GraphConnection, base: { kind: "path"; raw: string }, root: string, relPath: string, cache: HistoryCache): Promise<PartialItem> {
   if (await moduleExists(conn, relPath)) return { ...base, status: "present", location: relPath };
   if (existsSync(join(root, relPath))) return { ...base, status: "present", location: relPath };
-  return finishNotFoundInGraph(base, root, relPath, cache);
+  return finishNotFoundInGraph(base, [root], relPath, cache);
 }
 
 /**
@@ -619,7 +665,7 @@ async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[
 
   if (roots.length === 0) {
     // No manifest — single-repo mode (DEC-115 D2: no cross-repo advantage to lose here).
-    return finishNotFoundInGraph(base, cwd, normalized, cache);
+    return finishNotFoundInGraph(base, [cwd], normalized, cache);
   }
 
   // DEC-115 H1 R3 rule 3 (continued): first segment names a real but
@@ -645,7 +691,11 @@ async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[
     };
   }
 
-  return finishNotFoundInGraph(base, roots[0]!, normalized, cache);
+  // DEC-115 H1 R4: not clearly root-qualified — the bug this round fixes is
+  // checking only `roots[0]` here (an arbitrary pick that silently missed
+  // every real deletion in every OTHER indexed repo). Try every indexed
+  // root, not just the first.
+  return finishNotFoundInGraph(base, roots, normalized, cache);
 }
 
 /** JS/Node built-in namespaces a dotted symbol reference's base might name — never a project symbol, so never worth a graph lookup. */
@@ -665,15 +715,64 @@ const BUILTIN_NAMESPACES: ReadonlySet<string> = new Set([
  * matches, so — unlike path history — this is never batched: the candidate
  * volume at that point is small (DEC-115 H1's baseline: tens, not hundreds).
  */
+/**
+ * `git log`'s pathspec argument list restricting a search to source-code
+ * files — derived from {@link GRAMMARS} (the same registry `run.ts`'s
+ * `CODE_EXTS` derives from), not hand-maintained, so this list can't drift
+ * from the languages EGR actually indexes.
+ */
+const CODE_PATHSPECS: readonly string[] = GRAMMARS.flatMap((g) => g.extensions).map((ext) => `*${ext}`);
+
+function escapeRegExpLiteral(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * A `git log -G` pattern matching common DEFINITION shapes for `name` —
+ * NOT a call site or a prose mention. POSIX extended-regex syntax only (no
+ * `\s`/`\b`/`\d` — empirically verified NOT to match under git's default
+ * `-G` engine; `[[:space:]]` and an explicit `[^A-Za-z0-9_]` boundary class
+ * are the portable equivalents).
+ *
+ * DEC-115 H1 R4: this is the fix for round 3's `-S` (plain occurrence-count
+ * pickaxe), which matched ANY text containing the name — a mere MENTION in
+ * a memory note or a doc, or a CALL site, counted the same as a real
+ * definition. The round-3 rerun's false `missing` were almost entirely this:
+ * `$(dirname $0)`, `setLoading(false)`, `createHash('sha256')`,
+ * `fileURLToPath(...)` all "existed" by that measure. None of them is a
+ * definition of a project symbol.
+ */
+function definitionPattern(name: string): string {
+  const n = escapeRegExpLiteral(name);
+  const boundaryBefore = "(^|[^A-Za-z0-9_])";
+  const boundaryAfter = "([^A-Za-z0-9_]|$)";
+  return [
+    `${boundaryBefore}(function|fn|func|def|class)[[:space:]]+${n}${boundaryAfter}`, // function NAME / fn NAME / func NAME / def NAME / class NAME
+    `${boundaryBefore}${n}[[:space:]]*=[[:space:]]*\\(`, // NAME = (...) =>  or  NAME = function
+    `${boundaryBefore}${n}[[:space:]]*\\([^)]*\\)[[:space:]]*\\{`, // NAME(...) {   (method/function shorthand)
+    `${boundaryBefore}${n}[[:space:]]*:[[:space:]]*function`, // NAME: function (...) {
+  ].join("|");
+}
+
+/**
+ * Evidence a symbol was once DEFINED somewhere in an indexed root's history
+ * — `git log -G<definition pattern>`, restricted to source-code paths
+ * ({@link CODE_PATHSPECS}) so a `.md`/`.yaml` mention can never count. Only
+ * called when the graph already found zero matches (see the lazy call site
+ * in {@link resolveSymbolRef}), so this is never batched — the candidate
+ * volume at that point is small.
+ */
 function symbolEverExisted(roots: string[], cwd: string, name: string): { root: string; commit: string } | null | "unavailable" {
   const searchRoots = roots.length > 0 ? roots : [cwd];
+  const pattern = definitionPattern(name);
   let sawUnavailable = false;
   for (const root of searchRoots) {
     try {
-      const out = execFileSync("git", ["-C", root, "log", "--all", "-S", name, "--format=%h", "-1"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
+      const out = execFileSync(
+        "git",
+        ["-C", root, "log", "--all", "-G", pattern, "--format=%h", "-1", "--", ...CODE_PATHSPECS],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      ).trim();
       if (out.length > 0) return { root, commit: out };
     } catch {
       sawUnavailable = true;
