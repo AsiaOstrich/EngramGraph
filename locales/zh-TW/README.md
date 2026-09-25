@@ -256,17 +256,36 @@ const app = createServer({ connection: conn });   // Hono app；路由在 /graph
 
 ## MCP — 在程式助理中使用 EngramGraph
 
-EngramGraph 內附一個 MCP server（stdio），暴露 8 個工具——`index_code`、`index_docs`、
-`call_chain`、`impact_analysis`、`ingest_feedback`、`implementers`、`implemented_specs`、
-`related`——讓任何支援 MCP 的助理都能把它當成程式碼 + 知識圖譜使用。無 LLM、確定性、**免 Docker**。
+EngramGraph 內附一個 MCP server（stdio），暴露 12 個工具——程式碼／知識圖譜查詢
+（`index_code`、`index_docs`、`call_chain`、`impact_analysis`、`ingest_feedback`、
+`implementers`、`implemented_specs`、`related`）、診斷（`blindspots`、`signatures`、
+`doctor`），以及一個 Markdown 引用查核員（`refs_check`，DEC-115，見下）——讓任何
+支援 MCP 的助理都能把它當成程式碼 + 知識圖譜使用。無 LLM、確定性、**免 Docker**。
+每個工具都宣告了 MCP 標註（`readOnlyHint`／`destructiveHint`／`idempotentHint`／
+`openWorldHint`），讓用戶端知道它即將執行的是什麼。
 
 ```bash
 # Claude Code，使用已安裝的套件：
 claude mcp add egr -- npx egr-mcp
 ```
 
-完整設定（Claude Code / Codex / Cursor / Windsurf）、全部 8 個工具與範例流程：
+完整設定（Claude Code / Codex / Cursor / Windsurf）、全部 12 個工具及其標註、與範例流程：
 **[docs/MCP.md](./docs/MCP.md)**。
+
+### 查核記憶筆記裡的程式碼引用是否還正確（DEC-115）
+
+AI 的記憶／筆記會用檔案路徑或符號名稱引用程式碼，而程式碼搬家時引用不會自動更新。
+`egr refs check` 讀 Markdown（記憶檔、CLAUDE.md／AGENTS.md、一個筆記目錄），
+每個引用回報 `present`（仍存在）｜`moved`（附新位置，透過圖與 `git` 查出）｜
+`missing`（找不到）｜`unresolvable`（資訊不足——例如引用的是這個圖從未索引過的
+另一個 repo；絕不會跟 `missing` 混為一談）。唯讀——不會寫入圖，也不會修改被檢查的
+檔案（見下方[「EngramGraph 不儲存什麼」](#engramgraph-不儲存什麼)）。
+
+```bash
+egr refs check MEMORY.md
+```
+
+完整抽取規則與範例：**[docs/CLI.md](./docs/CLI.md)**。
 
 ## Core 與 Adapter 邊界
 

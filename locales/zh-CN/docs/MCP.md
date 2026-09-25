@@ -81,8 +81,52 @@ command/args/env 都一样：
 | `blindspots` | — | 解析不完全或失败的文件（来自 parse-health manifest）——图可能缺少节点／边的地方。当查询报告 `indexHealth.possiblyIncomplete` 时用它查出**缺的是什么**。`manifestPresent` 用来区分「没有问题」与「从未测量过」。 |
 | `signatures` | — | 同一批文件改以**根本原因**分组而非逐一列出——把「584 个文件」变成「1 个问题」。当 `blindspots` 返回很长的列表时使用。 |
 | `doctor` | — | 哪些语言可用、不可用的原因、这台机器上有哪些是自行编译的、哪些命令需要网络。**不打开图**，所以在「索引本身坏掉」时仍然回答得出来。 |
+| `refs_check` | `paths: string[]` | 检查 Markdown 文件／目录中（反引号包住的）文件路径与符号引用，对照图与 `git` 是否仍然正确。每个引用回报 `present`（仍存在）｜`moved`（附新位置）｜`missing`（找不到）｜`unresolvable`（信息不足，例如引用的是这个图没有索引的另一个 repo——绝不回报成 `missing`）。只读，不会修改图或被检查的文件。抽取规则见 [CLI.md](./CLI.md)。 |
 
 每个工具都返回一个 JSON 文本内容块；失败时返回 `error: <message>` 并带 `isError: true`。
+
+### 通过 stdio 被拒绝的工具，以及原因
+
+stdio server 把图**只读**打开。这个引擎是单一写入者，而 server 是长生命的——它跟你的
+编辑器开多久就活多久。如果它握有写入句柄，你在终端同时执行的任何 `egr`
+命令都会跟它抢，而这个引擎上两个写入者不是单纯拒绝输的那个，是**把数据库毁掉**。
+
+所以这里有四个工具被拒绝，每个都会指名该改跑哪个命令：
+
+| 工具 | 改跑 |
+|------|------|
+| `index_code` | `egr index <dir>` |
+| `index_docs` | `egr index <dir> --docs` |
+| `ingest_feedback` | `egr feedback <type> <node-id>` |
+| `related` | `egr related <seed-id>` |
+
+server 会在下一次查询时看到结果——不需要重启。
+
+### 工具标注（DEC-115 L2）
+
+每个工具都声明了 MCP 规格的 `readOnlyHint`／`destructiveHint`／`idempotentHint`／
+`openWorldHint`——这些是提示，不是保证，但完全不声明就等于什么线索都没给客户端。
+每一格的值都是**读过该工具的实现**才定的，不是照名字猜的：`related` 读起来像查询，
+但排名前必须先安装算法扩展、建立投影图，两者都是写入，所以它的 `readOnly` 是 false。
+
+| 工具 | readOnly | destructive | idempotent | openWorld |
+|------|:--:|:--:|:--:|:--:|
+| `index_code` | false | false | true | false |
+| `index_docs` | false | false | true | false |
+| `call_chain` | true | false | true | false |
+| `impact_analysis` | true | false | true | false |
+| `ingest_feedback` | false | false | **false** | false |
+| `implementers` | true | false | true | false |
+| `implemented_specs` | true | false | true | false |
+| `related` | **false** | false | true | false |
+| `blindspots` | true | false | true | false |
+| `signatures` | true | false | true | false |
+| `doctor` | true | false | true | false |
+| `refs_check` | true | false | true | false |
+
+全部都不连网（`openWorldHint: false`）——图、文件系统与 `git` 都是本机的。
+只有 `ingest_feedback` 不是幂等的：它套用的是置信度的**增量**，同一组参数调用两次
+会改变分数两次，不是一次。
 
 ## 助手流程示例
 

@@ -41,6 +41,7 @@ import {
   type ParseHealthSummary,
 } from "../code-graph/parse-manifest.js";
 import { walkFiles, summarizeUnindexed, type UnindexedSummary } from "./walk.js";
+import { checkRefs, type RefCheckResult } from "./refs-check.js";
 import { unavailableGrammars } from "../code-graph/grammar-registry.js";
 import { GRAMMARS, compiledFromSourceOn, currentPlatform } from "../../language-support.js";
 import type { SupportedLanguage } from "../code-graph/types.js";
@@ -738,4 +739,15 @@ export function cmdDoctor(dbPath: string): DoctorResult {
     })),
     networkCommands: ["god-nodes", "communities", "related"],
   };
+}
+
+/**
+ * `egr refs check <path...>` (DEC-115 L2). Thin wrapper over
+ * {@link checkRefs} kept here for the same reason every other `cmd*`
+ * function is: unit-testable in isolation from arg parsing, and so it can
+ * sit in `read-only-command-list.test.ts`'s hand-written command map
+ * alongside the other read-only commands.
+ */
+export async function cmdRefsCheck(conn: GraphConnection, paths: string[]): Promise<RefCheckResult> {
+  return checkRefs(conn, paths);
 }

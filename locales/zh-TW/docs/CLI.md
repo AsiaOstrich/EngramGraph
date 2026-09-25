@@ -195,6 +195,29 @@ egr top Function --limit 20
 egr top Decision --json
 ```
 
+### `refs check <path...> [--json]`
+
+檢查 Markdown 檔案或目錄中（反引號包住的）檔案路徑與符號／函式引用，對照圖與
+`git` 是否仍然正確 —— 記憶筆記、CLAUDE.md／AGENTS.md、任何 `.md` 檔皆可。
+唯讀：不會修改圖，也不會修改被檢查的檔案（見 EGR README
+[「What EngramGraph does not store」](../../../README.md#what-engramgraph-does-not-store)
+—— 這是查核員，不是第二個記憶庫）。每個引用只會得到以下四種答案之一，絕不用猜的：
+
+- `present` —— 仍然解析得到。
+- `moved` —— 檔案／符號在圖裡或磁碟上，但位置不同了。改名偵測使用
+  `git log --diff-filter=R -M`；完全不在圖裡的純檔案（設定檔、文件）也一樣會查。
+- `missing` —— 圖裡找不到，也查不到改名紀錄。
+- `unresolvable` —— 資訊不足以判斷是存在還是消失（例如引用的是這個圖從未
+  索引過的另一個 repo —— 絕不會回報成 `missing`，那會是一個假的確定性宣稱）。
+
+抽取規則刻意保守：只處理反引號包住的字串，沒有路徑形狀或 `(...)`
+呼叫形狀的裸字不會被抽取，同名函式若出現在多個檔案會列出候選而不猜測。
+
+```bash
+egr refs check MEMORY.md
+egr refs check ./notes --json
+```
+
 ### `gc [--dry-run]`
 
 回收已不存在分支的 per-branch 圖譜。檢查 `<git-common-dir>/engram/`；當沒有任何現存

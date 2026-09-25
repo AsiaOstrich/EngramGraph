@@ -57,6 +57,7 @@ describe("EngramGraph MCP server", () => {
       "index_code",
       "index_docs",
       "ingest_feedback",
+      "refs_check",
       "related",
       "signatures",
     ]);

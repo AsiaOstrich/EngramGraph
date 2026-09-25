@@ -208,6 +208,36 @@ egr top Function --limit 20
 egr top Decision --json
 ```
 
+### `refs check <path...> [--json]`
+
+Check file-path and symbol/function references (in backticks) inside
+Markdown files or directories — memory notes, CLAUDE.md/AGENTS.md, any
+`.md` — against the graph and `git`. Read-only: it does not modify the
+graph or the files it checks (see EGR README, ["What EngramGraph does not
+store"](../README.md#what-engramgraph-does-not-store) — this is a checker,
+not a second memory store). Each reference gets one of four answers, never
+guessed:
+
+- `present` — still resolves.
+- `moved` — the file/symbol is in the graph or on disk, at a different
+  location. Rename detection uses `git log --diff-filter=R -M`; a plain
+  file not in the graph at all (a config file, a doc) is still checked this
+  way.
+- `missing` — not found in the graph, and no rename was found either.
+- `unresolvable` — not enough information to say present or missing (e.g.
+  the reference names a repo this graph was never told to index — never
+  reported as `missing`, which would be a false claim of certainty).
+
+Extraction is deliberately conservative: only backtick-quoted tokens are
+considered, a bare word with no path shape or `(...)` call shape is not
+extracted at all, and same-named functions in different files are reported
+as candidates rather than guessed at.
+
+```bash
+egr refs check MEMORY.md
+egr refs check ./notes --json
+```
+
 ### `gc [--dry-run]`
 
 Garbage-collect per-branch graphs whose branch no longer exists. Inspects
