@@ -427,6 +427,13 @@ function findRenameTarget(repoRoot: string, relPath: string): string | null | "u
 function siblingRepoExists(roots: string[], firstSeg: string): boolean {
   for (const root of roots) {
     const candidate = join(dirname(root), firstSeg);
+    // DEC-115 H1 R5: an index root whose OWN basename equals `firstSeg`
+    // (the real shape — `vibeops/src` for a citation starting `src/…`) makes
+    // `candidate` equal that SAME already-indexed root, not a sibling of it.
+    // Without this guard, an index root is reported as its own un-indexed
+    // sibling — wrong in the specific, structural way this round's
+    // `matchedRoot` fix could otherwise be shadowed by.
+    if (roots.includes(candidate)) continue;
     if (existsSync(candidate) && statSync(candidate).isDirectory()) return true;
   }
   return false;
@@ -473,6 +480,84 @@ function normalizePathToken(raw: string): string {
 }
 
 type PartialItem = Omit<RefCheckItem, "sourceFile" | "sourceLine">;
+
+/**
+ * Per-`checkRefs`-run cache of `indexRoot → git toplevel` (DEC-115 H1 R5).
+ * Never module-level — same reasoning as {@link HistoryCache}.
+ */
+type ToplevelCache = Map<string, string>;
+
+/**
+ * `git -C <dir> rev-parse --show-toplevel` — the real repo root, realpath
+ * resolved (so a symlinked index root, e.g. `dev-platform/vibeops`, and its
+ * real target agree). Falls back to `dir` itself when `dir` is not inside a
+ * git repo (or `git` is unavailable) — this checker still works, just
+ * without the toplevel/index-root distinction (nothing to distinguish).
+ */
+function gitToplevel(dir: string, cache: ToplevelCache): string {
+  const cached = cache.get(dir);
+  if (cached) return cached;
+  let result: string;
+  try {
+    const out = execFileSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    result = out.length > 0 ? out : dir;
+  } catch {
+    result = dir;
+  }
+  cache.set(dir, result);
+  return result;
+}
+
+/**
+ * DEC-115 H1 R5's core fix. `roots` (from the parse-health manifest) are
+ * `egr index <dir>` call sites — frequently a SUBDIRECTORY of a repo, not
+ * its root (dev-platform's real manifest: `vibeops/src`, `vibeops/scripts`,
+ * …, each its own index root, all inside the ONE `vibeops` repo). But:
+ *
+ *   - `git log`'s output (rename targets, `--name-only` history, commit
+ *     hashes via `-- <path>` pathspecs) is always REPO-ROOT-relative — `git
+ *     -C <subdir>` changes where git RUNS, not the coordinate system its
+ *     answers are reported in, and a `-- <path>` pathspec is resolved
+ *     relative to that same cwd, so a subdirectory root silently shifts
+ *     pathspec-based lookups (`lastSeenCommit`) onto the wrong file even
+ *     when unrestricted lookups (`historyPathSet`, no pathspec) still
+ *     happen to return correct, repo-wide, repo-root-relative data.
+ *   - A memory note is usually written AS IF standing at the repo it
+ *     describes, so its paths (`src/license/index.ts`) are already
+ *     REPO-ROOT-relative, not relative to whatever subdirectory happened to
+ *     be indexed.
+ *
+ * So this returns EVERY (toplevel, repo-relative-path) pair worth trying
+ * for `normalized`, deduplicated across all `roots`: the path taken as
+ * literally repo-root-relative already (the common case), AND the path
+ * taken as relative to each index root, converted to repo-root-relative via
+ * that root's offset from its own toplevel (the case an index root's
+ * `basename` used to be mistaken for a "repo name" to strip — see round 3's
+ * `matchedRoot`, which still exists for the GRAPH's Module-id lookup, a
+ * genuinely different, index-root-relative coordinate system).
+ */
+function repoRelativeCandidates(roots: string[], normalized: string, topCache: ToplevelCache): Array<{ toplevel: string; repoRelativePath: string }> {
+  const out: Array<{ toplevel: string; repoRelativePath: string }> = [];
+  const seen = new Set<string>();
+  const push = (toplevel: string, repoRelativePath: string): void => {
+    const key = `${toplevel}\u0000${repoRelativePath}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ toplevel, repoRelativePath });
+  };
+  for (const root of roots) {
+    const toplevel = gitToplevel(root, topCache);
+    push(toplevel, normalized); // already repo-root-relative (the common case)
+    if (toplevel !== root) {
+      const offset = toPosixPath(relative(toplevel, root));
+      push(toplevel, toPosixPath(join(offset, normalized))); // index-root-relative, converted
+    }
+  }
+  return out;
+}
 
 /**
  * Per-`checkRefs`-run cache of each root's full historical path set (DEC-115
@@ -539,11 +624,11 @@ function lastSeenCommit(repoRoot: string, relPath: string): string | null {
  * checked. Every candidate root is tried, in order, for both rename and
  * history evidence; the first hit wins.
  */
-function finishNotFoundInGraph(base: { kind: "path"; raw: string }, candidateRoots: string[], relPath: string, cache: HistoryCache): PartialItem {
+function finishNotFoundInGraph(base: { kind: "path"; raw: string }, candidates: Array<{ toplevel: string; repoRelativePath: string }>, cache: HistoryCache): PartialItem {
   let anyUnavailable = false;
 
-  for (const root of candidateRoots) {
-    const moved = findRenameTarget(root, relPath);
+  for (const { toplevel, repoRelativePath } of candidates) {
+    const moved = findRenameTarget(toplevel, repoRelativePath);
     if (moved === "unavailable") {
       anyUnavailable = true;
       continue;
@@ -551,14 +636,19 @@ function finishNotFoundInGraph(base: { kind: "path"; raw: string }, candidateRoo
     if (moved) return { ...base, status: "moved", location: moved };
   }
 
-  for (const root of candidateRoots) {
-    const history = historyPathSet(root, cache);
+  for (const { toplevel, repoRelativePath } of candidates) {
+    const history = historyPathSet(toplevel, cache);
     if (history === "unavailable") {
       anyUnavailable = true;
       continue;
     }
-    if (history.has(relPath)) {
-      const commit = lastSeenCommit(root, relPath);
+    if (history.has(repoRelativePath)) {
+      // Same (toplevel, repoRelativePath) pair the membership check just
+      // matched on — DEC-115 H1 R5's bug 2: computing this against the
+      // wrong root/coordinate returned nothing even on a confirmed hit
+      // ("last commit could not be determined"), because `-- <path>` is a
+      // pathspec, and a pathspec IS resolved relative to `-C`'s cwd.
+      const commit = lastSeenCommit(toplevel, repoRelativePath);
       return {
         ...base,
         status: "missing",
@@ -582,10 +672,25 @@ function finishNotFoundInGraph(base: { kind: "path"; raw: string }, candidateRoo
 }
 
 /** Graph, then disk, then (as a last resort) git evidence — for a reference already resolved to one specific root + relative path. */
-async function resolveRelPathInRoot(conn: GraphConnection, base: { kind: "path"; raw: string }, root: string, relPath: string, cache: HistoryCache): Promise<PartialItem> {
+async function resolveRelPathInRoot(
+  conn: GraphConnection,
+  base: { kind: "path"; raw: string },
+  root: string,
+  relPath: string,
+  cache: HistoryCache,
+  topCache: ToplevelCache,
+): Promise<PartialItem> {
+  // Graph: Module ids are INDEX-ROOT-relative (egr index <dir> walks from
+  // <dir>), so `relPath` (already stripped to be relative to `root`) is the
+  // right coordinate here, unchanged from round 3.
   if (await moduleExists(conn, relPath)) return { ...base, status: "present", location: relPath };
   if (existsSync(join(root, relPath))) return { ...base, status: "present", location: relPath };
-  return finishNotFoundInGraph(base, [root], relPath, cache);
+  // Disk/git evidence: repo-root coordinate (DEC-115 H1 R5) — `relPath` here
+  // might ALSO already be repo-root-relative on its own (the absolute-path
+  // branch's relPath, or a citation that happened not to need `matchedRoot`
+  // stripping), so both interpretations are tried via the same helper used
+  // for the fully-unqualified fallback.
+  return finishNotFoundInGraph(base, repoRelativeCandidates([root], relPath, topCache), cache);
 }
 
 /**
@@ -620,7 +725,14 @@ async function resolveBareFilename(conn: GraphConnection, normalized: string, ro
   };
 }
 
-async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[], cwd: string, cache: HistoryCache): Promise<PartialItem> {
+async function resolvePathRef(
+  conn: GraphConnection,
+  ref: RawRef,
+  roots: string[],
+  cwd: string,
+  cache: HistoryCache,
+  topCache: ToplevelCache,
+): Promise<PartialItem> {
   const base = { kind: "path" as const, raw: ref.raw };
   let normalized = normalizePathToken(ref.raw);
 
@@ -642,35 +754,51 @@ async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[
       return { ...base, status: "unresolvable", reason: "absolute path (or expanded ~) is not under any of this graph's indexed roots" };
     }
     const relPath = toPosixPath(relative(matchingRoot, normalized));
-    return resolveRelPathInRoot(conn, base, matchingRoot, relPath, cache);
+    return resolveRelPathInRoot(conn, base, matchingRoot, relPath, cache, topCache);
   }
 
   // Relative reference: try it bare first (the common case — a doc inside
   // the same repo it's referring to, so its paths are already root-relative).
-  // Checked against the graph AND the filesystem of every indexed root —
-  // most non-code files (.md/.sh/.yaml/docs) are real but were never walked
-  // into a Module node, so a graph-only check misses them.
+  // Checked against the graph in INDEX-ROOT coordinates first (Module ids
+  // come from `egr index <dir>`'s own walk, so `normalized` as literally
+  // given is the right coordinate there).
   if (await moduleExists(conn, normalized)) return { ...base, status: "present", location: normalized };
-  const diskRoots = roots.length > 0 ? roots : [cwd];
-  if (diskRoots.some((r) => existsSync(join(r, normalized)))) return { ...base, status: "present", location: normalized };
 
   const firstSeg = normalized.split("/")[0]!;
   const matchedRoot = roots.find((r) => basename(r) === firstSeg);
+  let stripped: string | undefined;
   if (matchedRoot) {
-    // DEC-115 H1 R3 rule 3: first segment names an INDEXED root — resolve
-    // one level in against that root (unchanged from round 2).
-    const stripped = normalized.split("/").slice(1).join("/");
-    return resolveRelPathInRoot(conn, base, matchedRoot, stripped, cache);
+    // Round 3 rule: first segment names an INDEXED root's basename. Try the
+    // GRAPH one level in (index-root-relative, unchanged) — its evidence
+    // counterpart is folded into `candidates` below via `matchedRoot`'s own
+    // repo-relative candidates, not a separate check.
+    stripped = normalized.split("/").slice(1).join("/");
+    if (await moduleExists(conn, stripped)) return { ...base, status: "present", location: stripped };
   }
+
+  // DEC-115 H1 R5: disk existence and all git evidence run in REPO-ROOT
+  // coordinates from here on — see {@link repoRelativeCandidates}'s doc
+  // comment for why an index root being a subdirectory (the common real
+  // shape) makes this a different coordinate system from the graph's.
+  // Two independent transforms feed this, both needed (round 5's actual
+  // bug was conflating them): `normalized` tried against every root's own
+  // toplevel/offset, AND — when the reference is explicitly repo-prefixed
+  // (`matchedRoot`) — `stripped` tried against THAT root specifically.
+  const evidenceRoots = roots.length > 0 ? roots : [cwd];
+  const candidates = repoRelativeCandidates(evidenceRoots, normalized, topCache);
+  if (matchedRoot && stripped !== undefined) {
+    candidates.push(...repoRelativeCandidates([matchedRoot], stripped, topCache));
+  }
+  const diskHit = candidates.find((c) => existsSync(join(c.toplevel, c.repoRelativePath)));
+  if (diskHit) return { ...base, status: "present", location: diskHit.repoRelativePath };
 
   if (roots.length === 0) {
     // No manifest — single-repo mode (DEC-115 D2: no cross-repo advantage to lose here).
-    return finishNotFoundInGraph(base, [cwd], normalized, cache);
+    return finishNotFoundInGraph(base, candidates, cache);
   }
 
-  // DEC-115 H1 R3 rule 3 (continued): first segment names a real but
-  // UN-indexed sibling repo — same "not in scope" answer as an indexed one,
-  // just without anything to resolve one level INTO.
+  // Round 3 rule (continued): first segment names a real but UN-indexed
+  // sibling repo — same "not in scope" answer as an indexed one.
   if (siblingRepoExists(roots, firstSeg)) {
     return {
       ...base,
@@ -679,9 +807,9 @@ async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[
     };
   }
 
-  // DEC-115 H1 R3 rule 4: no repo-name prefix at all, but the path exists
-  // inside SOME un-indexed sibling anyway — the citing context likely
-  // implied the repo name and the note dropped it.
+  // Round 3 rule 4: no repo-name prefix at all, but the path exists inside
+  // SOME un-indexed sibling anyway — the citing context likely implied the
+  // repo name and the note dropped it.
   const siblingHit = siblingRepoContainingPath(roots, normalized);
   if (siblingHit) {
     return {
@@ -691,11 +819,10 @@ async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[
     };
   }
 
-  // DEC-115 H1 R4: not clearly root-qualified — the bug this round fixes is
-  // checking only `roots[0]` here (an arbitrary pick that silently missed
-  // every real deletion in every OTHER indexed repo). Try every indexed
-  // root, not just the first.
-  return finishNotFoundInGraph(base, roots, normalized, cache);
+  // Not clearly root-qualified — try every indexed repo's evidence, in
+  // both repo-root and index-root-converted coordinates (`candidates`,
+  // already built above).
+  return finishNotFoundInGraph(base, candidates, cache);
 }
 
 /** JS/Node built-in namespaces a dotted symbol reference's base might name — never a project symbol, so never worth a graph lookup. */
@@ -704,7 +831,25 @@ const BUILTIN_NAMESPACES: ReadonlySet<string> = new Set([
   "Date", "RegExp", "Map", "Set", "Symbol", "Reflect", "Error", "Buffer",
   "globalThis", "global", "window", "document",
   "os", "path", "fs", "crypto", "util", "url", "child_process",
+  // Test-framework/platform globals (DEC-115 H1 R5 item 4) — same category
+  // as the JS/Node built-ins above, checked here too since `vi.fn()`/
+  // `jest.mock()` are dotted just like `os.tmpdir()`.
+  "vi", "jest",
 ]);
+
+/**
+ * Test-framework/platform globals used BARE (undotted) — `expect`,
+ * `describe`, `it`, `fetch`, and any `mock*`-prefixed Vitest/Jest mock
+ * method (`mockImplementation`, `mockImplementationOnce`,
+ * `mockReturnValue`, …). DEC-115 H1 R5 item 4: these are never a project
+ * symbol, so — same treatment as {@link BUILTIN_NAMESPACES} — checked
+ * BEFORE any graph lookup or git-evidence search, not after.
+ */
+const BARE_TEST_FRAMEWORK_GLOBALS: ReadonlySet<string> = new Set(["expect", "describe", "it", "fetch"]);
+
+function isBareTestFrameworkGlobal(name: string): boolean {
+  return BARE_TEST_FRAMEWORK_GLOBALS.has(name) || name.startsWith("mock");
+}
 
 /**
  * DEC-115 H1 R3: the symbol counterpart of {@link finishNotFoundInGraph}'s
@@ -869,6 +1014,10 @@ async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: strin
     return finish(files);
   }
 
+  if (isBareTestFrameworkGlobal(fullName)) {
+    return { ...base, status: "unresolvable", reason: `"${fullName}" looks like a test-framework/platform global, not a project symbol` };
+  }
+
   return finish(await symbolLocations(conn, fullName));
 }
 
@@ -892,9 +1041,10 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
   const files = collectMarkdownFiles(inputPaths);
   const roots = opts.roots ?? readRootsFromManifest(conn.path);
   const cwd = opts.cwd ?? process.cwd();
-  // Fresh per call (DEC-115 H1 R3) — see HistoryCache's doc comment for why
-  // this is never module-level.
+  // Fresh per call (DEC-115 H1 R3/R5) — see HistoryCache's/ToplevelCache's
+  // doc comments for why neither is ever module-level.
   const historyCache: HistoryCache = new Map();
+  const topCache: ToplevelCache = new Map();
 
   const items: RefCheckItem[] = [];
   let skippedTokens = 0;
@@ -905,7 +1055,7 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
     skippedTokens += skipped;
     for (const ref of refs) {
       const partial =
-        ref.kind === "path" ? await resolvePathRef(conn, ref, roots, cwd, historyCache) : await resolveSymbolRef(conn, ref, roots, cwd);
+        ref.kind === "path" ? await resolvePathRef(conn, ref, roots, cwd, historyCache, topCache) : await resolveSymbolRef(conn, ref, roots, cwd);
       items.push({ ...partial, sourceFile: file, sourceLine: ref.line });
     }
   }

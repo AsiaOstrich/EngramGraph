@@ -789,3 +789,94 @@ describe("refs check does not extract code-snippet-shaped tokens as symbols (DEC
     expect(result.items[0]).toMatchObject({ kind: "symbol", status: "present", location: "src/real.ts" });
   });
 });
+
+/**
+ * DEC-115 H1 R5: the real shape. dev-platform's actual parse-manifest keys
+ * are subdirectories of a repo (`vibeops/src`, `vibeops/scripts`, …), not
+ * the repo root — each still has its own real `.git` one level up (or
+ * more). A memory note is written as if standing at the REPO the citation
+ * describes, so its paths (`src/license/index.ts`) are repo-root-relative,
+ * not relative to whichever subdirectory happened to be indexed.
+ */
+describe("refs check subdirectory index roots (DEC-115 H1 R5)", () => {
+  it("finds real deletions with a correct commit, with the index root a SUBDIRECTORY of the repo", async () => {
+    const repoRoot = tmpDir("engram-refs-subrepo-");
+    git(repoRoot, "init", "-q");
+    mkdirSync(join(repoRoot, "src", "license"), { recursive: true });
+    writeFileSync(join(repoRoot, "src", "license", "index.ts"), "// placeholder\n");
+    // A file that stays — the index root ("src") must still exist ON DISK
+    // after the delete commit below, or `git -C <indexRoot>` itself fails
+    // (`cannot change to '<indexRoot>': No such file or directory`) — not
+    // this fix's bug, just what happens when the ONLY file under a
+    // directory is removed and nothing else lives there.
+    writeFileSync(join(repoRoot, "src", "keep.ts"), "// stays\n");
+    mkdirSync(join(repoRoot, "scripts"), { recursive: true });
+    writeFileSync(join(repoRoot, "scripts", "setup-hooks.sh"), "#!/bin/sh\n");
+    git(repoRoot, "add", "-A");
+    git(repoRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "add");
+    git(repoRoot, "rm", "-q", "src/license/index.ts");
+    git(repoRoot, "rm", "-q", "scripts/setup-hooks.sh");
+    git(repoRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "delete");
+
+    const indexRoot = join(repoRoot, "src"); // the manifest's real shape: a subdirectory, not the repo root
+
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(
+      notesDir,
+      "note.md",
+      // `src/license/index.ts` is repo-root-relative (inside the indexed
+      // subtree). `scripts/setup-hooks.sh` is ALSO repo-root-relative but
+      // OUTSIDE the indexed subtree entirely — same repo, different subdir.
+      "See `src/license/index.ts` and `scripts/setup-hooks.sh` for details.\n",
+    );
+
+    const result = await checkRefs(conn, [md], { roots: [indexRoot], cwd: indexRoot });
+
+    expect(result.items).toHaveLength(2);
+    for (const item of result.items) {
+      expect(item.status, `${item.raw}: expected missing`).toBe("missing");
+      expect(item.reason, `${item.raw}: expected a real commit`).toMatch(/commit [0-9a-f]+/);
+      expect(item.reason).not.toContain("could not be determined");
+    }
+  });
+
+  it("reports unresolvable for a path that never existed, even with a subdirectory index root", async () => {
+    const repoRoot = tmpDir("engram-refs-subrepo-empty-");
+    git(repoRoot, "init", "-q");
+    git(repoRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "init", "--allow-empty");
+    mkdirSync(join(repoRoot, "src"), { recursive: true });
+    const indexRoot = join(repoRoot, "src");
+
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/never/existed.ts` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [indexRoot], cwd: indexRoot });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+  });
+});
+
+/** DEC-115 H1 R5 item 4: test-framework/platform globals treated like built-ins. */
+describe("refs check test-framework globals are not treated as project symbols (DEC-115 H1 R5)", () => {
+  it.each([
+    ["expect", "expect(x)"],
+    ["a mock* method", "mockImplementation(fn)"],
+    ["describe", "describe(name)"],
+    ["it", "it(name)"],
+    ["vi (dotted)", "vi.fn()"],
+    ["jest (dotted)", "jest.fn()"],
+    ["fetch", "fetch(url)"],
+  ])("does not treat %s as a project symbol (%s)", async (_label, tok) => {
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", `Uses \`${tok}\` here.\n`);
+
+    const result = await checkRefs(conn, [md], { roots: [], cwd: notesDir });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+  });
+});
