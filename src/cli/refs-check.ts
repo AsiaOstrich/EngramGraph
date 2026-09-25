@@ -743,7 +743,31 @@ function findEvidence(
       anyUnavailable = true;
       continue;
     }
-    if (moved) return { kind: "found", item: { ...base, status: "moved", location: moved } };
+    if (moved) {
+      // DEC-115 H1 R7: a rename chain's END is not guaranteed to still be
+      // there — a file (or directory) can move once, then be deleted at
+      // its new location, and `findRenameTarget`/`directoryRenameTarget`
+      // only ever chase the CHAIN, they never checked whether the chain's
+      // last stop still exists. Reporting `moved` to a location that is
+      // ALSO gone is a wrong answer, not a partial one — the correct
+      // status for "moved, then removed" is `missing`, with a reason that
+      // names both events instead of silently collapsing them into a
+      // `moved` a caller would then go look for and not find.
+      if (existsSync(join(toplevel, moved))) {
+        return { kind: "found", item: { ...base, status: "moved", location: moved } };
+      }
+      const commit = isDir ? lastSeenCommitForDir(toplevel, moved) : lastSeenCommit(toplevel, moved);
+      return {
+        kind: "found",
+        item: {
+          ...base,
+          status: "missing",
+          reason: commit
+            ? `moved to "${moved}" and later removed there; last appears in git history at commit ${commit}`
+            : `moved to "${moved}", which no longer exists there either, but its own last commit could not be determined`,
+        },
+      };
+    }
   }
 
   for (const { toplevel, repoRelativePath } of candidates) {
@@ -1118,6 +1142,11 @@ async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: strin
     if (files.length === 1) {
       const file = files[0]!;
       if (!expectedFile || matchesExpected(file)) return { ...base, status: "present", location: file };
+      // DEC-115 H1 R7 (checked, not changed): unlike a path's `moved`,
+      // `file` here comes from a LIVE `symbolLocations` graph query, not a
+      // chased historical rename chain — so it cannot point at a location
+      // that has since stopped existing; the round-7 bug (a rename chain's
+      // end no longer existing) has no symbol-side counterpart to fix.
       return { ...base, status: "moved", location: file };
     }
     const confirmed = files.find(matchesExpected);

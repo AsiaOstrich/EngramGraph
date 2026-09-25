@@ -72,6 +72,22 @@ function emptyGitRepo(): string {
 }
 
 /** A git repo where `path` was committed, then deleted (not renamed) — evidence it once existed, without a git rename record. */
+/** A→B (git mv), then B is deleted — the exact DEC-115 H1 R7 shape: moved once, then removed at the new location. */
+function gitRepoWithRenameThenDelete(initFile: string, renamedTo: string): string {
+  const root = gitRepoWithRename(initFile, renamedTo);
+  git(root, "rm", "-q", renamedTo);
+  git(root, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "delete after rename");
+  return root;
+}
+
+/** A→B→C (two separate `git mv` commits) — C is left in place, so the chain must be chased to its real end. */
+function gitRepoWithRenameChain(initFile: string, mid: string, final: string): string {
+  const root = gitRepoWithRename(initFile, mid);
+  git(root, "mv", mid, final);
+  git(root, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "rename again");
+  return root;
+}
+
 function gitRepoWithDeletedFile(path: string): string {
   const root = tmpDir("engram-refs-deleted-repo-");
   git(root, "init", "-q");
@@ -990,5 +1006,51 @@ describe("refs check evidence outranks the sibling-repo guess (DEC-115 H1 R6 ite
     expect(result.items[0]).toMatchObject({ status: "missing" });
     expect(result.items[0]!.reason).toMatch(/commit [0-9a-f]+/);
     expect(result.items[0]!.reason).not.toContain("indexed roots");
+  });
+});
+
+/**
+ * DEC-115 H1 R7: a rename chain's END is not guaranteed to still exist — a
+ * file can move once, then be deleted at its new location. `findRenameTarget`
+ * (and its directory counterpart) always chased the chain, but never
+ * verified the chain's last stop was still there before reporting `moved`.
+ */
+describe("refs check verifies a moved target still exists (DEC-115 H1 R7)", () => {
+  it("reports moved when the renamed-to file still exists", async () => {
+    const repo = gitRepoWithRename("src/old.ts", "src/new.ts");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/old.ts` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: "moved", location: "src/new.ts" });
+  });
+
+  it("reports missing (with the deletion commit) when the file moved once, then was removed at the new location", async () => {
+    const repo = gitRepoWithRenameThenDelete("src/old.ts", "src/new.ts");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/old.ts` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: "missing" });
+    expect(result.items[0]!.reason).toContain("src/new.ts");
+    expect(result.items[0]!.reason).toMatch(/commit [0-9a-f]+/);
+  });
+
+  it("chases a two-hop rename chain (A→B→C) to its real end and reports C when C exists", async () => {
+    const repo = gitRepoWithRenameChain("src/a.ts", "src/b.ts", "src/c.ts");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/a.ts` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: "moved", location: "src/c.ts" });
   });
 });
