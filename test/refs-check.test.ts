@@ -84,6 +84,19 @@ function gitRepoWithDeletedFile(path: string): string {
   return root;
 }
 
+/** A git repo where a file defining `symbolText` (e.g. `"export function foo() {}"`) was committed, then the file deleted — `git log -S<name>` evidence without any graph node. */
+function gitRepoWithDeletedSymbol(path: string, symbolText: string): string {
+  const root = tmpDir("engram-refs-deleted-symbol-repo-");
+  git(root, "init", "-q");
+  mkdirSync(join(root, path.split("/").slice(0, -1).join("/") || "."), { recursive: true });
+  writeFileSync(join(root, path), `${symbolText}\n`);
+  git(root, "add", "-A");
+  git(root, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "add");
+  git(root, "rm", "-q", path);
+  git(root, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "delete");
+  return root;
+}
+
 describe("refs check", () => {
   it("reports a function moved to another file as moved with its new location, not as missing", async () => {
     const { conn } = await openFixtureGraph({
@@ -408,9 +421,114 @@ describe("refs check extraction exclusions (DEC-115 H1)", () => {
     ["a scoped npm package spec", "@asiaostrich/telemetry-client@0.1.0"],
     ["a key=value pair", "seccomp=runtime/default"],
     ["a slash-separated word list with no extension", "outDir/include/exclude/testDir"],
+    ["a URL", "https://asiaostrich-telemetry.workers.dev"],
   ])("does not extract %s as a path (%s)", async (_label, noise) => {
     const { skipped } = await checkOneNoiseTokenNextToARealPath(noise);
     expect(skipped).toBeGreaterThanOrEqual(1);
+  });
+});
+
+/** DEC-115 H1 R3 rules 3+4: cross-repo relative-path resolution. */
+describe("refs check cross-repo relative path resolution (DEC-115 H1 R3)", () => {
+  it("resolves a repo-name-prefixed path one level into that INDEXED root (rule 3)", async () => {
+    const base = tmpDir("engram-refs-crossrepo-");
+    const repoA = join(base, "RepoA");
+    const repoB = join(base, "RepoB");
+    mkdirSync(join(repoB, "src"), { recursive: true });
+    writeFileSync(join(repoB, "src", "foo.ts"), "// real\n");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `RepoB/src/foo.ts` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repoA, repoB], cwd: repoA });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: "present", location: "src/foo.ts" });
+  });
+
+  it("resolves a repo-name-prefixed path into an UN-indexed sibling as unresolvable (rule 3)", async () => {
+    const base = tmpDir("engram-refs-crossrepo-");
+    const indexedRoot = join(base, "IndexedRepo");
+    const otherRepo = join(base, "machine-setup");
+    mkdirSync(join(indexedRoot), { recursive: true });
+    mkdirSync(join(otherRepo, "machines", "nb28-mac"), { recursive: true });
+    writeFileSync(join(otherRepo, "machines", "nb28-mac", "README.md"), "# nb28\n");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `machine-setup/machines/nb28-mac/README.md` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [indexedRoot], cwd: indexedRoot });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+  });
+
+  it("finds an unqualified path (repo-name prefix dropped) inside an UN-indexed sibling as unresolvable, not missing (rule 4)", async () => {
+    // The exact DEC-115 H1 R3 case: a note drops the `machine-setup/`
+    // prefix its own context implied, citing just `machines/nb28-mac/…`.
+    const base = tmpDir("engram-refs-crossrepo-");
+    const indexedRoot = join(base, "IndexedRepo");
+    const otherRepo = join(base, "machine-setup");
+    mkdirSync(join(indexedRoot), { recursive: true });
+    mkdirSync(join(otherRepo, "machines", "nb28-mac"), { recursive: true });
+    writeFileSync(join(otherRepo, "machines", "nb28-mac", "README.md"), "# nb28\n");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `machines/nb28-mac/README.md` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [indexedRoot], cwd: indexedRoot });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+    expect(result.items[0]!.reason).toContain("machine-setup");
+  });
+
+  it("an unqualified path that exists in NO sibling either still falls through to the evidence rule (missing/unresolvable by history)", async () => {
+    const base = tmpDir("engram-refs-crossrepo-");
+    const indexedRoot = join(base, "IndexedRepo");
+    mkdirSync(indexedRoot, { recursive: true });
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `routes/interview.ts` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [indexedRoot], cwd: indexedRoot });
+
+    expect(result.items).toHaveLength(1);
+    // No sibling has it, and the indexed root's (empty) git history has no
+    // evidence either — no rename lookup on a non-git dir is "unavailable",
+    // which this checker also treats as missing (git absence must not read
+    // as a confirmed deletion) OR unresolvable if git IS available but empty;
+    // either way it must NOT silently become `present`.
+    expect(["missing", "unresolvable"]).toContain(result.items[0]!.status);
+  });
+});
+
+/** DEC-115 H1 R3 rule 1 (symbol half): missing requires git-history evidence. */
+describe("refs check symbol evidence requirement (DEC-115 H1 R3)", () => {
+  it("reports a symbol once defined (git evidence) but now gone from the graph as missing, with a commit in the reason", async () => {
+    const repo = gitRepoWithDeletedSymbol("src/oldFn.ts", "export function myVanishedFunc() { return 1; }");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "`myVanishedFunc()` used to do the thing.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("missing");
+    expect(result.items[0]!.reason).toMatch(/commit [0-9a-f]+/);
+  });
+
+  it("reports a symbol with no graph match and no git evidence anywhere as unresolvable, not missing", async () => {
+    const repo = emptyGitRepo();
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "`totallyMadeUpFunctionName()` was called here.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+    expect(result.items[0]!.reason).toContain("evidence");
   });
 });
 
