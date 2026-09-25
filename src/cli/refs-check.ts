@@ -7,14 +7,89 @@
  *
  * AI memory/notes/README files cite code by file path or by symbol name.
  * Code moves; the citation doesn't update itself. A naive "does this path
- * exist" check is wrong more than it's right (DEC-115's own measurement: on
- * a real 269-note corpus, a plain existence check flagged 43 as missing and
- * a manual check of 4 of them found all 4 were false positives — the file
- * had simply MOVED). So every reference gets one of four answers, and
- * `unresolvable` is not a synonym for "missing" — it means this checker does
- * not have enough information to say either way (e.g. the reference names a
- * repo this graph was never told to index). Reporting `missing` there would
- * be a false claim of certainty this tool does not have.
+ * exist" check is wrong more than it's right. So every reference gets one of
+ * four answers, and `unresolvable` is not a synonym for "missing" — it means
+ * this checker does not have enough information to say either way (e.g. the
+ * reference names a repo this graph was never told to index, or gives a bare
+ * filename with no directory). Reporting `missing` there would be a false
+ * claim of certainty this tool does not have.
+ *
+ * ## H1 baseline (2026-09) and what it changed here
+ *
+ * The first real run — 270 memory files against dev-platform's multi-repo
+ * graph, 2,375 references — fell well short of DEC-115's H1 accuracy bar.
+ * Walking the false `missing`/`moved` results by hand found five distinct,
+ * fixable causes, and this revision (round 2) addresses each one
+ * structurally rather than patching individual strings:
+ *
+ *   1. **Bare filenames** (`App.tsx`, no directory) were the largest single
+ *      bucket. A bare filename cannot be judged present/missing without
+ *      guessing which of possibly several files it means — see
+ *      {@link resolveBareFilename}.
+ *   2. **Real, existing files that were never Module nodes** — most
+ *      non-code files (`.md`, `.sh`, `.yaml`, docs) are never walked into a
+ *      `Module` node at all (only `egr index`'s source-code walk creates
+ *      those), so a graph-only check reported them missing even though they
+ *      exist on disk. Every resolution path here now checks the FILESYSTEM
+ *      under each indexed root, not just the graph.
+ *   3. **Home-directory and absolute references** outside any indexed root
+ *      are `unresolvable`, not `missing` — this was already the rule for
+ *      absolute paths in round 1; round 2 also expands a leading `~` so it
+ *      goes through the same check.
+ *   4. **Extraction over-matched non-path shapes**: glob/regex/placeholder
+ *      syntax, conventional-commit branch names (`feat/xspec-…`), GitHub
+ *      `owner/repo`(`#N`) shorthand, npm package specs (`pkg@ver`,
+ *      `@scope/pkg@ver`), `key=value` pairs, and bare slash-separated word
+ *      lists with no extension all look enough like a path to fool a naive
+ *      "contains a slash" rule. None of them is a checkable path — see
+ *      {@link looksLikePath}.
+ *   5. **Dotted "member call" symbols** (`process.cwd()`, `os.tmpdir()`,
+ *      `useAuth.restore()`) used to fall back to matching just the LAST
+ *      segment (`cwd`, `tmpdir`, `restore`) against ANY Function in the
+ *      graph — which is exactly the "same name in an unrelated place" guess
+ *      DEC-115 D2 forbids, and is how `useAuth.restore()` got reported
+ *      `moved` to a same-named `restore` it has nothing to do with. That
+ *      fallback is gone; see {@link resolveSymbolRef}.
+ *
+ * ## Round 3: `missing` needs EVIDENCE it once existed, not just an absence
+ *
+ * Round 2 raised the real accuracy substantially but still fell short of H1
+ * (28% of `missing` were real on the next full run). The remaining false
+ * positives were not new noise shapes to list — the round-2 exclusion list
+ * approach had reached its structural limit. The fix is a rule, not another
+ * exclusion:
+ *
+ * **A reference is only `missing` when this checker can point to evidence it
+ * once existed — a git commit, for a path; a commit that changed the
+ * identifier's occurrence count, for a symbol. No such evidence →
+ * `unresolvable`, however plausible the reference looks.** This makes
+ * `missing`'s accuracy a property of the check's construction, not of how
+ * complete an exclusion list happens to be. See {@link finishNotFoundInGraph}
+ * (paths) and the symbol-evidence branch in {@link resolveSymbolRef}.
+ *
+ * Three smaller, related fixes shipped alongside it:
+ *
+ *   - **URLs** (`scheme://…`) were being extracted as paths (a domain like
+ *     `…workers.dev` ends in what looks like a file extension) — excluded at
+ *     extraction; see {@link looksLikePath}.
+ *   - **Repo-name-prefixed relative paths** (`machine-setup/machines/…`)
+ *     whose first segment names a real but UN-indexed sibling repo now
+ *     resolve one level in and land on the same "sibling repo, not indexed"
+ *     `unresolvable` as before — this already worked when the first segment
+ *     matched an INDEXED root's name; it now also fires for an unindexed one.
+ *   - **Unqualified relative paths that live inside an unindexed sibling**
+ *     (a note says `machines/nb28-mac/README.md`, dropping the
+ *     `machine-setup/` the citing context implied) are found by checking
+ *     every sibling directory of every indexed root for that path, not just
+ *     the one named by the first segment — see {@link siblingRepoContainingPath}.
+ *
+ * Performance: a git call per candidate is what round 2's design implied and
+ * is NOT what round 3 does. Each indexed root's full set of ever-committed
+ * paths is fetched ONCE (`git log --all --name-only`) and cached for the
+ * whole `checkRefs` run; a candidate is checked against that in-memory set,
+ * and only a CONFIRMED hit pays for a second, cheap call to find its last
+ * commit. Symbol pickaxe search (`git log -S`) only runs at all for the
+ * (typically much smaller) set of symbols with zero graph matches.
  *
  * ## This module ONLY reads: the graph, the filesystem, and `git log`
  *
@@ -26,25 +101,11 @@
  *
  * ## Extraction rule (deliberately conservative — see DEC-115 D2)
  *
- * Only backtick-quoted (`` `...` ``) tokens are considered; the rest of a
- * Markdown file is prose this checker has no business parsing. Within a
- * backtick span:
- *
- *   - **Path-like**: contains `/`, OR ends in `.<ext>` (so a same-directory
- *     mention like `` `package.json` `` still counts) — but NOT a bare
- *     version number (`1.30.0`) and NOT anything containing `(`/`)` (that
- *     shape is claimed by the symbol rule below instead). A trailing
- *     `:<line>` (or `:<line>-<line>`) is stripped and the remainder is
- *     treated as the path; this tool does not track whether the LINE number
- *     is still correct, only the file — see the module's `file:line` note
- *     in the DEC's OQ-1 (out of scope for this batch).
- *   - **Symbol-like**: call-shaped, `name(...)` (also matches dotted names
- *     like `console.log()`). A bare identifier with no parentheses and no
- *     path context (`` `main` ``, `` `true` ``) is intentionally NOT
- *     extracted — it is indistinguishable from an English word, and DEC-115
- *     explicitly asks for under-extraction over false positives.
- *   - Anything else in backticks (a shell command with a space, a CLI flag,
- *     a bare number) is silently skipped and counted in `skippedTokens`.
+ * Only backtick-quoted (`` `...` ``) tokens are considered. Within a
+ * backtick span, see {@link looksLikePath} and {@link looksLikeSymbolCall}
+ * for the exact path/symbol shapes accepted; anything else (a shell command
+ * with a space, a CLI flag, a bare number, a placeholder) is silently
+ * skipped and counted in `skippedTokens`.
  *
  * **Pairing** (this is what makes "moved" answerable for a *symbol*, not
  * just a file): when a symbol-like token and a path-like token sit
@@ -61,20 +122,19 @@
  * absolute directories `egr index <dir>` was run against — read from the
  * parse-health manifest, the same SSOT `parse-manifest.ts` already keys by
  * absolute root for the same cross-repo-collision reason). A path that does
- * not fall under ANY indexed root is `unresolvable`, never `missing` — this
- * is the direct fix for DEC-115's own false-positive count (a relative path
- * like `EngramGraph/src/x.ts` written from a sibling repo's docs, or an
- * absolute path into a repo this graph was never told to index).
+ * not fall under ANY indexed root is `unresolvable`, never `missing` — a
+ * relative path like `EngramGraph/src/x.ts` written from a sibling repo's
+ * docs, or an absolute/home-directory path into a repo this graph was never
+ * told to index.
  *
  * When a relative reference's first path segment does not match any
  * indexed root's name, this checker makes ONE further, grounded guess
  * before giving up: does a sibling directory with that name exist on disk,
  * next to an indexed root (`join(dirname(root), firstSegment)`)? If so, this
  * is very likely a reference into a real, checked-out, but NOT indexed
- * sibling repo (DEC-115's measured case: 4 of 5 "missing" hits in the
- * five-repo sample were exactly this) — `unresolvable`, not `missing`. If no
- * such sibling exists either, this checker has run out of grounded signal
- * and falls back to `missing` (after trying git rename detection).
+ * sibling repo — `unresolvable`, not `missing`. If no such sibling exists
+ * either, this checker has run out of grounded signal and falls back to
+ * `missing` (after checking the filesystem and trying git rename detection).
  *
  * ## Rename detection
  *
@@ -88,26 +148,39 @@
  * chain (A→B→C) up to a bounded number of hops. `git` unavailable (not
  * installed, or the root is not a git repo) degrades to `missing` with a
  * reason noting renames were not checked — never silently treated as a
- * confirmed deletion.
+ * confirmed deletion. Rename detection is deliberately NOT attempted for a
+ * bare filename with no directory (see point 1 above) — there is no
+ * grounded way to tell git which of possibly several same-named files in
+ * history is meant.
  *
  * ## Symbol resolution and ambiguity
  *
- * A symbol name is looked up as both `Function` and `Class` (this project's
- * two symbol-bearing node labels). Multiple distinct files sharing that name
- * are NOT guessed at — DEC-115 D2 is explicit: "同名多處時不要亂猜，回報候選或
- * unresolvable". The one exception is when the reference's OWN expected file
- * is among the candidates: that isn't a guess, it's confirming what the
- * reference already claimed.
+ * A bare (undotted) symbol name is looked up as both `Function` and `Class`
+ * (this project's two symbol-bearing node labels). A dotted/member-call name
+ * (`a.b()`) is only resolved when either the full dotted name matches
+ * exactly (rare — this project's extractor stores simple names), or `a`
+ * itself is a real `Class` node in the graph and `b` is a `Function` defined
+ * in that same class's file — a structural stand-in for "confirmed
+ * `Class.method`", since the schema has no `Class`→`Function` edge to check
+ * directly. Anything else dotted (a JS/Node built-in namespace, a plain
+ * variable, an unconfirmed base) is `unresolvable`, never guessed at.
+ * Multiple distinct files sharing a bare name are likewise NOT guessed at —
+ * DEC-115 D2 is explicit: "同名多處時不要亂猜，回報候選或 unresolvable". The one
+ * exception is when the reference's OWN expected file is among the
+ * candidates: that isn't a guess, it's confirming what the reference already
+ * claimed.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
 
 import type { GraphConnection } from "../graph-db/connection.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { manifestPathForDb, readManifest } from "../code-graph/parse-manifest.js";
 import { SKIP_DIRS } from "./walk.js";
+import { GRAMMARS } from "../../language-support.js";
 
 export type RefKind = "path" | "symbol";
 export type RefStatus = "present" | "moved" | "missing" | "unresolvable";
@@ -121,8 +194,9 @@ export interface RefCheckItem {
   status: RefStatus;
   /** Where it currently is (present: resolved id; moved: the new location). */
   location?: string;
-  /** Set when `status === "unresolvable"` because several nodes share this name. */
+  /** Set when `status === "unresolvable"` because several candidates share this name/path. */
   candidates?: string[];
+  /** Always set for `missing` and `unresolvable` (DEC-115 H1 revision) — never for `present`/`moved`. */
   reason?: string;
 }
 
@@ -136,7 +210,7 @@ export interface RefCheckResult {
 export interface RefCheckOptions {
   /** Absolute index roots. Defaults to reading them off the graph's own parse-health manifest. */
   roots?: string[];
-  /** Working directory used for best-effort git lookups when no root claims a reference. Defaults to `process.cwd()`. */
+  /** Working directory used for best-effort disk/git lookups when no root claims a reference. Defaults to `process.cwd()`. */
   cwd?: string;
 }
 
@@ -144,6 +218,12 @@ export interface RefCheckOptions {
 
 const KNOWN_EXT_RE = /\.[A-Za-z0-9]{1,8}$/;
 const BARE_VERSION_RE = /^v?\d+(\.\d+){1,3}$/;
+/** Glob/regex/template-placeholder syntax — never a literal, checkable path. */
+const NOISE_CHAR_RE = /[*?[\]^$<>{}|]/;
+/** An explicit path marker: home-relative, `./`/`../`, POSIX-absolute, or a Windows drive letter. Overrides the "needs an extension" rule below — this is what still lets `~/.claude/skills` and `/abs/path` reach resolution (as `unresolvable` when out of scope) instead of being silently dropped at extraction. */
+const PATH_MARKER_RE = /^(~\/|~$|\.\.?\/|\/|[A-Za-z]:[/\\])/;
+/** A URL scheme (`https://…`, `ssh://…`) — never a checkable filesystem path, and a domain's TLD (`…workers.dev`) otherwise looks exactly like a file extension. */
+const URL_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 
 /** Strip a trailing `:<line>` or `:<line>-<line>` from a path-shaped token (DEC-115 OQ-1: the line half is discarded, not verified). */
 function stripLineSuffix(tok: string): string {
@@ -152,19 +232,61 @@ function stripLineSuffix(tok: string): string {
   return tok;
 }
 
+/**
+ * Is this backtick-quoted token a checkable file/directory path?
+ *
+ * A token WITH a leading path marker (`~/`, `./`, `../`, `/`, `C:/`) is
+ * always a path — that marker is unambiguous. Otherwise it needs EITHER a
+ * recognized file extension OR a trailing `/` (an explicit directory
+ * mention, the convention this project's own docs/notes already use). A
+ * bare multi-segment token with neither — `feat/xspec-297-…` (branch name),
+ * `AsiaOstrich/EngramGraph` (`owner/repo`), `outDir/include/exclude/testDir`
+ * (a word list) — is NOT a path, even though it contains `/`: this is the
+ * single rule that subsumes all three of DEC-115 H1's named extraction
+ * exclusions (branch names, `owner/repo`(`#N`), bare word lists), because
+ * all three share the same shape (no extension, no trailing slash, no
+ * marker) and none of them is a filesystem location.
+ */
 function looksLikePath(tok: string): boolean {
   if (tok.length === 0 || /\s/.test(tok)) return false;
   if (tok.startsWith("-")) return false; // a CLI flag, e.g. `--json`
+  if (URL_SCHEME_RE.test(tok)) return false; // `https://…` etc — a domain's TLD looks like a file extension
+  if (NOISE_CHAR_RE.test(tok) || tok.includes("...")) return false; // glob/regex/placeholder
+  if (tok.includes("=")) return false; // `key=value`
+  if (tok.includes("@")) return false; // `pkg@ver`, `@scope/pkg@ver`, or an email — never a checkable path
+
   const stripped = stripLineSuffix(tok);
   if (stripped.includes("(") || stripped.includes(")")) return false; // claimed by the symbol rule
   if (BARE_VERSION_RE.test(stripped)) return false;
-  if (stripped.includes("/")) return true;
-  return KNOWN_EXT_RE.test(stripped);
+
+  if (PATH_MARKER_RE.test(stripped)) return true;
+
+  if (!stripped.includes("/")) return KNOWN_EXT_RE.test(stripped); // bare filename — still a path IF it has a real extension
+
+  if (stripped.endsWith("/")) return true; // directory marker
+  return KNOWN_EXT_RE.test(stripped); // has a real extension → path; otherwise a branch name/owner-repo/word-list → not a path
 }
 
+/**
+ * A call-shaped token whose PARENTHESIZED BODY still looks like a plain
+ * argument list — not an inline code snippet quoting an expression.
+ * DEC-115 H1 R4: `$(dirname $0)` (shell substitution), `filter(x => !...)`
+ * (an arrow-function literal, not a call to a symbol named `filter`), and
+ * `fileURLToPath(import.meta.url) === path.resolve(process.argv[1])` (two
+ * expressions joined by a comparison, matched whole by the old permissive
+ * regex) were all extracted as if they named a single project symbol.
+ */
 function looksLikeSymbolCall(tok: string): boolean {
   if (tok.includes("/")) return false;
-  return /^[A-Za-z_$][\w$.]*\([^`]*\)$/.test(tok);
+  if (tok.includes("...")) return false; // ellipsis placeholder
+  if (tok.startsWith("$(")) return false; // shell command substitution
+  const m = /^[A-Za-z_$][\w$.]*\(([^`]*)\)$/.exec(tok);
+  if (!m) return false;
+  const body = m[1]!;
+  if (body.includes("=>")) return false; // an arrow-function literal, not a call
+  if (body.includes("===") || body.includes("!==")) return false; // a comparison expression, not a single call
+  if (/['"]/.test(body)) return false; // a string-literal argument — usually quoted example code, not a symbol reference
+  return true;
 }
 
 interface RawRef {
@@ -250,16 +372,19 @@ async function moduleExists(conn: GraphConnection, id: string): Promise<boolean>
   return rows.length > 0;
 }
 
+async function functionLocations(conn: GraphConnection, name: string): Promise<string[]> {
+  const rows = await conn.query(`MATCH (f:Function {name: $name}) RETURN DISTINCT f.file AS file`, { name });
+  return rows.map((r) => String(r.file)).filter((f) => f && f !== "null");
+}
+
+async function classLocations(conn: GraphConnection, name: string): Promise<string[]> {
+  const rows = await conn.query(`MATCH (c:Class {name: $name}) RETURN DISTINCT c.file AS file`, { name });
+  return rows.map((r) => String(r.file)).filter((f) => f && f !== "null");
+}
+
 async function symbolLocations(conn: GraphConnection, name: string): Promise<string[]> {
-  const [fnRows, clsRows] = await Promise.all([
-    conn.query(`MATCH (f:Function {name: $name}) RETURN DISTINCT f.file AS file`, { name }),
-    conn.query(`MATCH (c:Class {name: $name}) RETURN DISTINCT c.file AS file`, { name }),
-  ]);
-  const files = new Set<string>();
-  for (const r of [...fnRows, ...clsRows]) {
-    if (r.file != null && r.file !== "null") files.add(String(r.file));
-  }
-  return [...files];
+  const [fnFiles, clsFiles] = await Promise.all([functionLocations(conn, name), classLocations(conn, name)]);
+  return [...new Set([...fnFiles, ...clsFiles])];
 }
 
 /**
@@ -302,9 +427,47 @@ function findRenameTarget(repoRoot: string, relPath: string): string | null | "u
 function siblingRepoExists(roots: string[], firstSeg: string): boolean {
   for (const root of roots) {
     const candidate = join(dirname(root), firstSeg);
+    // DEC-115 H1 R5: an index root whose OWN basename equals `firstSeg`
+    // (the real shape — `vibeops/src` for a citation starting `src/…`) makes
+    // `candidate` equal that SAME already-indexed root, not a sibling of it.
+    // Without this guard, an index root is reported as its own un-indexed
+    // sibling — wrong in the specific, structural way this round's
+    // `matchedRoot` fix could otherwise be shadowed by.
+    if (roots.includes(candidate)) continue;
     if (existsSync(candidate) && statSync(candidate).isDirectory()) return true;
   }
   return false;
+}
+
+/**
+ * DEC-115 H1 round 3: the un-qualified counterpart of {@link siblingRepoExists}.
+ * A citing note often drops the repo-name prefix its own context implied
+ * (`machines/nb28-mac/README.md`, not `machine-setup/machines/nb28-mac/…`),
+ * so this checks whether `relPath` itself exists inside ANY sibling
+ * directory of any indexed root — not just one named by the reference's
+ * first segment. Returns that sibling's directory name, or `undefined`.
+ */
+function siblingRepoContainingPath(roots: string[], relPath: string): string | undefined {
+  const parents = new Set(roots.map((r) => dirname(r)));
+  for (const parent of parents) {
+    let entries: string[];
+    try {
+      entries = readdirSync(parent);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      const dir = join(parent, name);
+      if (roots.includes(dir)) continue; // already an indexed root — handled elsewhere
+      try {
+        if (!statSync(dir).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      if (existsSync(join(dir, relPath))) return name;
+    }
+  }
+  return undefined;
 }
 
 function isUnderRoot(root: string, absPath: string): boolean {
@@ -318,46 +481,324 @@ function normalizePathToken(raw: string): string {
 
 type PartialItem = Omit<RefCheckItem, "sourceFile" | "sourceLine">;
 
-async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[], cwd: string): Promise<PartialItem> {
-  const base = { kind: "path" as const, raw: ref.raw };
-  const normalized = normalizePathToken(ref.raw);
+/**
+ * Per-`checkRefs`-run cache of `indexRoot → git toplevel` (DEC-115 H1 R5).
+ * Never module-level — same reasoning as {@link HistoryCache}.
+ */
+type ToplevelCache = Map<string, string>;
 
-  const finishFromDisk = (repoRoot: string, relPath: string): PartialItem => {
-    const moved = findRenameTarget(repoRoot, relPath);
+/**
+ * `git -C <dir> rev-parse --show-toplevel` — the real repo root, realpath
+ * resolved (so a symlinked index root, e.g. `dev-platform/vibeops`, and its
+ * real target agree). Falls back to `dir` itself when `dir` is not inside a
+ * git repo (or `git` is unavailable) — this checker still works, just
+ * without the toplevel/index-root distinction (nothing to distinguish).
+ */
+function gitToplevel(dir: string, cache: ToplevelCache): string {
+  const cached = cache.get(dir);
+  if (cached) return cached;
+  let result: string;
+  try {
+    const out = execFileSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    result = out.length > 0 ? out : dir;
+  } catch {
+    result = dir;
+  }
+  cache.set(dir, result);
+  return result;
+}
+
+/**
+ * DEC-115 H1 R5's core fix. `roots` (from the parse-health manifest) are
+ * `egr index <dir>` call sites — frequently a SUBDIRECTORY of a repo, not
+ * its root (dev-platform's real manifest: `vibeops/src`, `vibeops/scripts`,
+ * …, each its own index root, all inside the ONE `vibeops` repo). But:
+ *
+ *   - `git log`'s output (rename targets, `--name-only` history, commit
+ *     hashes via `-- <path>` pathspecs) is always REPO-ROOT-relative — `git
+ *     -C <subdir>` changes where git RUNS, not the coordinate system its
+ *     answers are reported in, and a `-- <path>` pathspec is resolved
+ *     relative to that same cwd, so a subdirectory root silently shifts
+ *     pathspec-based lookups (`lastSeenCommit`) onto the wrong file even
+ *     when unrestricted lookups (`historyPathSet`, no pathspec) still
+ *     happen to return correct, repo-wide, repo-root-relative data.
+ *   - A memory note is usually written AS IF standing at the repo it
+ *     describes, so its paths (`src/license/index.ts`) are already
+ *     REPO-ROOT-relative, not relative to whatever subdirectory happened to
+ *     be indexed.
+ *
+ * So this returns EVERY (toplevel, repo-relative-path) pair worth trying
+ * for `normalized`, deduplicated across all `roots`: the path taken as
+ * literally repo-root-relative already (the common case), AND the path
+ * taken as relative to each index root, converted to repo-root-relative via
+ * that root's offset from its own toplevel (the case an index root's
+ * `basename` used to be mistaken for a "repo name" to strip — see round 3's
+ * `matchedRoot`, which still exists for the GRAPH's Module-id lookup, a
+ * genuinely different, index-root-relative coordinate system).
+ */
+function repoRelativeCandidates(roots: string[], normalized: string, topCache: ToplevelCache): Array<{ toplevel: string; repoRelativePath: string }> {
+  const out: Array<{ toplevel: string; repoRelativePath: string }> = [];
+  const seen = new Set<string>();
+  const push = (toplevel: string, repoRelativePath: string): void => {
+    const key = `${toplevel}\u0000${repoRelativePath}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ toplevel, repoRelativePath });
+  };
+  for (const root of roots) {
+    const toplevel = gitToplevel(root, topCache);
+    push(toplevel, normalized); // already repo-root-relative (the common case)
+    if (toplevel !== root) {
+      const offset = toPosixPath(relative(toplevel, root));
+      push(toplevel, toPosixPath(join(offset, normalized))); // index-root-relative, converted
+    }
+  }
+  return out;
+}
+
+/**
+ * Per-`checkRefs`-run cache of each root's full historical path set (DEC-115
+ * H1 round 3). Built fresh in {@link checkRefs} and threaded through — never
+ * module-level, so nothing here persists between runs or leaks across tests
+ * using different fixture repos at coincidentally-reused paths.
+ */
+type HistoryCache = Map<string, Set<string> | "unavailable">;
+
+/**
+ * Every path ANY commit in `repoRoot`'s full history ever touched (added,
+ * modified, deleted, or the source/target of a rename) — one `git log`
+ * call, cached, and then a plain Set membership check per candidate. This is
+ * the batching DEC-115 H1 R3 asks for: checking hundreds of `missing`
+ * candidates against a per-root call each, not a call each.
+ */
+function historyPathSet(repoRoot: string, cache: HistoryCache): Set<string> | "unavailable" {
+  const cached = cache.get(repoRoot);
+  if (cached) return cached;
+  let result: Set<string> | "unavailable";
+  try {
+    const out = execFileSync("git", ["-C", repoRoot, "log", "--all", "--name-only", "--format="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    result = new Set(out.split("\n").map((l) => l.trim()).filter((l) => l.length > 0));
+  } catch {
+    result = "unavailable";
+  }
+  cache.set(repoRoot, result);
+  return result;
+}
+
+/** The most recent commit that touched `relPath` — only called for a CONFIRMED history hit, so this is a small, bounded number of extra calls, not one per candidate. */
+function lastSeenCommit(repoRoot: string, relPath: string): string | null {
+  try {
+    const out = execFileSync("git", ["-C", repoRoot, "log", "--all", "--format=%h", "-1", "--", relPath], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A path/module NOT found in the graph and NOT found on disk (both already
+ * checked by the caller). DEC-115 H1 R3's core rule: `missing` requires
+ * EVIDENCE this path once existed, not just its current absence — a rename
+ * (checked first, since that's a stronger, more specific claim) or a plain
+ * appearance anywhere in history. No evidence at all → `unresolvable`,
+ * however plausible the reference looks.
+ *
+ * `candidateRoots` — DEC-115 H1 R4's fix: a reference isn't always clearly
+ * root-qualified (e.g. a note written from inside a sub-repo just says
+ * `src/license/index.ts`, no `vibeops/` prefix), and dev-platform's graph
+ * indexes SEVERAL git repos under separate roots (each sub-project symlinked
+ * in, each with its own `.git`). Checking only ONE root's history — round 3's
+ * bug — silently missed every real deletion in every OTHER indexed repo:
+ * the round-3 rerun found 51 confirmed-real deletions in sub-repos, all
+ * reported `unresolvable` because only one (arbitrary) root was ever
+ * checked. Every candidate root is tried, in order, for both rename and
+ * history evidence; the first hit wins.
+ */
+function finishNotFoundInGraph(base: { kind: "path"; raw: string }, candidates: Array<{ toplevel: string; repoRelativePath: string }>, cache: HistoryCache): PartialItem {
+  let anyUnavailable = false;
+
+  for (const { toplevel, repoRelativePath } of candidates) {
+    const moved = findRenameTarget(toplevel, repoRelativePath);
     if (moved === "unavailable") {
-      return { ...base, status: "missing", reason: "not found in the graph; git was unavailable so renames were not checked" };
+      anyUnavailable = true;
+      continue;
     }
     if (moved) return { ...base, status: "moved", location: moved };
-    return { ...base, status: "missing" };
+  }
+
+  for (const { toplevel, repoRelativePath } of candidates) {
+    const history = historyPathSet(toplevel, cache);
+    if (history === "unavailable") {
+      anyUnavailable = true;
+      continue;
+    }
+    if (history.has(repoRelativePath)) {
+      // Same (toplevel, repoRelativePath) pair the membership check just
+      // matched on — DEC-115 H1 R5's bug 2: computing this against the
+      // wrong root/coordinate returned nothing even on a confirmed hit
+      // ("last commit could not be determined"), because `-- <path>` is a
+      // pathspec, and a pathspec IS resolved relative to `-C`'s cwd.
+      const commit = lastSeenCommit(toplevel, repoRelativePath);
+      return {
+        ...base,
+        status: "missing",
+        reason: commit ? `no longer exists; last appears in git history at commit ${commit}` : "no longer exists; found in git history but its last commit could not be determined",
+      };
+    }
+  }
+
+  if (anyUnavailable) {
+    return {
+      ...base,
+      status: "missing",
+      reason: "not found in the graph or on disk under any indexed root; git was unavailable for at least one of them so history could not be fully checked",
+    };
+  }
+  return {
+    ...base,
+    status: "unresolvable",
+    reason: "never appears in any indexed root's git history — not enough evidence this was ever a real path here",
   };
+}
+
+/** Graph, then disk, then (as a last resort) git evidence — for a reference already resolved to one specific root + relative path. */
+async function resolveRelPathInRoot(
+  conn: GraphConnection,
+  base: { kind: "path"; raw: string },
+  root: string,
+  relPath: string,
+  cache: HistoryCache,
+  topCache: ToplevelCache,
+): Promise<PartialItem> {
+  // Graph: Module ids are INDEX-ROOT-relative (egr index <dir> walks from
+  // <dir>), so `relPath` (already stripped to be relative to `root`) is the
+  // right coordinate here, unchanged from round 3.
+  if (await moduleExists(conn, relPath)) return { ...base, status: "present", location: relPath };
+  if (existsSync(join(root, relPath))) return { ...base, status: "present", location: relPath };
+  // Disk/git evidence: repo-root coordinate (DEC-115 H1 R5) — `relPath` here
+  // might ALSO already be repo-root-relative on its own (the absolute-path
+  // branch's relPath, or a citation that happened not to need `matchedRoot`
+  // stripping), so both interpretations are tried via the same helper used
+  // for the fully-unqualified fallback.
+  return finishNotFoundInGraph(base, repoRelativeCandidates([root], relPath, topCache), cache);
+}
+
+/**
+ * A bare filename with no directory (`App.tsx`, `graph.db`) — DEC-115 H1's
+ * single largest false-`missing` bucket. There is no grounded way to say
+ * "missing" here: the same basename could exist, or not, in any number of
+ * places this checker was never told about. The only claims it is safe to
+ * make are (a) present, when the graph or the TOP LEVEL of exactly one
+ * indexed root has a file with this exact name, and (b) unresolvable
+ * otherwise — never a guess, and never a git-rename attempt (chasing a
+ * rename for a name with no known original directory would itself be a
+ * guess about where it used to live).
+ */
+async function resolveBareFilename(conn: GraphConnection, normalized: string, roots: string[], cwd: string, base: { kind: "path"; raw: string }): Promise<PartialItem> {
+  if (await moduleExists(conn, normalized)) return { ...base, status: "present", location: normalized };
+
+  const searchRoots = roots.length > 0 ? roots : [cwd];
+  const hits = searchRoots.filter((r) => existsSync(join(r, normalized)));
+  if (hits.length === 1) return { ...base, status: "present", location: normalized };
+  if (hits.length > 1) {
+    return {
+      ...base,
+      status: "unresolvable",
+      candidates: hits.map((r) => join(r, normalized)),
+      reason: "a file with this name exists at the top level of more than one indexed root; cannot determine which one this reference means",
+    };
+  }
+  return {
+    ...base,
+    status: "unresolvable",
+    reason: "no directory was given, so this could refer to any file with this name anywhere; not enough context to check",
+  };
+}
+
+async function resolvePathRef(
+  conn: GraphConnection,
+  ref: RawRef,
+  roots: string[],
+  cwd: string,
+  cache: HistoryCache,
+  topCache: ToplevelCache,
+): Promise<PartialItem> {
+  const base = { kind: "path" as const, raw: ref.raw };
+  let normalized = normalizePathToken(ref.raw);
+
+  // Expand a literal leading "~" to the real home directory so it goes
+  // through the same "is this under an indexed root" check as any other
+  // absolute path — home directories are almost never an indexed root, so
+  // this correctly (and usually) resolves to `unresolvable`, not `missing`.
+  if (normalized === "~" || normalized.startsWith("~/")) {
+    normalized = toPosixPath(join(homedir(), normalized.slice(1)));
+  }
+
+  if (!normalized.includes("/")) {
+    return resolveBareFilename(conn, normalized, roots, cwd, base);
+  }
 
   if (isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized)) {
     const matchingRoot = roots.find((r) => isUnderRoot(r, normalized));
     if (!matchingRoot) {
-      return { ...base, status: "unresolvable", reason: "absolute path is not under any of this graph's indexed roots" };
+      return { ...base, status: "unresolvable", reason: "absolute path (or expanded ~) is not under any of this graph's indexed roots" };
     }
     const relPath = toPosixPath(relative(matchingRoot, normalized));
-    if (await moduleExists(conn, relPath)) return { ...base, status: "present", location: relPath };
-    return finishFromDisk(matchingRoot, relPath);
+    return resolveRelPathInRoot(conn, base, matchingRoot, relPath, cache, topCache);
   }
 
   // Relative reference: try it bare first (the common case — a doc inside
   // the same repo it's referring to, so its paths are already root-relative).
+  // Checked against the graph in INDEX-ROOT coordinates first (Module ids
+  // come from `egr index <dir>`'s own walk, so `normalized` as literally
+  // given is the right coordinate there).
   if (await moduleExists(conn, normalized)) return { ...base, status: "present", location: normalized };
 
   const firstSeg = normalized.split("/")[0]!;
   const matchedRoot = roots.find((r) => basename(r) === firstSeg);
+  let stripped: string | undefined;
   if (matchedRoot) {
-    const stripped = normalized.split("/").slice(1).join("/");
+    // Round 3 rule: first segment names an INDEXED root's basename. Try the
+    // GRAPH one level in (index-root-relative, unchanged) — its evidence
+    // counterpart is folded into `candidates` below via `matchedRoot`'s own
+    // repo-relative candidates, not a separate check.
+    stripped = normalized.split("/").slice(1).join("/");
     if (await moduleExists(conn, stripped)) return { ...base, status: "present", location: stripped };
-    return finishFromDisk(matchedRoot, stripped);
   }
+
+  // DEC-115 H1 R5: disk existence and all git evidence run in REPO-ROOT
+  // coordinates from here on — see {@link repoRelativeCandidates}'s doc
+  // comment for why an index root being a subdirectory (the common real
+  // shape) makes this a different coordinate system from the graph's.
+  // Two independent transforms feed this, both needed (round 5's actual
+  // bug was conflating them): `normalized` tried against every root's own
+  // toplevel/offset, AND — when the reference is explicitly repo-prefixed
+  // (`matchedRoot`) — `stripped` tried against THAT root specifically.
+  const evidenceRoots = roots.length > 0 ? roots : [cwd];
+  const candidates = repoRelativeCandidates(evidenceRoots, normalized, topCache);
+  if (matchedRoot && stripped !== undefined) {
+    candidates.push(...repoRelativeCandidates([matchedRoot], stripped, topCache));
+  }
+  const diskHit = candidates.find((c) => existsSync(join(c.toplevel, c.repoRelativePath)));
+  if (diskHit) return { ...base, status: "present", location: diskHit.repoRelativePath };
 
   if (roots.length === 0) {
     // No manifest — single-repo mode (DEC-115 D2: no cross-repo advantage to lose here).
-    return finishFromDisk(cwd, normalized);
+    return finishNotFoundInGraph(base, candidates, cache);
   }
 
+  // Round 3 rule (continued): first segment names a real but UN-indexed
+  // sibling repo — same "not in scope" answer as an indexed one.
   if (siblingRepoExists(roots, firstSeg)) {
     return {
       ...base,
@@ -366,44 +807,218 @@ async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[
     };
   }
 
-  return finishFromDisk(roots[0]!, normalized);
-}
-
-async function resolveSymbolRef(conn: GraphConnection, ref: RawRef): Promise<PartialItem> {
-  const base = { kind: "symbol" as const, raw: ref.raw };
-  const fullName = ref.raw.replace(/\(.*\)$/s, "");
-  let files = await symbolLocations(conn, fullName);
-  if (files.length === 0 && fullName.includes(".")) {
-    files = await symbolLocations(conn, fullName.split(".").pop()!);
+  // Round 3 rule 4: no repo-name prefix at all, but the path exists inside
+  // SOME un-indexed sibling anyway — the citing context likely implied the
+  // repo name and the note dropped it.
+  const siblingHit = siblingRepoContainingPath(roots, normalized);
+  if (siblingHit) {
+    return {
+      ...base,
+      status: "unresolvable",
+      reason: `found on disk inside the "${siblingHit}" repo, which is not one of this graph's indexed roots`,
+    };
   }
 
+  // Not clearly root-qualified — try every indexed repo's evidence, in
+  // both repo-root and index-root-converted coordinates (`candidates`,
+  // already built above).
+  return finishNotFoundInGraph(base, candidates, cache);
+}
+
+/** JS/Node built-in namespaces a dotted symbol reference's base might name — never a project symbol, so never worth a graph lookup. */
+const BUILTIN_NAMESPACES: ReadonlySet<string> = new Set([
+  "process", "console", "JSON", "Object", "Array", "Promise", "Math", "Number", "String", "Boolean",
+  "Date", "RegExp", "Map", "Set", "Symbol", "Reflect", "Error", "Buffer",
+  "globalThis", "global", "window", "document",
+  "os", "path", "fs", "crypto", "util", "url", "child_process",
+  // Test-framework/platform globals (DEC-115 H1 R5 item 4) — same category
+  // as the JS/Node built-ins above, checked here too since `vi.fn()`/
+  // `jest.mock()` are dotted just like `os.tmpdir()`.
+  "vi", "jest",
+]);
+
+/**
+ * Test-framework/platform globals used BARE (undotted) — `expect`,
+ * `describe`, `it`, `fetch`, and any `mock*`-prefixed Vitest/Jest mock
+ * method (`mockImplementation`, `mockImplementationOnce`,
+ * `mockReturnValue`, …). DEC-115 H1 R5 item 4: these are never a project
+ * symbol, so — same treatment as {@link BUILTIN_NAMESPACES} — checked
+ * BEFORE any graph lookup or git-evidence search, not after.
+ */
+const BARE_TEST_FRAMEWORK_GLOBALS: ReadonlySet<string> = new Set(["expect", "describe", "it", "fetch"]);
+
+function isBareTestFrameworkGlobal(name: string): boolean {
+  return BARE_TEST_FRAMEWORK_GLOBALS.has(name) || name.startsWith("mock");
+}
+
+/**
+ * DEC-115 H1 R3: the symbol counterpart of {@link finishNotFoundInGraph}'s
+ * evidence rule. `git log -S<name>` (pickaxe) finds the most recent commit
+ * that changed `name`'s literal occurrence count in `root`'s history — a
+ * real definition being added or removed changes that count; a name that
+ * was never there does not. Only called when the graph already has zero
+ * matches, so — unlike path history — this is never batched: the candidate
+ * volume at that point is small (DEC-115 H1's baseline: tens, not hundreds).
+ */
+/**
+ * `git log`'s pathspec argument list restricting a search to source-code
+ * files — derived from {@link GRAMMARS} (the same registry `run.ts`'s
+ * `CODE_EXTS` derives from), not hand-maintained, so this list can't drift
+ * from the languages EGR actually indexes.
+ */
+const CODE_PATHSPECS: readonly string[] = GRAMMARS.flatMap((g) => g.extensions).map((ext) => `*${ext}`);
+
+function escapeRegExpLiteral(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * A `git log -G` pattern matching common DEFINITION shapes for `name` —
+ * NOT a call site or a prose mention. POSIX extended-regex syntax only (no
+ * `\s`/`\b`/`\d` — empirically verified NOT to match under git's default
+ * `-G` engine; `[[:space:]]` and an explicit `[^A-Za-z0-9_]` boundary class
+ * are the portable equivalents).
+ *
+ * DEC-115 H1 R4: this is the fix for round 3's `-S` (plain occurrence-count
+ * pickaxe), which matched ANY text containing the name — a mere MENTION in
+ * a memory note or a doc, or a CALL site, counted the same as a real
+ * definition. The round-3 rerun's false `missing` were almost entirely this:
+ * `$(dirname $0)`, `setLoading(false)`, `createHash('sha256')`,
+ * `fileURLToPath(...)` all "existed" by that measure. None of them is a
+ * definition of a project symbol.
+ */
+function definitionPattern(name: string): string {
+  const n = escapeRegExpLiteral(name);
+  const boundaryBefore = "(^|[^A-Za-z0-9_])";
+  const boundaryAfter = "([^A-Za-z0-9_]|$)";
+  return [
+    `${boundaryBefore}(function|fn|func|def|class)[[:space:]]+${n}${boundaryAfter}`, // function NAME / fn NAME / func NAME / def NAME / class NAME
+    `${boundaryBefore}${n}[[:space:]]*=[[:space:]]*\\(`, // NAME = (...) =>  or  NAME = function
+    `${boundaryBefore}${n}[[:space:]]*\\([^)]*\\)[[:space:]]*\\{`, // NAME(...) {   (method/function shorthand)
+    `${boundaryBefore}${n}[[:space:]]*:[[:space:]]*function`, // NAME: function (...) {
+  ].join("|");
+}
+
+/**
+ * Evidence a symbol was once DEFINED somewhere in an indexed root's history
+ * — `git log -G<definition pattern>`, restricted to source-code paths
+ * ({@link CODE_PATHSPECS}) so a `.md`/`.yaml` mention can never count. Only
+ * called when the graph already found zero matches (see the lazy call site
+ * in {@link resolveSymbolRef}), so this is never batched — the candidate
+ * volume at that point is small.
+ */
+function symbolEverExisted(roots: string[], cwd: string, name: string): { root: string; commit: string } | null | "unavailable" {
+  const searchRoots = roots.length > 0 ? roots : [cwd];
+  const pattern = definitionPattern(name);
+  let sawUnavailable = false;
+  for (const root of searchRoots) {
+    try {
+      const out = execFileSync(
+        "git",
+        ["-C", root, "log", "--all", "-G", pattern, "--format=%h", "-1", "--", ...CODE_PATHSPECS],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      ).trim();
+      if (out.length > 0) return { root, commit: out };
+    } catch {
+      sawUnavailable = true;
+    }
+  }
+  return sawUnavailable ? "unavailable" : null;
+}
+
+async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: string[], cwd: string): Promise<PartialItem> {
+  const base = { kind: "symbol" as const, raw: ref.raw };
+  const fullName = ref.raw.replace(/\(.*\)$/s, "");
   const expectedFile = ref.pairedPath ? normalizePathToken(ref.pairedPath) : undefined;
   const matchesExpected = (file: string): boolean =>
     expectedFile != null && (file === expectedFile || file.endsWith(`/${expectedFile}`) || expectedFile.endsWith(`/${file}`));
 
-  if (files.length === 0) {
-    if (expectedFile) {
-      return { ...base, status: "missing", reason: `no Function/Class named "${fullName}" was found in the graph` };
+  // DEC-115 H1 R3: `missing` requires evidence this symbol once existed —
+  // a commit that changed its occurrence count in some indexed root's
+  // history. This REPLACES the round-2 rule ("has an expected file → missing,
+  // else unresolvable"): that heuristic is exactly what let built-ins,
+  // other-language functions in un-indexed repos, and test-framework calls
+  // through as false `missing` whenever they happened to sit next to an
+  // unrelated path citation on the same line. Looked up LAZILY — only when
+  // the graph already found zero matches — both for cost (a `git log -S`
+  // call is not free) and because it is meaningless when the symbol already
+  // resolved.
+  const lookupName = fullName.includes(".") ? fullName.split(".").pop()! : fullName;
+
+  const finish = (files: string[]): PartialItem => {
+    if (files.length === 0) {
+      const evidence = symbolEverExisted(roots, cwd, lookupName);
+      if (evidence === "unavailable") {
+        return { ...base, status: "missing", reason: "no Function/Class with this name was found in the graph; git was unavailable so its history could not be checked" };
+      }
+      if (evidence) {
+        return {
+          ...base,
+          status: "missing",
+          reason: `no longer defined anywhere in the graph; last appears in "${evidence.root}"'s git history at commit ${evidence.commit}`,
+        };
+      }
+      return {
+        ...base,
+        status: "unresolvable",
+        reason: "not found in the graph, and no evidence in any indexed root's git history that this was ever a defined symbol here (it may be a built-in or external call)",
+      };
     }
+    if (files.length === 1) {
+      const file = files[0]!;
+      if (!expectedFile || matchesExpected(file)) return { ...base, status: "present", location: file };
+      return { ...base, status: "moved", location: file };
+    }
+    const confirmed = files.find(matchesExpected);
+    if (confirmed) return { ...base, status: "present", location: confirmed };
     return {
       ...base,
       status: "unresolvable",
-      reason: "not found in the graph, and no accompanying file reference to confirm this names a symbol in this project (it may be a built-in or external call)",
+      candidates: files.sort(),
+      reason: "multiple functions/classes share this name; cannot determine which one this reference means",
     };
-  }
-  if (files.length === 1) {
-    const file = files[0]!;
-    if (!expectedFile || matchesExpected(file)) return { ...base, status: "present", location: file };
-    return { ...base, status: "moved", location: file };
-  }
-  const confirmed = files.find(matchesExpected);
-  if (confirmed) return { ...base, status: "present", location: confirmed };
-  return {
-    ...base,
-    status: "unresolvable",
-    candidates: files.sort(),
-    reason: "multiple functions/classes share this name; cannot determine which one this reference means",
   };
+
+  if (fullName.includes(".")) {
+    // A dotted/member-call reference (`a.b()`). DEC-115 H1: the round-1
+    // fallback of matching just the LAST segment against any Function in
+    // the graph is exactly the "same name somewhere unrelated" guess D2
+    // forbids — it produced false `moved` results. There is no `Class` →
+    // `Function` edge in the schema, so "confirmed Class.method" here means:
+    // the base is a real `Class` node, AND the tail name is a `Function`
+    // defined in that same class's file.
+    const parts = fullName.split(".");
+    const rootName = parts[0]!;
+    const method = parts[parts.length - 1]!;
+
+    if (BUILTIN_NAMESPACES.has(rootName)) {
+      return { ...base, status: "unresolvable", reason: `"${rootName}" looks like a built-in/standard-library namespace, not a project symbol` };
+    }
+
+    let files = await symbolLocations(conn, fullName); // exact dotted name — rare, but some extractors could store it
+    if (files.length === 0) {
+      const classFiles = await classLocations(conn, rootName);
+      if (classFiles.length === 0) {
+        return {
+          ...base,
+          status: "unresolvable",
+          reason: `"${fullName}" is a member/dotted call; "${rootName}" could not be confirmed as a class in the graph, so this may not be a project symbol`,
+        };
+      }
+      const methodFiles = await functionLocations(conn, method);
+      files = methodFiles.filter((f) => classFiles.includes(f));
+      if (files.length === 0) {
+        return { ...base, status: "unresolvable", reason: `"${rootName}" is a class in the graph, but "${method}" could not be confirmed as one of its methods` };
+      }
+    }
+    return finish(files);
+  }
+
+  if (isBareTestFrameworkGlobal(fullName)) {
+    return { ...base, status: "unresolvable", reason: `"${fullName}" looks like a test-framework/platform global, not a project symbol` };
+  }
+
+  return finish(await symbolLocations(conn, fullName));
 }
 
 // --- entry point ------------------------------------------------------
@@ -426,6 +1041,10 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
   const files = collectMarkdownFiles(inputPaths);
   const roots = opts.roots ?? readRootsFromManifest(conn.path);
   const cwd = opts.cwd ?? process.cwd();
+  // Fresh per call (DEC-115 H1 R3/R5) — see HistoryCache's/ToplevelCache's
+  // doc comments for why neither is ever module-level.
+  const historyCache: HistoryCache = new Map();
+  const topCache: ToplevelCache = new Map();
 
   const items: RefCheckItem[] = [];
   let skippedTokens = 0;
@@ -435,7 +1054,8 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
     const { refs, skipped } = extractReferences(text);
     skippedTokens += skipped;
     for (const ref of refs) {
-      const partial = ref.kind === "path" ? await resolvePathRef(conn, ref, roots, cwd) : await resolveSymbolRef(conn, ref);
+      const partial =
+        ref.kind === "path" ? await resolvePathRef(conn, ref, roots, cwd, historyCache, topCache) : await resolveSymbolRef(conn, ref, roots, cwd);
       items.push({ ...partial, sourceFile: file, sourceLine: ref.line });
     }
   }
