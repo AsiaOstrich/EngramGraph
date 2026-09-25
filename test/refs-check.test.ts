@@ -880,3 +880,115 @@ describe("refs check test-framework globals are not treated as project symbols (
     expect(result.items[0]!.status).toBe("unresolvable");
   });
 });
+
+/**
+ * DEC-115 H1 R6 item 1: directory references. Git only ever records file
+ * renames/history, never a directory as such — "the directory once
+ * existed" has to be read off the same file-path history set as a prefix
+ * scan, and "moved" only when every renamed file under it lands under one
+ * consistent new prefix. Fixture uses the real shape: index root is a
+ * SUBDIRECTORY of the repo.
+ */
+describe("refs check directory references (DEC-115 H1 R6 item 1)", () => {
+  it("reports a directory once populated, now gone, as missing with a real commit", async () => {
+    const repoRoot = tmpDir("engram-refs-dirrepo-");
+    git(repoRoot, "init", "-q");
+    mkdirSync(join(repoRoot, "src", "orchestrator"), { recursive: true });
+    writeFileSync(join(repoRoot, "src", "orchestrator", "a.ts"), "// a\n");
+    writeFileSync(join(repoRoot, "src", "orchestrator", "b.ts"), "// b\n");
+    writeFileSync(join(repoRoot, "src", "keep.ts"), "// stays\n"); // keeps the index root alive on disk
+    git(repoRoot, "add", "-A");
+    git(repoRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "add");
+    git(repoRoot, "rm", "-qr", "src/orchestrator");
+    git(repoRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "remove dir");
+
+    const indexRoot = join(repoRoot, "src");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/orchestrator/` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [indexRoot], cwd: indexRoot });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ kind: "path", status: "missing" });
+    expect(result.items[0]!.reason).toMatch(/commit [0-9a-f]+/);
+  });
+
+  it("reports a directory that never existed as unresolvable, not missing", async () => {
+    const repoRoot = tmpDir("engram-refs-dirrepo-empty-");
+    git(repoRoot, "init", "-q");
+    mkdirSync(join(repoRoot, "src"), { recursive: true });
+    writeFileSync(join(repoRoot, "src", "keep.ts"), "// stays\n");
+    git(repoRoot, "add", "-A");
+    git(repoRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "add");
+
+    const indexRoot = join(repoRoot, "src");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/never-existed/` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [indexRoot], cwd: indexRoot });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+  });
+
+  it("reports a whole-directory rename as moved to the new directory", async () => {
+    const repoRoot = tmpDir("engram-refs-dirrepo-moved-");
+    git(repoRoot, "init", "-q");
+    mkdirSync(join(repoRoot, "src", "oldname"), { recursive: true });
+    writeFileSync(join(repoRoot, "src", "oldname", "a.ts"), "// a\n");
+    writeFileSync(join(repoRoot, "src", "oldname", "b.ts"), "// b\n");
+    writeFileSync(join(repoRoot, "src", "keep.ts"), "// stays\n");
+    git(repoRoot, "add", "-A");
+    git(repoRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "add");
+    git(repoRoot, "mv", "src/oldname", "src/newname");
+    git(repoRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "rename dir");
+
+    const indexRoot = join(repoRoot, "src");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/oldname/` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [indexRoot], cwd: indexRoot });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: "moved", location: "src/newname/" });
+  });
+});
+
+/** DEC-115 H1 R6 item 2: an indexed repo's own history/disk evidence must win over a coincidentally-named un-indexed sibling. */
+describe("refs check evidence outranks the sibling-repo guess (DEC-115 H1 R6 item 2)", () => {
+  it("resolves a path found in an INDEXED repo's history as missing, even though a sibling directory shares its first segment's name", async () => {
+    const base = tmpDir("engram-refs-evidence-vs-sibling-");
+    const repoRoot = join(base, "UDS");
+    mkdirSync(repoRoot, { recursive: true });
+    git(repoRoot, "init", "-q");
+    mkdirSync(join(repoRoot, "scripts"), { recursive: true });
+    writeFileSync(join(repoRoot, "scripts", "setup-hooks.sh"), "#!/bin/sh\n");
+    writeFileSync(join(repoRoot, "README.md"), "# uds\n");
+    git(repoRoot, "add", "-A");
+    git(repoRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "add");
+    git(repoRoot, "rm", "-q", "scripts/setup-hooks.sh");
+    git(repoRoot, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "remove");
+
+    // A directory literally named "scripts" sitting as a SIBLING of the
+    // indexed root itself (`join(dirname(root), firstSeg)` — exactly what
+    // `siblingRepoExists` checks) — "scripts" is an extremely common
+    // directory name, exactly the coincidence that used to win.
+    mkdirSync(join(base, "scripts"), { recursive: true });
+    const otherIndexed = join(base, "OtherIndexed");
+    mkdirSync(otherIndexed, { recursive: true });
+
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `scripts/setup-hooks.sh` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repoRoot, otherIndexed], cwd: repoRoot });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: "missing" });
+    expect(result.items[0]!.reason).toMatch(/commit [0-9a-f]+/);
+    expect(result.items[0]!.reason).not.toContain("indexed roots");
+  });
+});
