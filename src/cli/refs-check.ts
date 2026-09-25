@@ -395,22 +395,41 @@ async function symbolLocations(conn: GraphConnection, name: string): Promise<str
  * MUST run without a `-- <path>` pathspec — see this module's doc comment
  * for the empirically-verified reason a pathspec silently defeats `-M`.
  */
-function findRenameTarget(repoRoot: string, relPath: string): string | null | "unavailable" {
-  let out: string;
+/**
+ * Per-`checkRefs`-run cache of each root's full rename-record map (DEC-115
+ * H1 R6) — same reasoning as {@link HistoryCache}: one `git log` call per
+ * repo, not one per candidate (this used to re-run the same query for
+ * every candidate that needed it; now it shares the map the way
+ * `historyPathSet` already shared history).
+ */
+type RenameCache = Map<string, Map<string, string> | "unavailable">;
+
+/** Every `oldPath → newPath` rename record in `repoRoot`'s full history, cached. MUST run without a `-- <path>` pathspec — see this module's doc comment for the empirically-verified reason a pathspec silently defeats `-M`. */
+function renamesForRoot(repoRoot: string, cache: RenameCache): Map<string, string> | "unavailable" {
+  const cached = cache.get(repoRoot);
+  if (cached) return cached;
+  let result: Map<string, string> | "unavailable";
   try {
-    out = execFileSync("git", ["-C", repoRoot, "log", "--diff-filter=R", "-M", "--name-status", "--format="], {
+    const out = execFileSync("git", ["-C", repoRoot, "log", "--diff-filter=R", "-M", "--name-status", "--format="], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
+    const map = new Map<string, string>();
+    for (const line of out.split("\n")) {
+      const m = /^R\d*\t([^\t]+)\t([^\t]+)$/.exec(line.trim());
+      if (m && !map.has(m[1]!)) map.set(m[1]!, m[2]!);
+    }
+    result = map;
   } catch {
-    return "unavailable";
+    result = "unavailable";
   }
+  cache.set(repoRoot, result);
+  return result;
+}
 
-  const renamedFrom = new Map<string, string>();
-  for (const line of out.split("\n")) {
-    const m = /^R\d*\t([^\t]+)\t([^\t]+)$/.exec(line.trim());
-    if (m && !renamedFrom.has(m[1]!)) renamedFrom.set(m[1]!, m[2]!);
-  }
+function findRenameTarget(repoRoot: string, relPath: string, cache: RenameCache): string | null | "unavailable" {
+  const renamedFrom = renamesForRoot(repoRoot, cache);
+  if (renamedFrom === "unavailable") return "unavailable";
 
   let current = relPath;
   const seen = new Set<string>([current]);
@@ -421,6 +440,59 @@ function findRenameTarget(repoRoot: string, relPath: string): string | null | "u
     current = next;
   }
   return current === relPath ? null : current;
+}
+
+/**
+ * DEC-115 H1 R6 item 1: the directory counterpart of {@link findRenameTarget}.
+ * Git only ever records file renames, never a directory rename as such — a
+ * directory move is N individual file-rename records that happen to share a
+ * prefix. `moved` is reported only when EVERY renamed file whose OLD path
+ * sat under `dirPrefix` maps to a NEW path under the exact same single new
+ * prefix — a genuine, consistent directory move. Anything less consistent
+ * (some files moved elsewhere, some not renamed at all) returns `null` — per
+ * DEC-115 H1 R6: "能判才判，不能判就 missing", not a guess.
+ */
+function directoryRenameTarget(repoRoot: string, dirPrefix: string, cache: RenameCache): string | null | "unavailable" {
+  const renamedFrom = renamesForRoot(repoRoot, cache);
+  if (renamedFrom === "unavailable") return "unavailable";
+
+  const prefix = dirPrefix.endsWith("/") ? dirPrefix : `${dirPrefix}/`;
+  const newPrefixes = new Set<string>();
+  let anyMatch = false;
+  for (const [oldPath, newPath] of renamedFrom) {
+    if (!oldPath.startsWith(prefix)) continue;
+    anyMatch = true;
+    const suffix = oldPath.slice(prefix.length);
+    if (!newPath.endsWith(suffix)) {
+      return null; // this one file's rename doesn't fit a whole-directory move — can't determine
+    }
+    newPrefixes.add(newPath.slice(0, newPath.length - suffix.length));
+  }
+  if (!anyMatch || newPrefixes.size !== 1) return null;
+  return [...newPrefixes][0]!;
+}
+
+/** Does ANY path in `history` sit under `dirPrefix`? Git only records files, never directories, so a directory's "existence" in history is this prefix scan over the same file-path set {@link historyPathSet} already collects. */
+function directoryEverExisted(history: Set<string>, dirPrefix: string): boolean {
+  const prefix = dirPrefix.endsWith("/") ? dirPrefix : `${dirPrefix}/`;
+  for (const p of history) {
+    if (p.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/** The most recent commit touching anything under `dirPrefix` — a trailing-slash pathspec, verified empirically to match every file below it. */
+function lastSeenCommitForDir(repoRoot: string, dirPrefix: string): string | null {
+  const prefix = dirPrefix.endsWith("/") ? dirPrefix : `${dirPrefix}/`;
+  try {
+    const out = execFileSync("git", ["-C", repoRoot, "log", "--all", "--format=%h", "-1", "--", prefix], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Does a directory named `firstSeg` exist as a sibling of any indexed root? (grounded "probably another checked-out repo" signal.) */
@@ -624,16 +696,54 @@ function lastSeenCommit(repoRoot: string, relPath: string): string | null {
  * checked. Every candidate root is tried, in order, for both rename and
  * history evidence; the first hit wins.
  */
-function finishNotFoundInGraph(base: { kind: "path"; raw: string }, candidates: Array<{ toplevel: string; repoRelativePath: string }>, cache: HistoryCache): PartialItem {
+/**
+ * DEC-115 H1 R6: evidence lookup, split out from the final "declare
+ * unresolvable" fallback (previously one function) so callers can try
+ * OTHER signals — the un-indexed-sibling heuristics — only when evidence
+ * genuinely comes up empty, not before. Round 6's item 2 bug was exactly
+ * this ordering: a sibling directory coincidentally named "scripts" was
+ * reported before this evidence check ever ran, even though the reference
+ * was sitting right there in an INDEXED repo's own history.
+ *
+ * Directory-aware (item 1): a candidate whose `repoRelativePath` ends in
+ * `/` is checked as a directory — history membership becomes "any path
+ * under this prefix", and rename detection becomes "every renamed file
+ * under this prefix landed under the same single new prefix" (see
+ * {@link directoryRenameTarget}) — since git records only file renames,
+ * never a directory rename as such.
+ *
+ * Returns `null` when there is truly no evidence anywhere (and git was
+ * available everywhere it was asked) — the caller decides what to do next.
+ */
+/**
+ * Three genuinely different outcomes, not two (DEC-115 H1 R6): `found` is a
+ * real positive hit (rename or history membership) and must outrank a
+ * sibling-repo GUESS. `unavailable` (git couldn't be run at all for any
+ * candidate) is NOT evidence of anything — it must NOT outrank the sibling
+ * guess either, or a fixture/environment with no real git repo would report
+ * `missing` before ever trying the sibling heuristics that used to catch it
+ * (this is exactly what broke when `anyUnavailable` first tried to double as
+ * "no evidence" here). `not-found` means every candidate WAS checked and
+ * came back clean.
+ */
+type EvidenceResult = { kind: "found"; item: PartialItem } | { kind: "unavailable" } | { kind: "not-found" };
+
+function findEvidence(
+  base: { kind: "path"; raw: string },
+  candidates: Array<{ toplevel: string; repoRelativePath: string }>,
+  cache: HistoryCache,
+  renameCache: RenameCache,
+): EvidenceResult {
   let anyUnavailable = false;
 
   for (const { toplevel, repoRelativePath } of candidates) {
-    const moved = findRenameTarget(toplevel, repoRelativePath);
+    const isDir = repoRelativePath.endsWith("/");
+    const moved = isDir ? directoryRenameTarget(toplevel, repoRelativePath, renameCache) : findRenameTarget(toplevel, repoRelativePath, renameCache);
     if (moved === "unavailable") {
       anyUnavailable = true;
       continue;
     }
-    if (moved) return { ...base, status: "moved", location: moved };
+    if (moved) return { kind: "found", item: { ...base, status: "moved", location: moved } };
   }
 
   for (const { toplevel, repoRelativePath } of candidates) {
@@ -642,22 +752,39 @@ function finishNotFoundInGraph(base: { kind: "path"; raw: string }, candidates: 
       anyUnavailable = true;
       continue;
     }
-    if (history.has(repoRelativePath)) {
+    const isDir = repoRelativePath.endsWith("/");
+    const found = isDir ? directoryEverExisted(history, repoRelativePath) : history.has(repoRelativePath);
+    if (found) {
       // Same (toplevel, repoRelativePath) pair the membership check just
       // matched on — DEC-115 H1 R5's bug 2: computing this against the
       // wrong root/coordinate returned nothing even on a confirmed hit
       // ("last commit could not be determined"), because `-- <path>` is a
       // pathspec, and a pathspec IS resolved relative to `-C`'s cwd.
-      const commit = lastSeenCommit(toplevel, repoRelativePath);
+      const commit = isDir ? lastSeenCommitForDir(toplevel, repoRelativePath) : lastSeenCommit(toplevel, repoRelativePath);
       return {
-        ...base,
-        status: "missing",
-        reason: commit ? `no longer exists; last appears in git history at commit ${commit}` : "no longer exists; found in git history but its last commit could not be determined",
+        kind: "found",
+        item: {
+          ...base,
+          status: "missing",
+          reason: commit ? `no longer exists; last appears in git history at commit ${commit}` : "no longer exists; found in git history but its last commit could not be determined",
+        },
       };
     }
   }
 
-  if (anyUnavailable) {
+  return anyUnavailable ? { kind: "unavailable" } : { kind: "not-found" };
+}
+
+/** `findEvidence`'s final fallback, when there is no sibling-repo nuance to weigh (single-repo/no-manifest mode) — `unavailable` and `not-found` collapse to their respective terminal answers straightaway. */
+function finishNotFoundInGraph(
+  base: { kind: "path"; raw: string },
+  candidates: Array<{ toplevel: string; repoRelativePath: string }>,
+  cache: HistoryCache,
+  renameCache: RenameCache,
+): PartialItem {
+  const evidence = findEvidence(base, candidates, cache, renameCache);
+  if (evidence.kind === "found") return evidence.item;
+  if (evidence.kind === "unavailable") {
     return {
       ...base,
       status: "missing",
@@ -679,6 +806,7 @@ async function resolveRelPathInRoot(
   relPath: string,
   cache: HistoryCache,
   topCache: ToplevelCache,
+  renameCache: RenameCache,
 ): Promise<PartialItem> {
   // Graph: Module ids are INDEX-ROOT-relative (egr index <dir> walks from
   // <dir>), so `relPath` (already stripped to be relative to `root`) is the
@@ -690,7 +818,7 @@ async function resolveRelPathInRoot(
   // branch's relPath, or a citation that happened not to need `matchedRoot`
   // stripping), so both interpretations are tried via the same helper used
   // for the fully-unqualified fallback.
-  return finishNotFoundInGraph(base, repoRelativeCandidates([root], relPath, topCache), cache);
+  return finishNotFoundInGraph(base, repoRelativeCandidates([root], relPath, topCache), cache, renameCache);
 }
 
 /**
@@ -732,6 +860,7 @@ async function resolvePathRef(
   cwd: string,
   cache: HistoryCache,
   topCache: ToplevelCache,
+  renameCache: RenameCache,
 ): Promise<PartialItem> {
   const base = { kind: "path" as const, raw: ref.raw };
   let normalized = normalizePathToken(ref.raw);
@@ -754,14 +883,15 @@ async function resolvePathRef(
       return { ...base, status: "unresolvable", reason: "absolute path (or expanded ~) is not under any of this graph's indexed roots" };
     }
     const relPath = toPosixPath(relative(matchingRoot, normalized));
-    return resolveRelPathInRoot(conn, base, matchingRoot, relPath, cache, topCache);
+    return resolveRelPathInRoot(conn, base, matchingRoot, relPath, cache, topCache, renameCache);
   }
 
   // Relative reference: try it bare first (the common case — a doc inside
   // the same repo it's referring to, so its paths are already root-relative).
   // Checked against the graph in INDEX-ROOT coordinates first (Module ids
   // come from `egr index <dir>`'s own walk, so `normalized` as literally
-  // given is the right coordinate there).
+  // given is the right coordinate there). A directory reference (trailing
+  // `/`) is never a Module id, so this is a harmless no-op for it.
   if (await moduleExists(conn, normalized)) return { ...base, status: "present", location: normalized };
 
   const firstSeg = normalized.split("/")[0]!;
@@ -794,11 +924,24 @@ async function resolvePathRef(
 
   if (roots.length === 0) {
     // No manifest — single-repo mode (DEC-115 D2: no cross-repo advantage to lose here).
-    return finishNotFoundInGraph(base, candidates, cache);
+    return finishNotFoundInGraph(base, candidates, cache, renameCache);
   }
 
+  // DEC-115 H1 R6 item 2: evidence FIRST, un-indexed-sibling guesswork
+  // second. Round 5's order tried `siblingRepoExists`/`siblingRepoContainingPath`
+  // BEFORE ever checking this indexed repo's own history — so a reference
+  // like `scripts/setup-hooks.sh`, genuinely present in an INDEXED repo's
+  // history, was reported as "looks like a reference into scripts, which
+  // ... is not one of this graph's indexed roots" the moment SOME unrelated
+  // directory named "scripts" happened to sit next to an indexed root
+  // ("scripts" is an extremely common directory name). An indexed repo's
+  // own evidence must win over a coincidental sibling-name match.
+  const evidence = findEvidence(base, candidates, cache, renameCache);
+  if (evidence.kind === "found") return evidence.item;
+
   // Round 3 rule (continued): first segment names a real but UN-indexed
-  // sibling repo — same "not in scope" answer as an indexed one.
+  // sibling repo — same "not in scope" answer as an indexed one. Tried
+  // only now — evidence.kind is "unavailable" or "not-found", never "found".
   if (siblingRepoExists(roots, firstSeg)) {
     return {
       ...base,
@@ -819,10 +962,18 @@ async function resolvePathRef(
     };
   }
 
-  // Not clearly root-qualified — try every indexed repo's evidence, in
-  // both repo-root and index-root-converted coordinates (`candidates`,
-  // already built above).
-  return finishNotFoundInGraph(base, candidates, cache);
+  if (evidence.kind === "unavailable") {
+    return {
+      ...base,
+      status: "missing",
+      reason: "not found in the graph or on disk under any indexed root; git was unavailable for at least one of them so history could not be fully checked",
+    };
+  }
+  return {
+    ...base,
+    status: "unresolvable",
+    reason: "never appears in any indexed root's git history — not enough evidence this was ever a real path here",
+  };
 }
 
 /** JS/Node built-in namespaces a dotted symbol reference's base might name — never a project symbol, so never worth a graph lookup. */
@@ -1041,10 +1192,11 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
   const files = collectMarkdownFiles(inputPaths);
   const roots = opts.roots ?? readRootsFromManifest(conn.path);
   const cwd = opts.cwd ?? process.cwd();
-  // Fresh per call (DEC-115 H1 R3/R5) — see HistoryCache's/ToplevelCache's
-  // doc comments for why neither is ever module-level.
+  // Fresh per call (DEC-115 H1 R3/R5/R6) — see HistoryCache's/ToplevelCache's/
+  // RenameCache's doc comments for why none of them is ever module-level.
   const historyCache: HistoryCache = new Map();
   const topCache: ToplevelCache = new Map();
+  const renameCache: RenameCache = new Map();
 
   const items: RefCheckItem[] = [];
   let skippedTokens = 0;
@@ -1055,7 +1207,9 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
     skippedTokens += skipped;
     for (const ref of refs) {
       const partial =
-        ref.kind === "path" ? await resolvePathRef(conn, ref, roots, cwd, historyCache, topCache) : await resolveSymbolRef(conn, ref, roots, cwd);
+        ref.kind === "path"
+          ? await resolvePathRef(conn, ref, roots, cwd, historyCache, topCache, renameCache)
+          : await resolveSymbolRef(conn, ref, roots, cwd);
       items.push({ ...partial, sourceFile: file, sourceLine: ref.line });
     }
   }
