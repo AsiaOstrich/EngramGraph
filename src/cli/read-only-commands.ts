@@ -37,4 +37,9 @@ export const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "top",
   "blindspots",
   "signatures",
+  // DEC-115 L2: `refs check` only queries the graph (MATCH) and reads the
+  // filesystem/`git log` — verified in `test/refs-check.test.ts` by
+  // comparing node/edge counts before and after a run. `cmd` here is the
+  // FIRST positional ("refs"), not the subcommand ("check").
+  "refs",
 ]);

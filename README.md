@@ -333,18 +333,39 @@ Or just `egr serve --port 3000`. API reference: **[docs/API.md](./docs/API.md)**
 
 ## MCP — use EngramGraph from a coding assistant
 
-EngramGraph ships an MCP server (stdio) exposing 8 tools — `index_code`,
-`index_docs`, `call_chain`, `impact_analysis`, `ingest_feedback`, `implementers`,
-`implemented_specs`, `related` — so any MCP-capable assistant can use it as a
-code + knowledge graph. Zero LLM, deterministic, **no Docker**.
+EngramGraph ships an MCP server (stdio) exposing 12 tools — the code/knowledge
+graph queries (`index_code`, `index_docs`, `call_chain`, `impact_analysis`,
+`ingest_feedback`, `implementers`, `implemented_specs`, `related`),
+diagnostics (`blindspots`, `signatures`, `doctor`), and a Markdown reference
+checker (`refs_check`, DEC-115 — see below) — so any MCP-capable assistant can
+use it as a code + knowledge graph. Zero LLM, deterministic, **no Docker**.
+Every tool declares MCP annotations (`readOnlyHint`/`destructiveHint`/
+`idempotentHint`/`openWorldHint`) so a client can tell what it's about to run.
 
 ```bash
 # Claude Code, from an installed package:
 claude mcp add egr -- npx egr-mcp
 ```
 
-Full setup (Claude Code / Codex / Cursor / Windsurf), all 8 tools, and an
-example flow: **[docs/MCP.md](./docs/MCP.md)**.
+Full setup (Claude Code / Codex / Cursor / Windsurf), all 12 tools with their
+annotations, and an example flow: **[docs/MCP.md](./docs/MCP.md)**.
+
+### Checking whether a memory note's code references still hold (DEC-115)
+
+AI memory/notes cite code by file path or symbol name, and code moves without
+the citation updating itself. `egr refs check` reads Markdown (a memory file,
+CLAUDE.md/AGENTS.md, a directory of notes) and reports each reference as
+`present` | `moved` (+ new location, via the graph and `git`) | `missing` |
+`unresolvable` (not enough information — e.g. a reference into a repo this
+graph was never told to index; never conflated with `missing`). Read-only —
+it never writes to the graph or the files it checks (see
+["What EngramGraph does not store"](#what-engramgraph-does-not-store) below).
+
+```bash
+egr refs check MEMORY.md
+```
+
+Full extraction rule and examples: **[docs/CLI.md](./docs/CLI.md)**.
 
 ## Core vs Adapter boundary
 

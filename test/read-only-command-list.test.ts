@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,6 +15,7 @@ import {
   cmdTop,
   cmdBlindspots,
   cmdSignatures,
+  cmdRefsCheck,
 } from "../src/cli/run.js";
 
 /**
@@ -48,6 +49,7 @@ describe("read-only command list (XSPEC-374)", () => {
   let dir: string;
   let dbPath: string;
   let manifestPath: string;
+  let mdPath: string;
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "engram-rocmd-"));
@@ -83,6 +85,12 @@ describe("read-only command list (XSPEC-374)", () => {
       `MATCH (d:Decision {id: 'DEC-1'}), (s:Spec {id: 'SPEC-1'}) CREATE (d)-[:IMPACTS]->(s)`,
     );
     await seed.close();
+
+    // `refs check`'s fixture: a Markdown note citing the same `src/a.ts`
+    // Module the queries above already use, so it finds real data without
+    // needing a second graph.
+    mdPath = join(dir, "note.md");
+    writeFileSync(mdPath, "See `src/a.ts` for details.\n");
   });
 
   afterAll(() => {
@@ -106,6 +114,10 @@ describe("read-only command list (XSPEC-374)", () => {
     // list rather than the subset that happens to take a connection.
     blindspots: async () => cmdBlindspots(manifestPath) !== undefined,
     signatures: async () => cmdSignatures(manifestPath) !== undefined,
+    refs: async (c) => {
+      const r = await cmdRefsCheck(c, [mdPath]);
+      return r.items.some((it) => it.status === "present");
+    },
   };
 
   it("has a case for every declared read-only command, and no extras", () => {

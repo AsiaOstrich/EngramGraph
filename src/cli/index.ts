@@ -14,7 +14,8 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
+import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, cmdRefsCheck, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
+import type { RefCheckResult } from "./refs-check.js";
 import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { readIndexHealth, definitionFiles, type IndexHealth } from "../code-graph/index.js";
@@ -57,6 +58,13 @@ Commands:
   communities                     Function-call clusters (Louvain over CALLS edges)
   related <node-id> [--depth N] [--limit N]
                                   Nodes important *around* a seed (seeded PageRank approx.)
+  refs check <path...>            Check file-path/symbol references (in
+                                  backticks) inside Markdown files or
+                                  directories against the graph + git —
+                                  present | moved (+ new location) | missing |
+                                  unresolvable (e.g. a reference into a repo
+                                  this graph does not index). Read-only;
+                                  never writes the graph or the files checked
   gc [--dry-run]                  Remove per-branch graphs for deleted branches
   blindspots                      Files that parsed partially or failed (from
                                   the parse-health manifest) — where the graph
@@ -560,6 +568,40 @@ async function main(): Promise<void> {
       if (!a1) throw new Error("related requires a <node-id>");
       const rows = await cmdRelated(conn, a1, num(values.depth, 2), num(values.limit, 10));
       out(rows, values.json, (d) => `related(${a1}):\n${fmtNodes(d as Array<{ name: string; label: string; rank: number }>)}`);
+      break;
+    }
+    case "refs": {
+      if (a1 !== "check") throw new Error(`unknown refs subcommand: ${a1 ?? "(none)"} — only "refs check <path...>" is supported`);
+      const paths = positionals.slice(2);
+      if (paths.length === 0) throw new Error("refs check requires at least one <path>");
+      const r = await cmdRefsCheck(conn, paths);
+      out(r, values.json, (d) => {
+        const res = d as RefCheckResult;
+        if (res.items.length === 0) {
+          return `refs check: no references found in ${res.filesScanned.length} file(s)`;
+        }
+        const counts = res.items.reduce<Record<string, number>>((acc, it) => {
+          acc[it.status] = (acc[it.status] ?? 0) + 1;
+          return acc;
+        }, {});
+        const summary = Object.entries(counts)
+          .map(([k, v]) => `${k} ${v}`)
+          .join(", ");
+        const lines = res.items.map((it) => {
+          const extra =
+            it.status === "moved"
+              ? ` → ${it.location}`
+              : it.status === "present" && it.location
+                ? ` (${it.location})`
+                : it.candidates
+                  ? ` [candidates: ${it.candidates.join(", ")}]`
+                  : it.reason
+                    ? ` — ${it.reason}`
+                    : "";
+          return `  [${it.status}] ${it.kind} \`${it.raw}\` (${it.sourceFile}:${it.sourceLine})${extra}`;
+        });
+        return `refs check: ${res.items.length} reference(s) in ${res.filesScanned.length} file(s) (${summary}):\n${lines.join("\n")}`;
+      });
       break;
     }
     default:

@@ -75,6 +75,7 @@ the command/args/env are the same:
 | `blindspots` | — | Files that parsed partially or failed, from the parse-health manifest — where the graph may be missing nodes/edges. Use after a query reports `indexHealth.possiblyIncomplete` to find out WHAT is missing. `manifestPresent` distinguishes "nothing wrong" from "never measured". |
 | `signatures` | — | The same files grouped by root cause instead of listed individually — turns "584 files" into "1 problem". Use when `blindspots` returns a long list. |
 | `doctor` | — | Which languages are available and why any are not, what was compiled on this machine, which commands need network. Does not open the graph, so it answers when indexing itself is what is broken. |
+| `refs_check` | `paths: string[]` | Check file-path/symbol references (backtick-quoted) inside Markdown files/directories against the graph and `git`. Each reference is `present` \| `moved` (+ new location) \| `missing` \| `unresolvable` (e.g. a reference into a repo this graph does not index — never reported as `missing`). Read-only; never modifies the graph or the files checked. See [CLI.md](./CLI.md) for the extraction rule. |
 
 Every tool returns a text content block of JSON; on failure it returns
 `error: <message>` with `isError: true`.
@@ -97,6 +98,35 @@ So four tools are refused here, each naming the command that does the job:
 | `related` | `egr related <seed-id>` |
 
 The server sees the result on its next query — no restart needed.
+
+### Tool annotations (DEC-115 L2)
+
+Every tool declares the MCP spec's `readOnlyHint` / `destructiveHint` /
+`idempotentHint` / `openWorldHint` — hints, not guarantees a client should
+skip verifying, but a server that omits them gives a client nothing to go
+on. Each one was set by reading the tool's own implementation, not assumed
+from its name: `related` is not read-only despite reading like a query — see
+its own note above and `readOnlyHint: false` below.
+
+| Tool | readOnly | destructive | idempotent | openWorld |
+|------|:--:|:--:|:--:|:--:|
+| `index_code` | false | false | true | false |
+| `index_docs` | false | false | true | false |
+| `call_chain` | true | false | true | false |
+| `impact_analysis` | true | false | true | false |
+| `ingest_feedback` | false | false | **false** | false |
+| `implementers` | true | false | true | false |
+| `implemented_specs` | true | false | true | false |
+| `related` | **false** | false | true | false |
+| `blindspots` | true | false | true | false |
+| `signatures` | true | false | true | false |
+| `doctor` | true | false | true | false |
+| `refs_check` | true | false | true | false |
+
+None of these talk to the network (`openWorldHint: false` throughout) — the
+graph, the filesystem and `git` are all local. `ingest_feedback` is the only
+non-idempotent write: it applies a confidence **delta**, so calling it twice
+with the same arguments changes the score twice, not once.
 
 `related` is the surprising one: it *reads*, from a caller's point of view. But
 ranking requires installing the algo extension and building a projected graph,
