@@ -125,7 +125,26 @@ describe("refs check", () => {
 
   it("finds a git-renamed plain file (not in the graph at all) via rename detection, not as missing", async () => {
     // The DEC-115 case this exists for: a config file or doc, never a Module
-    // node, that git nonetheless knows was renamed.
+    // node, that git nonetheless knows was renamed. Nested (has a
+    // directory) — a BARE filename goes through resolveBareFilename
+    // instead, which deliberately never attempts a rename lookup; see the
+    // next test.
+    const repo = gitRepoWithRename("src/old.ts", "src/new.ts");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/old.ts` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: "moved", location: "src/new.ts" });
+  });
+
+  it("reports a bare filename with no directory as unresolvable, even one git could otherwise find a rename for", async () => {
+    // DEC-115 H1: bare filenames (`App.tsx`, `graph.db`, no directory) were
+    // the largest false-`missing` bucket in the real baseline run. There is
+    // no grounded original directory to search git for, so this is
+    // deliberately `unresolvable`, never `missing` and never a rename guess.
     const repo = gitRepoWithRename("old.ts", "new.ts");
     const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
     const notesDir = tmpDir("engram-refs-notes-");
@@ -134,7 +153,69 @@ describe("refs check", () => {
     const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
 
     expect(result.items).toHaveLength(1);
-    expect(result.items[0]).toMatchObject({ status: "moved", location: "new.ts" });
+    expect(result.items[0]!.status).toBe("unresolvable");
+    expect(result.items[0]!.reason).toContain("no directory");
+  });
+
+  it("resolves a bare filename via the filesystem when it exists at the top level of exactly one indexed root", async () => {
+    // DEC-115 H1: root-level files (README.md, package.json, CLAUDE.md) are
+    // extremely common bare citations and DO exist — this is the bounded,
+    // cheap slice of the "unique hit" refinement DEC-115 R2 left optional.
+    const root = tmpDir("engram-refs-root-");
+    writeFileSync(join(root, "README.md"), "# hi\n");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `README.md` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [root], cwd: root });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: "present", location: "README.md" });
+  });
+
+  it("does not guess between root-level files of the same bare name in two indexed roots", async () => {
+    const rootA = tmpDir("engram-refs-rootA-");
+    const rootB = tmpDir("engram-refs-rootB-");
+    writeFileSync(join(rootA, "CHANGELOG.md"), "# a\n");
+    writeFileSync(join(rootB, "CHANGELOG.md"), "# b\n");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `CHANGELOG.md` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [rootA, rootB], cwd: rootA });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+    expect(result.items[0]!.candidates).toHaveLength(2);
+  });
+
+  it("finds a real, existing file on disk under an indexed root even when it was never a Module node (e.g. a doc)", async () => {
+    // DEC-115 H1: most non-code files (.md/.sh/.yaml) are never walked into
+    // a Module node, so a graph-only check reported them missing even
+    // though they exist. This is the direct fix.
+    const root = tmpDir("engram-refs-root-");
+    mkdirSync(join(root, "cross-project", "ops"), { recursive: true });
+    writeFileSync(join(root, "cross-project", "ops", "runbook.md"), "# runbook\n");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] }); // no Module node for it at all
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `cross-project/ops/runbook.md` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [root], cwd: root });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: "present", location: "cross-project/ops/runbook.md" });
+  });
+
+  it("reports a home-directory reference outside every indexed root as unresolvable, not missing", async () => {
+    const root = tmpDir("engram-refs-root-");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `~/.claude/skills/` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [root], cwd: root });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
   });
 
   it("reports a reference into an un-indexed sibling repo as unresolvable, not missing", async () => {
@@ -260,5 +341,178 @@ describe("refs check", () => {
     expect(result.filesScanned.sort()).toEqual([join(notesDir, "one.md"), join(notesDir, "sub", "two.md")].sort());
     expect(result.items).toHaveLength(2);
     expect(result.items.every((it) => it.status === "present")).toBe(true);
+  });
+});
+
+/**
+ * Extraction exclusions (DEC-115 H1). Each case is a pair by construction:
+ * one line puts a noise token next to a real path in the SAME graph/root, so
+ * a passing test proves both halves at once — the noise token contributes
+ * no item (only `skippedTokens` grows) and the real path is still found.
+ * Fixture content below is generic/synthetic, not copied from any real
+ * memory file.
+ */
+describe("refs check extraction exclusions (DEC-115 H1)", () => {
+  async function checkOneNoiseTokenNextToARealPath(noiseToken: string): Promise<{ items: number; skipped: number }> {
+    const { conn } = await openFixtureGraph({
+      nodes: [{ label: "Module", id: "src/real.ts", properties: { path: "src/real.ts" } }],
+      edges: [],
+    });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", `Noise: \`${noiseToken}\`. Real: \`src/real.ts\`.\n`);
+
+    const result = await checkRefs(conn, [md], { roots: [], cwd: notesDir });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ kind: "path", status: "present", location: "src/real.ts" });
+    return { items: result.items.length, skipped: result.skippedTokens };
+  }
+
+  it.each([
+    ["glob/regex/placeholder syntax", "[^/]*"],
+    ["a literal '...' placeholder", "cross-project/specs/XSPEC-316-...md"],
+    ["a conventional-commit branch name", "feat/xspec-297-something"],
+    ["a bare GitHub owner/repo", "AsiaOstrich/EngramGraph"],
+    ["owner/repo#N", "AsiaOstrich/universal-dev-standards#165"],
+    ["a bare npm package spec", "better-sqlite3@8.7.0"],
+    ["a scoped npm package spec", "@asiaostrich/telemetry-client@0.1.0"],
+    ["a key=value pair", "seccomp=runtime/default"],
+    ["a slash-separated word list with no extension", "outDir/include/exclude/testDir"],
+  ])("does not extract %s as a path (%s)", async (_label, noise) => {
+    const { skipped } = await checkOneNoiseTokenNextToARealPath(noise);
+    expect(skipped).toBeGreaterThanOrEqual(1);
+  });
+});
+
+/** Symbol precision (DEC-115 H1). */
+describe("refs check symbol precision (DEC-115 H1)", () => {
+  it("reports a JS/Node built-in namespace call as unresolvable, not missing", async () => {
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "Uses `process.cwd()` internally.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [], cwd: notesDir });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+    expect(result.items[0]!.reason).toContain("built-in");
+  });
+
+  it("does not guess a member call belongs to an unrelated same-named function (the useAuth.restore() case)", async () => {
+    // The exact DEC-115 H1 regression: a Function named `restore` exists,
+    // but in a file that has nothing to do with `useAuth`. The round-1
+    // "match the last dot segment" fallback reported this as `moved` to
+    // that unrelated file — a guess D2 forbids.
+    const { conn } = await openFixtureGraph({
+      nodes: [{ label: "Function", id: "src/unrelated.ts#restore", properties: { name: "restore", file: "src/unrelated.ts", start_line: 1, confidence: 0.8, provider: "tree-sitter" } }],
+      edges: [],
+    });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "Calls `useAuth.restore()` on mount.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [], cwd: notesDir });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+    expect(result.items[0]!.status).not.toBe("moved");
+  });
+
+  it("resolves a confirmed Class.method dotted reference (base is a real Class, method is a Function in the same file)", async () => {
+    const { conn } = await openFixtureGraph({
+      nodes: [
+        { label: "Class", id: "src/cache.ts#Cache", properties: { name: "Cache", file: "src/cache.ts", provider: "tree-sitter" } },
+        { label: "Function", id: "src/cache.ts#get", properties: { name: "get", file: "src/cache.ts", start_line: 5, confidence: 0.8, provider: "tree-sitter" } },
+      ],
+      edges: [],
+    });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "Calls `Cache.get()` to read.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [], cwd: notesDir });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: "present", location: "src/cache.ts" });
+  });
+});
+
+/** Every `missing`/`unresolvable` item carries a `reason` (DEC-115 H1 R6). */
+describe("refs check reason coverage (DEC-115 H1)", () => {
+  it("sets a reason on both a missing path and an unresolvable path", async () => {
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const repo = emptyGitRepo();
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "Gone: `src/gone.ts`. Elsewhere: `~/.claude/skills/`.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(2);
+    for (const item of result.items) {
+      expect(["missing", "unresolvable"]).toContain(item.status);
+      expect(item.reason, `${item.raw} (${item.status}) has no reason`).toBeTruthy();
+    }
+  });
+});
+
+/**
+ * DEC-115 H1 acceptance: reproduce the baseline's category mix on one
+ * fixture (a small multi-repo directory + one Markdown file), not copied
+ * from any real memory content.
+ */
+describe("refs check reproduces the DEC-115 H1 baseline categories on one fixture", () => {
+  it("classifies every category correctly in a single run", async () => {
+    const base = tmpDir("engram-refs-baseline-");
+    const repoA = join(base, "RepoA");
+    const repoB = join(base, "RepoB");
+    const siblingUnindexed = join(base, "SiblingRepo");
+    mkdirSync(join(repoA, "cross-project", "ops"), { recursive: true });
+    mkdirSync(repoB, { recursive: true });
+    mkdirSync(siblingUnindexed, { recursive: true });
+    writeFileSync(join(repoA, "README.md"), "# a\n");
+    writeFileSync(join(repoA, "cross-project", "ops", "runbook.md"), "# runbook\n");
+
+    const { conn } = await openFixtureGraph({
+      nodes: [
+        { label: "Module", id: "src/known.ts", properties: { path: "src/known.ts" } },
+        { label: "Function", id: "src/cache.ts#get", properties: { name: "get", file: "src/cache.ts", start_line: 1, confidence: 0.8, provider: "tree-sitter" } },
+        { label: "Class", id: "src/cache.ts#Cache", properties: { name: "Cache", file: "src/cache.ts", provider: "tree-sitter" } },
+      ],
+      edges: [],
+    });
+
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(
+      notesDir,
+      "note.md",
+      [
+        "- in-graph path: `src/known.ts`",
+        "- real file, not a Module node: `cross-project/ops/runbook.md`",
+        "- root-level bare filename, unique hit: `README.md`",
+        "- bare filename, no hit anywhere: `some-random-file.ts`",
+        "- outside every indexed root: `~/.claude/skills/`",
+        "- sibling repo that exists but isn't indexed: `SiblingRepo/notes.md`",
+        "- glob noise: `[^/]*`",
+        "- branch-name noise: `feat/xspec-297-something`",
+        "- owner/repo noise: `AsiaOstrich/EngramGraph`",
+        "- built-in call: `process.cwd()`",
+        "- confirmed Class.method: `Cache.get()`",
+        "- member call on a non-class base: `useAuth.restore()`",
+      ].join("\n") + "\n",
+    );
+
+    const result = await checkRefs(conn, [md], { roots: [repoA, repoB], cwd: repoA });
+    const byRaw = new Map(result.items.map((it) => [it.raw, it]));
+
+    expect(byRaw.get("src/known.ts")?.status).toBe("present");
+    expect(byRaw.get("cross-project/ops/runbook.md")?.status).toBe("present");
+    expect(byRaw.get("README.md")?.status).toBe("present");
+    expect(byRaw.get("some-random-file.ts")?.status).toBe("unresolvable");
+    expect(byRaw.get("~/.claude/skills/")?.status).toBe("unresolvable");
+    expect(byRaw.get("SiblingRepo/notes.md")?.status).toBe("unresolvable");
+    expect(byRaw.get("process.cwd()")?.status).toBe("unresolvable");
+    expect(byRaw.get("Cache.get()")?.status).toBe("present");
+    expect(byRaw.get("useAuth.restore()")?.status).toBe("unresolvable");
+    // The three noise tokens never became items at all.
+    expect(byRaw.has("[^/]*")).toBe(false);
+    expect(byRaw.has("feat/xspec-297-something")).toBe(false);
+    expect(byRaw.has("AsiaOstrich/EngramGraph")).toBe(false);
   });
 });
