@@ -51,6 +51,46 @@
  *      `moved` to a same-named `restore` it has nothing to do with. That
  *      fallback is gone; see {@link resolveSymbolRef}.
  *
+ * ## Round 3: `missing` needs EVIDENCE it once existed, not just an absence
+ *
+ * Round 2 raised the real accuracy substantially but still fell short of H1
+ * (28% of `missing` were real on the next full run). The remaining false
+ * positives were not new noise shapes to list — the round-2 exclusion list
+ * approach had reached its structural limit. The fix is a rule, not another
+ * exclusion:
+ *
+ * **A reference is only `missing` when this checker can point to evidence it
+ * once existed — a git commit, for a path; a commit that changed the
+ * identifier's occurrence count, for a symbol. No such evidence →
+ * `unresolvable`, however plausible the reference looks.** This makes
+ * `missing`'s accuracy a property of the check's construction, not of how
+ * complete an exclusion list happens to be. See {@link finishNotFoundInGraph}
+ * (paths) and the symbol-evidence branch in {@link resolveSymbolRef}.
+ *
+ * Three smaller, related fixes shipped alongside it:
+ *
+ *   - **URLs** (`scheme://…`) were being extracted as paths (a domain like
+ *     `…workers.dev` ends in what looks like a file extension) — excluded at
+ *     extraction; see {@link looksLikePath}.
+ *   - **Repo-name-prefixed relative paths** (`machine-setup/machines/…`)
+ *     whose first segment names a real but UN-indexed sibling repo now
+ *     resolve one level in and land on the same "sibling repo, not indexed"
+ *     `unresolvable` as before — this already worked when the first segment
+ *     matched an INDEXED root's name; it now also fires for an unindexed one.
+ *   - **Unqualified relative paths that live inside an unindexed sibling**
+ *     (a note says `machines/nb28-mac/README.md`, dropping the
+ *     `machine-setup/` the citing context implied) are found by checking
+ *     every sibling directory of every indexed root for that path, not just
+ *     the one named by the first segment — see {@link siblingRepoContainingPath}.
+ *
+ * Performance: a git call per candidate is what round 2's design implied and
+ * is NOT what round 3 does. Each indexed root's full set of ever-committed
+ * paths is fetched ONCE (`git log --all --name-only`) and cached for the
+ * whole `checkRefs` run; a candidate is checked against that in-memory set,
+ * and only a CONFIRMED hit pays for a second, cheap call to find its last
+ * commit. Symbol pickaxe search (`git log -S`) only runs at all for the
+ * (typically much smaller) set of symbols with zero graph matches.
+ *
  * ## This module ONLY reads: the graph, the filesystem, and `git log`
  *
  * Per the EGR README ("What EngramGraph does not store") and XSPEC-373: this
@@ -181,6 +221,8 @@ const BARE_VERSION_RE = /^v?\d+(\.\d+){1,3}$/;
 const NOISE_CHAR_RE = /[*?[\]^$<>{}|]/;
 /** An explicit path marker: home-relative, `./`/`../`, POSIX-absolute, or a Windows drive letter. Overrides the "needs an extension" rule below — this is what still lets `~/.claude/skills` and `/abs/path` reach resolution (as `unresolvable` when out of scope) instead of being silently dropped at extraction. */
 const PATH_MARKER_RE = /^(~\/|~$|\.\.?\/|\/|[A-Za-z]:[/\\])/;
+/** A URL scheme (`https://…`, `ssh://…`) — never a checkable filesystem path, and a domain's TLD (`…workers.dev`) otherwise looks exactly like a file extension. */
+const URL_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 
 /** Strip a trailing `:<line>` or `:<line>-<line>` from a path-shaped token (DEC-115 OQ-1: the line half is discarded, not verified). */
 function stripLineSuffix(tok: string): string {
@@ -207,6 +249,7 @@ function stripLineSuffix(tok: string): string {
 function looksLikePath(tok: string): boolean {
   if (tok.length === 0 || /\s/.test(tok)) return false;
   if (tok.startsWith("-")) return false; // a CLI flag, e.g. `--json`
+  if (URL_SCHEME_RE.test(tok)) return false; // `https://…` etc — a domain's TLD looks like a file extension
   if (NOISE_CHAR_RE.test(tok) || tok.includes("...")) return false; // glob/regex/placeholder
   if (tok.includes("=")) return false; // `key=value`
   if (tok.includes("@")) return false; // `pkg@ver`, `@scope/pkg@ver`, or an email — never a checkable path
@@ -371,6 +414,37 @@ function siblingRepoExists(roots: string[], firstSeg: string): boolean {
   return false;
 }
 
+/**
+ * DEC-115 H1 round 3: the un-qualified counterpart of {@link siblingRepoExists}.
+ * A citing note often drops the repo-name prefix its own context implied
+ * (`machines/nb28-mac/README.md`, not `machine-setup/machines/nb28-mac/…`),
+ * so this checks whether `relPath` itself exists inside ANY sibling
+ * directory of any indexed root — not just one named by the reference's
+ * first segment. Returns that sibling's directory name, or `undefined`.
+ */
+function siblingRepoContainingPath(roots: string[], relPath: string): string | undefined {
+  const parents = new Set(roots.map((r) => dirname(r)));
+  for (const parent of parents) {
+    let entries: string[];
+    try {
+      entries = readdirSync(parent);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      const dir = join(parent, name);
+      if (roots.includes(dir)) continue; // already an indexed root — handled elsewhere
+      try {
+        if (!statSync(dir).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      if (existsSync(join(dir, relPath))) return name;
+    }
+  }
+  return undefined;
+}
+
 function isUnderRoot(root: string, absPath: string): boolean {
   const withSep = root.endsWith("/") ? root : `${root}/`;
   return absPath === root || absPath.startsWith(withSep);
@@ -383,25 +457,89 @@ function normalizePathToken(raw: string): string {
 type PartialItem = Omit<RefCheckItem, "sourceFile" | "sourceLine">;
 
 /**
+ * Per-`checkRefs`-run cache of each root's full historical path set (DEC-115
+ * H1 round 3). Built fresh in {@link checkRefs} and threaded through — never
+ * module-level, so nothing here persists between runs or leaks across tests
+ * using different fixture repos at coincidentally-reused paths.
+ */
+type HistoryCache = Map<string, Set<string> | "unavailable">;
+
+/**
+ * Every path ANY commit in `repoRoot`'s full history ever touched (added,
+ * modified, deleted, or the source/target of a rename) — one `git log`
+ * call, cached, and then a plain Set membership check per candidate. This is
+ * the batching DEC-115 H1 R3 asks for: checking hundreds of `missing`
+ * candidates against a per-root call each, not a call each.
+ */
+function historyPathSet(repoRoot: string, cache: HistoryCache): Set<string> | "unavailable" {
+  const cached = cache.get(repoRoot);
+  if (cached) return cached;
+  let result: Set<string> | "unavailable";
+  try {
+    const out = execFileSync("git", ["-C", repoRoot, "log", "--all", "--name-only", "--format="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    result = new Set(out.split("\n").map((l) => l.trim()).filter((l) => l.length > 0));
+  } catch {
+    result = "unavailable";
+  }
+  cache.set(repoRoot, result);
+  return result;
+}
+
+/** The most recent commit that touched `relPath` — only called for a CONFIRMED history hit, so this is a small, bounded number of extra calls, not one per candidate. */
+function lastSeenCommit(repoRoot: string, relPath: string): string | null {
+  try {
+    const out = execFileSync("git", ["-C", repoRoot, "log", "--all", "--format=%h", "-1", "--", relPath], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A path/module NOT found in the graph and NOT found on disk (both already
- * checked by the caller): the only thing left to try is a git rename.
+ * checked by the caller). DEC-115 H1 R3's core rule: `missing` requires
+ * EVIDENCE this path once existed, not just its current absence — a rename
+ * (checked first, since that's a stronger, more specific claim) or a plain
+ * appearance anywhere in `gitRoot`'s history. No evidence at all →
+ * `unresolvable`, however plausible the reference looks; DEC-115 H1's own
+ * baseline measured most "looks plausible" `missing` guesses as wrong.
  * `gitRoot` is the repo whose history is searched — best-effort when the
  * reference wasn't clearly root-qualified.
  */
-function finishNotFoundInGraph(base: { kind: "path"; raw: string }, gitRoot: string, relPath: string): PartialItem {
+function finishNotFoundInGraph(base: { kind: "path"; raw: string }, gitRoot: string, relPath: string, cache: HistoryCache): PartialItem {
   const moved = findRenameTarget(gitRoot, relPath);
   if (moved === "unavailable") {
-    return { ...base, status: "missing", reason: "not found in the graph or on disk under the indexed root; git was unavailable so renames were not checked" };
+    return { ...base, status: "missing", reason: "not found in the graph or on disk under the indexed root; git was unavailable so history could not be checked" };
   }
   if (moved) return { ...base, status: "moved", location: moved };
-  return { ...base, status: "missing", reason: "not found in the graph, on disk under the indexed root, or in git rename history" };
+
+  const history = historyPathSet(gitRoot, cache);
+  if (history === "unavailable") {
+    return { ...base, status: "missing", reason: "not found in the graph or on disk under the indexed root; git was unavailable so history could not be checked" };
+  }
+  if (!history.has(relPath)) {
+    return { ...base, status: "unresolvable", reason: "never appears in this indexed root's git history — not enough evidence this was ever a real path here" };
+  }
+  const commit = lastSeenCommit(gitRoot, relPath);
+  return {
+    ...base,
+    status: "missing",
+    reason: commit ? `no longer exists; last appears in git history at commit ${commit}` : "no longer exists; found in git history but its last commit could not be determined",
+  };
 }
 
-/** Graph, then disk, then (as a last resort) git rename — for a reference already resolved to one specific root + relative path. */
-async function resolveRelPathInRoot(conn: GraphConnection, base: { kind: "path"; raw: string }, root: string, relPath: string): Promise<PartialItem> {
+/** Graph, then disk, then (as a last resort) git evidence — for a reference already resolved to one specific root + relative path. */
+async function resolveRelPathInRoot(conn: GraphConnection, base: { kind: "path"; raw: string }, root: string, relPath: string, cache: HistoryCache): Promise<PartialItem> {
   if (await moduleExists(conn, relPath)) return { ...base, status: "present", location: relPath };
   if (existsSync(join(root, relPath))) return { ...base, status: "present", location: relPath };
-  return finishNotFoundInGraph(base, root, relPath);
+  return finishNotFoundInGraph(base, root, relPath, cache);
 }
 
 /**
@@ -436,7 +574,7 @@ async function resolveBareFilename(conn: GraphConnection, normalized: string, ro
   };
 }
 
-async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[], cwd: string): Promise<PartialItem> {
+async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[], cwd: string, cache: HistoryCache): Promise<PartialItem> {
   const base = { kind: "path" as const, raw: ref.raw };
   let normalized = normalizePathToken(ref.raw);
 
@@ -458,7 +596,7 @@ async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[
       return { ...base, status: "unresolvable", reason: "absolute path (or expanded ~) is not under any of this graph's indexed roots" };
     }
     const relPath = toPosixPath(relative(matchingRoot, normalized));
-    return resolveRelPathInRoot(conn, base, matchingRoot, relPath);
+    return resolveRelPathInRoot(conn, base, matchingRoot, relPath, cache);
   }
 
   // Relative reference: try it bare first (the common case — a doc inside
@@ -473,15 +611,20 @@ async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[
   const firstSeg = normalized.split("/")[0]!;
   const matchedRoot = roots.find((r) => basename(r) === firstSeg);
   if (matchedRoot) {
+    // DEC-115 H1 R3 rule 3: first segment names an INDEXED root — resolve
+    // one level in against that root (unchanged from round 2).
     const stripped = normalized.split("/").slice(1).join("/");
-    return resolveRelPathInRoot(conn, base, matchedRoot, stripped);
+    return resolveRelPathInRoot(conn, base, matchedRoot, stripped, cache);
   }
 
   if (roots.length === 0) {
     // No manifest — single-repo mode (DEC-115 D2: no cross-repo advantage to lose here).
-    return finishNotFoundInGraph(base, cwd, normalized);
+    return finishNotFoundInGraph(base, cwd, normalized, cache);
   }
 
+  // DEC-115 H1 R3 rule 3 (continued): first segment names a real but
+  // UN-indexed sibling repo — same "not in scope" answer as an indexed one,
+  // just without anything to resolve one level INTO.
   if (siblingRepoExists(roots, firstSeg)) {
     return {
       ...base,
@@ -490,7 +633,19 @@ async function resolvePathRef(conn: GraphConnection, ref: RawRef, roots: string[
     };
   }
 
-  return finishNotFoundInGraph(base, roots[0]!, normalized);
+  // DEC-115 H1 R3 rule 4: no repo-name prefix at all, but the path exists
+  // inside SOME un-indexed sibling anyway — the citing context likely
+  // implied the repo name and the note dropped it.
+  const siblingHit = siblingRepoContainingPath(roots, normalized);
+  if (siblingHit) {
+    return {
+      ...base,
+      status: "unresolvable",
+      reason: `found on disk inside the "${siblingHit}" repo, which is not one of this graph's indexed roots`,
+    };
+  }
+
+  return finishNotFoundInGraph(base, roots[0]!, normalized, cache);
 }
 
 /** JS/Node built-in namespaces a dotted symbol reference's base might name — never a project symbol, so never worth a graph lookup. */
@@ -501,22 +656,68 @@ const BUILTIN_NAMESPACES: ReadonlySet<string> = new Set([
   "os", "path", "fs", "crypto", "util", "url", "child_process",
 ]);
 
-async function resolveSymbolRef(conn: GraphConnection, ref: RawRef): Promise<PartialItem> {
+/**
+ * DEC-115 H1 R3: the symbol counterpart of {@link finishNotFoundInGraph}'s
+ * evidence rule. `git log -S<name>` (pickaxe) finds the most recent commit
+ * that changed `name`'s literal occurrence count in `root`'s history — a
+ * real definition being added or removed changes that count; a name that
+ * was never there does not. Only called when the graph already has zero
+ * matches, so — unlike path history — this is never batched: the candidate
+ * volume at that point is small (DEC-115 H1's baseline: tens, not hundreds).
+ */
+function symbolEverExisted(roots: string[], cwd: string, name: string): { root: string; commit: string } | null | "unavailable" {
+  const searchRoots = roots.length > 0 ? roots : [cwd];
+  let sawUnavailable = false;
+  for (const root of searchRoots) {
+    try {
+      const out = execFileSync("git", ["-C", root, "log", "--all", "-S", name, "--format=%h", "-1"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      if (out.length > 0) return { root, commit: out };
+    } catch {
+      sawUnavailable = true;
+    }
+  }
+  return sawUnavailable ? "unavailable" : null;
+}
+
+async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: string[], cwd: string): Promise<PartialItem> {
   const base = { kind: "symbol" as const, raw: ref.raw };
   const fullName = ref.raw.replace(/\(.*\)$/s, "");
   const expectedFile = ref.pairedPath ? normalizePathToken(ref.pairedPath) : undefined;
   const matchesExpected = (file: string): boolean =>
     expectedFile != null && (file === expectedFile || file.endsWith(`/${expectedFile}`) || expectedFile.endsWith(`/${file}`));
 
+  // DEC-115 H1 R3: `missing` requires evidence this symbol once existed —
+  // a commit that changed its occurrence count in some indexed root's
+  // history. This REPLACES the round-2 rule ("has an expected file → missing,
+  // else unresolvable"): that heuristic is exactly what let built-ins,
+  // other-language functions in un-indexed repos, and test-framework calls
+  // through as false `missing` whenever they happened to sit next to an
+  // unrelated path citation on the same line. Looked up LAZILY — only when
+  // the graph already found zero matches — both for cost (a `git log -S`
+  // call is not free) and because it is meaningless when the symbol already
+  // resolved.
+  const lookupName = fullName.includes(".") ? fullName.split(".").pop()! : fullName;
+
   const finish = (files: string[]): PartialItem => {
     if (files.length === 0) {
-      if (expectedFile) {
-        return { ...base, status: "missing", reason: `no Function/Class named "${fullName}" was found in the graph` };
+      const evidence = symbolEverExisted(roots, cwd, lookupName);
+      if (evidence === "unavailable") {
+        return { ...base, status: "missing", reason: "no Function/Class with this name was found in the graph; git was unavailable so its history could not be checked" };
+      }
+      if (evidence) {
+        return {
+          ...base,
+          status: "missing",
+          reason: `no longer defined anywhere in the graph; last appears in "${evidence.root}"'s git history at commit ${evidence.commit}`,
+        };
       }
       return {
         ...base,
         status: "unresolvable",
-        reason: "not found in the graph, and no accompanying file reference to confirm this names a symbol in this project (it may be a built-in or external call)",
+        reason: "not found in the graph, and no evidence in any indexed root's git history that this was ever a defined symbol here (it may be a built-in or external call)",
       };
     }
     if (files.length === 1) {
@@ -592,6 +793,9 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
   const files = collectMarkdownFiles(inputPaths);
   const roots = opts.roots ?? readRootsFromManifest(conn.path);
   const cwd = opts.cwd ?? process.cwd();
+  // Fresh per call (DEC-115 H1 R3) — see HistoryCache's doc comment for why
+  // this is never module-level.
+  const historyCache: HistoryCache = new Map();
 
   const items: RefCheckItem[] = [];
   let skippedTokens = 0;
@@ -601,7 +805,8 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
     const { refs, skipped } = extractReferences(text);
     skippedTokens += skipped;
     for (const ref of refs) {
-      const partial = ref.kind === "path" ? await resolvePathRef(conn, ref, roots, cwd) : await resolveSymbolRef(conn, ref);
+      const partial =
+        ref.kind === "path" ? await resolvePathRef(conn, ref, roots, cwd, historyCache) : await resolveSymbolRef(conn, ref, roots, cwd);
       items.push({ ...partial, sourceFile: file, sourceLine: ref.line });
     }
   }

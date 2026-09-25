@@ -63,11 +63,24 @@ function gitRepoWithRename(initFile: string, renamedTo: string): string {
   return root;
 }
 
-/** A git repo with commits that never touch the given path (used for a clean "missing" case). */
+/** A git repo with commits that never touch the given path (used for a clean "no evidence" case). */
 function emptyGitRepo(): string {
   const root = tmpDir("engram-refs-empty-repo-");
   git(root, "init", "-q");
   git(root, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "init", "--allow-empty");
+  return root;
+}
+
+/** A git repo where `path` was committed, then deleted (not renamed) — evidence it once existed, without a git rename record. */
+function gitRepoWithDeletedFile(path: string): string {
+  const root = tmpDir("engram-refs-deleted-repo-");
+  git(root, "init", "-q");
+  mkdirSync(join(root, path.split("/").slice(0, -1).join("/") || "."), { recursive: true });
+  writeFileSync(join(root, path), "// placeholder\n");
+  git(root, "add", "-A");
+  git(root, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "add");
+  git(root, "rm", "-q", path);
+  git(root, "-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-q", "-m", "delete");
   return root;
 }
 
@@ -111,7 +124,11 @@ describe("refs check", () => {
     expect(result.items[0]).toMatchObject({ kind: "path", status: "present", location: "src/a.ts" });
   });
 
-  it("reports a cited path with no graph match and no git rename as missing", async () => {
+  it("reports a path with no graph match and no evidence in git history as unresolvable, not missing (DEC-115 H1 R3)", async () => {
+    // The round-3 rule: a plausible-looking path with NO evidence it ever
+    // existed anywhere in the indexed root's history is `unresolvable`, not
+    // a guessed `missing` — round 2's baseline rerun found most `missing`
+    // guesses this shape were wrong.
     const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
     const repo = emptyGitRepo();
     const notesDir = tmpDir("engram-refs-notes-");
@@ -120,7 +137,21 @@ describe("refs check", () => {
     const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
 
     expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.status).toBe("unresolvable");
+    expect(result.items[0]!.reason).toContain("history");
+  });
+
+  it("reports a path once committed then deleted (no rename) as missing, with the last commit in the reason (DEC-115 H1 R3)", async () => {
+    const repo = gitRepoWithDeletedFile("src/gone.ts");
+    const { conn } = await openFixtureGraph({ nodes: [], edges: [] });
+    const notesDir = tmpDir("engram-refs-notes-");
+    const md = writeMd(notesDir, "note.md", "See `src/gone.ts` for details.\n");
+
+    const result = await checkRefs(conn, [md], { roots: [repo], cwd: repo });
+
+    expect(result.items).toHaveLength(1);
     expect(result.items[0]!.status).toBe("missing");
+    expect(result.items[0]!.reason).toMatch(/commit [0-9a-f]+/);
   });
 
   it("finds a git-renamed plain file (not in the graph at all) via rename detection, not as missing", async () => {
