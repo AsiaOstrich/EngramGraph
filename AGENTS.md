@@ -30,7 +30,12 @@ See `.standards/` for detailed coding standards.
 - Follow the testing pyramid: Unit (70%) > Integration (20%) > E2E (10%)
 
 <!-- UDS:STANDARDS:START -->
-<!-- WARNING: This block is managed by UDS (universal-dev-standards). DO NOT manually edit. Use 'npx uds install' or 'npx uds update' to modify. -->
+<!-- WARNING: This block is managed by UDS (universal-dev-standards). DO NOT manually edit. Use 'npx uds init' or 'npx uds update' to modify. -->
+> **This block is an index, not the standards.** The rules are NOT reproduced here.
+> Before acting on anything below, open the relevant file under `.standards/` and
+> follow its contents. Working from this block alone means working without the
+> standards.
+
 ## Standards Reference
 
 **IMPORTANT**: When performing related tasks, you MUST read and follow the standards in `.standards/`:

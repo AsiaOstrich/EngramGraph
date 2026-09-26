@@ -2,8 +2,8 @@
   "version": "3.4.0",
   "upstream": {
     "repo": "AsiaOstrich/universal-dev-standards",
-    "version": "6.7.5",
-    "installed": "2026-08-18"
+    "version": "6.12.0",
+    "installed": "2026-09-26"
   },
   "format": "ai",
   "contentMode": "minimal",
@@ -129,9 +129,9 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/commit-message.ai.yaml": {
-      "hash": "sha256:7c26854080c017828f2060788aa235c342f9a1f7a8ebc8d28a0533fa634fc2b8",
-      "size": 3943,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:d2674b92b4c6f23ac30820f047b7ae87406dea3c5592613698d517cd5c7865e6",
+      "size": 4188,
+      "installedAt": "2026-09-26T15:21:19.613Z"
     },
     ".standards/options/english.ai.yaml": {
       "hash": "sha256:2c1f53cf847a8b874efa95e678a61744e25491cc491108e40ad2898dd9074ce8",
@@ -164,14 +164,14 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/spec-driven-development.ai.yaml": {
-      "hash": "sha256:626b1ae7510b0111041c4aa865576aec5e739e374d2dd4dcee2273e18db59871",
-      "size": 8636,
-      "installedAt": "2026-08-17T02:55:12.371Z"
+      "hash": "sha256:fb449c673fdfc821b07592c4b3fad794be6253b77cc01df9c755f0f37c3aebf1",
+      "size": 9216,
+      "installedAt": "2026-09-26T15:21:19.614Z"
     },
     ".standards/code-review.ai.yaml": {
-      "hash": "sha256:35ab2486a6ecf63581281f84611d508edadfb3f86e698af7ce84d9dc6dc9afd4",
-      "size": 4663,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:cff4618c462b89b0215db58ae3feeb514afb715421be689277377387e5b26bff",
+      "size": 5199,
+      "installedAt": "2026-09-26T15:21:19.613Z"
     },
     ".standards/git-workflow.ai.yaml": {
       "hash": "sha256:a8587127cf1e4be81a165642edb79770cec1f83a02adc2fd4f16441a47bd7b2f",
@@ -259,9 +259,9 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/ai-instruction-standards.ai.yaml": {
-      "hash": "sha256:0c3ec46a6f534f1307070727dfde241f2043d5caee5776bece9693f9e65385f3",
-      "size": 18724,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:13994c5dab1c4a3669d3e0ad303ffcfc40c095b9ca6ae89e73289e3d6681e363",
+      "size": 18824,
+      "installedAt": "2026-09-26T15:21:19.612Z"
     },
     ".standards/project-structure.ai.yaml": {
       "hash": "sha256:8454cc82c289edfbfad502d5ffef6a917d143040ac196f9b38ad6c166b75e009",
@@ -274,9 +274,9 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/logging.ai.yaml": {
-      "hash": "sha256:e2988886f16165ed97128f9d12c5ac633e3c7a0307491b0c1eebb1761aff155f",
-      "size": 10057,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:a810255de2ae168555aab65bb53ab92f0f93689ccf5c10bc13be5dc08077a1ee",
+      "size": 10059,
+      "installedAt": "2026-09-26T15:21:19.613Z"
     },
     ".standards/test-completeness-dimensions.ai.yaml": {
       "hash": "sha256:7b513c2030a9421ed7d4902fcac4ea6adb61f62907d5dc5d6aa67fe0cc07dfbc",
@@ -319,9 +319,9 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/reverse-engineering-standards.ai.yaml": {
-      "hash": "sha256:317ddb7a27834a03a34cfb0ef0f5fb0fabf574b3028eeaf2fbe405f17eb9e381",
-      "size": 13390,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:9ee4b24999c9ac0697806c9542759573f04be1376479b85823f2f9d69ddae2f2",
+      "size": 18906,
+      "installedAt": "2026-09-26T15:21:19.614Z"
     },
     ".standards/forward-derivation-standards.ai.yaml": {
       "hash": "sha256:e58eb9f02ed9e4eddf96e3e2a28c56fe2167701e18911662471b85799649ccf5",
@@ -359,9 +359,9 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/security-standards.ai.yaml": {
-      "hash": "sha256:4dc6d4418f609f1c1752e566e80e813a7e628d753b88b13d1040188375be0ad2",
-      "size": 5515,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:6000bb96136ee85f2003adb084a5bceb4e6ab6f3d00590abdf656e5e260dfc66",
+      "size": 5517,
+      "installedAt": "2026-09-26T15:21:19.614Z"
     },
     ".standards/performance-standards.ai.yaml": {
       "hash": "sha256:878cd7894ab01e42dee04ea3d6118d008497f07a1f8a6e07bdabd5235a788987",
@@ -409,9 +409,9 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/acceptance-criteria-traceability.ai.yaml": {
-      "hash": "sha256:47c35486797a36b6344e2d1d13b520d5dc42ee8aa266c1cb418c68166048f654",
-      "size": 11285,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:a69e9083423ecf0d63f25364ed88665c40a6f76322aac6579acb55e6b1eb32bf",
+      "size": 11846,
+      "installedAt": "2026-09-26T15:21:19.612Z"
     },
     ".standards/feature-manifest-standard.ai.yaml": {
       "hash": "sha256:5ef21f24a37dc59dc6e482d884a87a62f6765594767bbaaf5ab2569e03a7a6f1",
@@ -429,9 +429,9 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/feature-discovery-standards.ai.yaml": {
-      "hash": "sha256:d82b428a3e77a1e539d1c54d4eb17ba04181c06c7b4427b00938cee6952e032c",
-      "size": 23572,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:48eda173f5853671a2e28d5e70c657cac8449213fc073af9786a80f6faaea49d",
+      "size": 24149,
+      "installedAt": "2026-09-26T15:21:19.613Z"
     },
     ".standards/systematic-debugging.ai.yaml": {
       "hash": "sha256:2584b82b62c4d8f18c8fa19eb109b146dcf095eeca9862e210305e9a6a47a98b",
@@ -454,23 +454,18 @@
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/adr-standards.ai.yaml": {
-      "hash": "sha256:fdf2ada3dd8779f2af38805f5c487199d6398032d0c102058f1157a201e1de64",
-      "size": 3606,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:de6af0ad19c891e05e9b83d63a72926f2a06f834a12dc4e4e5df700e3b4eaef5",
+      "size": 4173,
+      "installedAt": "2026-09-26T15:21:19.612Z"
     },
     ".standards/retrospective-standards.ai.yaml": {
-      "hash": "sha256:cdc8fd831050f50a6cc3031cf83b61d02d2c7abc7c3bb53fbefbc504f41f14e2",
-      "size": 1471,
-      "installedAt": "2026-08-14T14:18:39.656Z"
+      "hash": "sha256:c7509262aa3b2688c063d43929ce83d433ae5dd88c084eb253f129405aed5ac3",
+      "size": 2047,
+      "installedAt": "2026-09-26T15:21:19.614Z"
     },
     ".standards/push-standards.ai.yaml": {
       "hash": "sha256:8434f0a68d41f373c6639013af33848f12a292319bd3c6dc14c259ab4e994f4f",
       "size": 4366,
-      "installedAt": "2026-08-14T14:18:39.656Z"
-    },
-    "AGENTS.md": {
-      "hash": "sha256:c422d1edaa6f05b53d090b258803307b877616363df1df198965058a5ac258fd",
-      "size": 4480,
       "installedAt": "2026-08-14T14:18:39.656Z"
     },
     ".standards/class-level-fix.ai.yaml": {
@@ -488,10 +483,14 @@
   "commandHashes": {},
   "integrationBlockHashes": {
     "AGENTS.md": {
-      "blockHash": "sha256:d56fa237a80850beb48bcc133bad53cb6ffcf656bec9d2baa3566f8f922c1ba1",
-      "blockSize": 3455,
-      "fullHash": "sha256:c422d1edaa6f05b53d090b258803307b877616363df1df198965058a5ac258fd",
-      "fullSize": 4480
+      "blockHash": "sha256:491c57519adbfe8ce0692761f38ef4e044e281ee2e143b61bdaad038dbadc6a6",
+      "blockSize": 3711,
+      "fullHash": "sha256:53dd410f5ad533ca08e6e4cb838e32f02bb69d1611090977951646a1f363eece",
+      "fullSize": 4736
     }
+  },
+  "provenance": {
+    "schema": 1,
+    "files": {}
   }
 }
