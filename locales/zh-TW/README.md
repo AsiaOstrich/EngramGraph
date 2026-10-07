@@ -209,6 +209,8 @@ package.json 裡（先前修復時加的）那個 `overrides` 對你沒有幫助
 ```bash
 # 1. 將 repo 索引進圖譜（程式碼 + 可選文件）
 egr index ./src --docs
+#    用 glob 讓某些路徑不進索引（可重複）：備份、產生的程式碼、封存
+egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 
 # 2.「改這個函式會牽動什麼？」
 egr callers myFunction --depth 2
@@ -268,6 +270,10 @@ EngramGraph 內附一個 MCP server（stdio），暴露 12 個工具——程式
 # Claude Code，使用已安裝的套件：
 claude mcp add egr -- npx egr-mcp
 ```
+
+server 只在查詢進行的期間握著圖，不是編輯器開多久就握多久——所以 `egr index`、`egr feedback`、
+`egr god-nodes` 與其他終端機指令能和它並行（Windows 也是），下一次查詢就看得到它們寫的結果。
+查詢中途碰到寫入者時會稍等再說「圖正忙」，不會拿一個沒能查到的空結果回答。
 
 完整設定（Claude Code / Codex / Cursor / Windsurf）、全部 12 個工具及其標註、與範例流程：
 **[docs/MCP.md](./docs/MCP.md)**。

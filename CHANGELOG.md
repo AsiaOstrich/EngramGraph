@@ -4,6 +4,39 @@ All notable changes to `engramgraph` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+*Fixes for the five problems in the 0.12.0 Windows 11 report (XSPEC-457). Two of them change exit codes — read "Changed" before upgrading a script.*
+
+**A running MCP server no longer stands between a terminal and the graph.**
+
+The 0.12.0 entry below says that with the MCP server running, "a full `egr index` all work[s]". It did not, on any platform. The engine takes its lock when the file is **opened**, not when something is written, so a server that held the graph read-only for as long as the editor was open refused every writer for that whole time: `egr index`, `egr feedback`, `egr god-nodes`, `egr communities` and `egr related` all exited 1 with `Could not set lock on file` (reproduced on macOS, reported on Windows 11). Only read-only terminal queries ran alongside it.
+
+### Fixed
+
+- **MCP opens the graph per query, read-only, and closes it** (R1). Nothing is held between queries, so every terminal command works while the server is running, on every platform, and the server's next query sees what the command wrote — no restart. Overlapping tool calls share one open (eight overlapping opens of one file in a process died with `Mmap … failed`). A query that meets a writer retries for about 5 s (`ENGRAM_LOCK_WAIT_MS`) and then answers *"the graph … is being written by another process … this is not an empty result"* — never an empty result. Cost: one open and close per tool call, measured at 21 ms against 1.4 ms on a small graph and 49 ms against 24 ms on a 2,300-function graph.
+- **A write command leaves nothing for the next open to replay** (R1). `egr index` and the other commands that open the graph for writing now checkpoint before exiting. The write-ahead log used to stay behind and be replayed on every open: with per-query opens that was 245 ms per query on a 4 MB log, against 49 ms once folded.
+- **The MCP refusal for `index_code` / `index_docs` / `ingest_feedback` / `related` works on every platform** (R1): it names the terminal command and says that command works while the server is running, which is now true.
+- **`related` no longer swallows the failure of its first write** (R2). A bare `catch` around dropping the previous projection hid any error that was not "no such projection".
+- **`egr doctor` says whether *this machine* needs network** (R3), from where the ALGO extension would actually come from (`algo.source`: the platform package, ryugraph's cache, a download, or undetermined), not from a fixed list that named `god-nodes`, `communities` and `related` on machines where all three worked offline. Where it cannot tell, it says so.
+- **`egr callers X` for an `X` the graph does not contain says so** (R4) instead of printing `(none)` — the same words as a real function nobody calls. The same for `callees`, `impact`, and MCP `call_chain` / `impact_analysis`. MCP `call_chain` results now carry `symbolFound: true`.
+- **`egr index --exclude <glob>`** (R5), repeatable. A project root holding `.uds-backup-*` directories had every backup document counted into `--docs`. The summary reports how many files and paths the patterns kept out, and says `nothing matched` for a pattern that matched nothing. See `egr --help` and `docs/CLI.md` for the pattern language.
+
+### Changed
+
+- **Exit codes (R2, R4) — these were `0` and are now `1`:**
+  - `egr callers <symbol>` and `egr callees <symbol>` for a symbol the graph does not contain (was: `(none)`, exit 0);
+  - `egr impact <spec-id>` for a spec id the graph has not seen (was: `(none)`, exit 0);
+  - `egr implementers <spec-id>` for a spec id the graph has not seen (was: a message, exit 0);
+  - `egr implemented-by <path>` for a path that matches no indexed module, or several (was: a message, exit 0);
+  - `egr feedback <type> <id>` for a node that is not there (was: `node not found`, exit 0);
+  - `egr related <id>` for an id that is not in the graph (was: `(none)`, exit 0).
+  
+  `(none)` with exit `0` now always means "it is in the graph and has no results". With `--json` these cases print nothing on stdout and the error on stderr, like `egr top BogusLabel`. A script that relied on exit `0` for a missing name must handle `1`.
+- **A write command's own lock failure now ends in exit 1 even when it had nothing to write** (R2): after its work, a command that opened the graph for writing checkpoints, which forces the lock to be taken and used. The lock error now also says who may hold it.
+- MCP `doctor` / `egr doctor --json` gain `networkStatus` and `algo`; `networkCommands` is empty when nothing needs a download.
+- The MCP server no longer requires the graph to exist at startup; each query says "No graph at …" until `egr index` has run.
+
 ## [0.12.0] — 2026-09-18
 
 *Release candidates rc.1–rc.5 shipped on npm `next` between 2026-08-11 and 2026-09-18; entries below marked (rc.N) arrived in that candidate. Verified on Windows by `.github/workflows/windows-release-verify.yml` — hosted Windows, no C++ toolchain, the ALGO download host blocked.*

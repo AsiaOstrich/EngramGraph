@@ -53,11 +53,24 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
 - `--clean`: drop the graph's data before indexing. Indexing is otherwise an
   upsert (MERGE) that never deletes, so a node removed from the code lingers;
   `--clean` rebuilds from scratch to prune it.
+- `--exclude <glob>` (repeatable): keep matching paths out of the index, for
+  code and for `--docs` alike. It exists because the skip list above is fixed
+  and `.gitignore` is not read — a project root that holds `.uds-backup-*`
+  directories would otherwise count every backup document. The summary always
+  says what it kept out (`excluded: N file(s) in M path(s) matched --exclude …`),
+  including `nothing matched` when a pattern is mistyped. Patterns are matched
+  against the path relative to `<dir>`, `/`-separated on every OS: `*` any
+  characters except `/`, `**` any characters including `/`, `?` one character,
+  `{a,b}` either, `[abc]` one of. A pattern with no `/` matches an entry's name
+  at any depth (`.uds-backup-*`); one with a `/` is anchored at `<dir>`
+  (`docs/archive/**`); a trailing `/` means directories only. Excluding a
+  directory excludes everything under it.
 
 ```bash
 egr index ./src
 egr index . --docs
 egr index ./src --clean   # rebuild, pruning deleted nodes
+egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 ```
 
 Output counts: `files`, `functions`, `classes`, `calls`, plus `ambiguous`
@@ -153,6 +166,11 @@ Functions that (transitively, up to `--depth`, default 1) call `<symbol>`.
 egr callers callChain --depth 2
 ```
 
+A symbol the graph does not contain is an **error** — exit `1`, `no function
+named "X" is in the graph`, with near names when there are any — not `(none)`.
+`(none)` with exit `0` means the function is in the graph and nothing calls it.
+(Through 0.12.0 both printed `(none)` and exited `0`.)
+
 ### `callees <symbol> [--depth N]`
 
 Functions that `<symbol>` (transitively, up to `--depth`, default 1) calls.
@@ -194,7 +212,8 @@ egr feedback test_fail "src/api/server.ts#createServer"
 egr feedback human_fix ADR-002 --label Decision
 ```
 
-Prints `before → after`, or "node not found" if the id/label miss.
+Prints `before → after`. An id/label the graph does not contain is an error
+(exit `1`, `no Function node with id "X" is in the graph`).
 
 ### `top <label> [--limit N]`
 
@@ -262,8 +281,18 @@ egr doctor --json
 
 Reports the egr/Node version and platform, the graph DB path, every language
 with whether its native module loaded (and the reason if it did not), which
-native dependencies this platform had to compile from source, which commands
-need network access, and the MCP registration command.
+native dependencies this platform had to compile from source, whether any
+command will need network access **on this machine**, and the MCP registration
+command.
+
+The network line is worked out from what is on disk, not from a fixed list.
+`god-nodes`, `communities` and `related` need ryugraph's ALGO extension; it
+normally comes from the `@asiaostrich/engramgraph-algo-<platform>` package that
+`npm install` brings with `engramgraph`, and is loaded by path with no download.
+`doctor --json` has `algo.source` (`bundled-package` | `user-cache` | `download`
+| `undetermined`), `networkStatus` (`none` | `needed` | `undetermined`) and
+`networkCommands` (empty unless a download is needed). On a platform where it
+cannot tell, it says so rather than guessing.
 
 It does not open the graph, so it still answers when the graph is missing or
 unreadable — which is when people run it.
@@ -310,9 +339,11 @@ different branches share the same graph. Three ways to isolate:
    gets its own `./.engram/graph.db` — zero flags, the cleanest isolation when
    branches map to long-lived separate projects.
 
-> **MCP caveat**: the MCP server binds to one graph at startup (it logs the path
-> to stderr). It does **not** follow a later `git checkout` — reconnect/restart
-> the server (or launch it with `--graph` / `ENGRAM_ISOLATION`) to switch.
+> **MCP caveat**: the MCP server binds to one graph path at startup (it logs the
+> path to stderr). It does **not** follow a later `git checkout` — reconnect/restart
+> the server (or launch it with `--graph` / `ENGRAM_ISOLATION`) to switch. It does
+> not hold the graph open between queries, so `egr index` and the other terminal
+> commands work while it is running (see [MCP.md](./MCP.md)).
 
 ## CI example
 
@@ -326,4 +357,9 @@ egr callers paymentGateway --depth 3 --json > callers.json
 ## Exit codes
 
 `0` on success; `1` on error (the message is written to stderr as
-`egr: <message>`).
+`egr: <message>`). Errors include a graph that another process holds locked and
+an input the graph does not contain — a symbol (`callers`, `callees`), a spec id
+(`impact`, `implementers`), a node id (`feedback`, `related`) or a module path
+(`implemented-by`). Through 0.12.0 several of these printed a message and exited
+`0`; scripts that relied on that must now handle exit `1`. `(none)` with exit `0`
+always means "it is in the graph and has no results".

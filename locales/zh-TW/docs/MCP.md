@@ -85,13 +85,26 @@ command/args/env 都一樣：
 
 每個工具都回傳一個 JSON 文字內容區塊；失敗時回傳 `error: <message>` 並帶 `isError: true`。
 
+有兩種失敗是「答案」而不是當機，而且都不會被當成空結果回傳：
+
+- **圖裡沒有這個名字。** 對圖裡沒有的函式呼叫 `call_chain`、對沒見過的 spec id 呼叫 `impact_analysis`，
+  回傳錯誤（`no function named "X" is in the graph — this is not the same as "nothing calls it"`），
+  有相近名稱時一併列出。在圖裡但沒有呼叫者的函式，回傳 `callers: []` 並帶 `symbolFound: true`。
+- **另一個行程正在寫圖。** 查詢會重試約 5 秒（可用 `ENGRAM_LOCK_WAIT_MS` 調整），然後回傳
+  `the graph … is being written by another process … This is not an empty result`。
+
 ### 透過 stdio 被拒絕的工具，以及原因
 
-stdio server 把圖**唯讀**開啟。這個引擎是單一寫入者，而 server 是長生命的——它跟你的
-編輯器開多久就活多久。如果它握有寫入控制代碼，你在終端機同時執行的任何 `egr`
-指令都會跟它搶，而這個引擎上兩個寫入者不是單純拒絕輸的那個，是**把資料庫毀掉**。
+stdio server 只在**一次查詢的期間**把圖**唯讀**開啟，查完就關。這個引擎是單一寫入者，而 server 是
+長生命的——它跟你的編輯器開多久就活多久。如果它握有寫入控制代碼，你在終端機同時執行的任何 `egr`
+指令都會跟它搶，而這個引擎上兩個寫入者不是單純拒絕輸的那個，是**把資料庫毀掉**。如果它在查詢之間握著
+唯讀控制代碼，一樣會擋住那些指令：引擎在開檔時就上鎖，任何平台都一樣。（0.12.0 就是這樣；在
+Windows 11 上，編輯器開著的整段時間裡 `egr index`、`egr feedback`、`egr god-nodes`、`egr related`
+都會失敗。）
 
-所以這裡有四個工具被拒絕，每個都會指名該改跑哪個指令：
+所以 server 在查詢之間什麼都不握——每次工具呼叫付出一次開與關（小圖約 20 ms），終端機指令只會碰到
+「此刻正在跑」的那一次查詢；同時重疊的工具呼叫共用同一次開啟。有四個工具在這裡被拒絕，每個都會指名該改跑
+哪個指令——而那個指令在 server 執行時就能用：
 
 | 工具 | 改跑 |
 |------|------|
@@ -100,7 +113,8 @@ stdio server 把圖**唯讀**開啟。這個引擎是單一寫入者，而 serve
 | `ingest_feedback` | `egr feedback <type> <node-id>` |
 | `related` | `egr related <seed-id>` |
 
-server 會在下一次查詢時看到結果——不需要重新啟動。
+server 會在下一次查詢時看到結果——不需要重新啟動。在第一次 `egr index` 之前就啟動的 server，每次查詢都會回答
+「No graph at …」，圖一出現就開始正常運作。
 
 ### 工具標註（DEC-115 L2）
 

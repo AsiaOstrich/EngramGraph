@@ -349,6 +349,12 @@ Every tool declares MCP annotations (`readOnlyHint`/`destructiveHint`/
 claude mcp add egr -- npx egr-mcp
 ```
 
+The server holds the graph only while a query is running, not for as long as
+your editor is open — so `egr index`, `egr feedback`, `egr god-nodes` and the
+other terminal commands work alongside it, on Windows too, and the next query
+sees what they wrote. A query that meets a writer mid-way waits briefly and then
+says the graph is busy; it never answers with an empty result it could not look up.
+
 Full setup (Claude Code / Codex / Cursor / Windsurf), all 12 tools with their
 annotations, and an example flow: **[docs/MCP.md](./docs/MCP.md)**.
 

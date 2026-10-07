@@ -80,15 +80,35 @@ the command/args/env are the same:
 Every tool returns a text content block of JSON; on failure it returns
 `error: <message>` with `isError: true`.
 
+Two failures are answers, not crashes, and neither is ever returned as an empty
+result:
+
+- **The name is not in the graph.** `call_chain` for a function the graph does
+  not contain, and `impact_analysis` for a spec id it has not seen, return an
+  error (`no function named "X" is in the graph — this is not the same as
+  "nothing calls it"`), with near names when there are any. A function that is
+  in the graph and has no callers returns `callers: []` with `symbolFound: true`.
+- **Another process is writing the graph.** The query retries for about 5 s
+  (`ENGRAM_LOCK_WAIT_MS` changes it) and then returns `the graph … is being
+  written by another process … This is not an empty result`.
+
 ### Tools refused over stdio, and why
 
-The stdio server holds the graph **read-only**. The engine is single-writer,
-and the server is long-lived — it is open for as long as your editor is. If it
-held a write handle, every `egr` command you ran in a terminal meanwhile would
-contend with it, and two writers on this engine do not merely refuse the loser:
-they corrupt the database.
+The stdio server opens the graph **read-only, for the length of one query**, and
+closes it again. The engine is single-writer, and the server is long-lived — it
+is open for as long as your editor is. If it held a write handle, every `egr`
+command you ran in a terminal meanwhile would contend with it, and two writers
+on this engine do not merely refuse the loser: they corrupt the database. If it
+held a read handle between queries, it would still refuse those commands: the
+engine takes its lock when the file is opened, on every platform. (That is what
+0.12.0 did, and on Windows 11 it made `egr index`, `egr feedback`,
+`egr god-nodes` and `egr related` fail for as long as the editor was open.)
 
-So four tools are refused here, each naming the command that does the job:
+So the server holds nothing between queries — each tool call costs one open and
+close, about 20 ms on a small graph, and a terminal command only ever meets a
+query that is running right now. Overlapping tool calls share one open. Four
+tools are refused here, each naming the command that does the job — and that
+command works while the server is running:
 
 | Tool | Run instead |
 |------|-------------|
@@ -97,7 +117,9 @@ So four tools are refused here, each naming the command that does the job:
 | `ingest_feedback` | `egr feedback <type> <node-id>` |
 | `related` | `egr related <seed-id>` |
 
-The server sees the result on its next query — no restart needed.
+The server sees the result on its next query — no restart needed. A server
+started before the first `egr index` answers each query with "No graph at …" and
+begins to work as soon as the graph exists.
 
 ### Tool annotations (DEC-115 L2)
 

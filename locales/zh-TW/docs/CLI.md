@@ -56,11 +56,19 @@ egr <command> [args] [options]
   （例如 `packages/`）會和其他目錄一樣被索引。
 - `--clean`：索引前先清空圖譜資料。索引本是 upsert（MERGE）從不刪除，程式裡被移除的節點
   會殘留；`--clean` 從頭重建以清掉它。
+- `--exclude <glob>`（可重複）：讓符合的路徑不進索引，程式碼與 `--docs` 都適用。上面的略過清單是固定的、
+  而且**不讀** `.gitignore`——專案根目錄若放著 `.uds-backup-*` 備份目錄，每一份備份文件都會被算進去，
+  所以才有這個旗標。摘要一定會說它擋掉了什麼（`excluded: N file(s) in M path(s) matched --exclude …`），
+  樣式打錯、什麼都沒比對到時會寫 `nothing matched`。樣式比對的是相對於 `<dir>` 的路徑，任何作業系統
+  都用 `/` 分隔：`*` 為除 `/` 外的任意字元、`**` 為含 `/` 的任意字元、`?` 一個字元、`{a,b}` 二選一、
+  `[abc]` 其中之一。沒有 `/` 的樣式比對任何深度的項目**名稱**（`.uds-backup-*`）；含 `/` 的樣式從 `<dir>`
+  起算（`docs/archive/**`）；結尾 `/` 表示只比對目錄。排除一個目錄就排除它底下的全部。
 
 ```bash
 egr index ./src
 egr index . --docs
 egr index ./src --clean   # 重建，清掉已刪除的節點
+egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 ```
 
 輸出計數：`files`、`functions`、`classes`、`calls`，以及 `ambiguous`（被呼叫名稱比對到
@@ -144,6 +152,10 @@ egr index . --scip index.scip
 egr callers callChain --depth 2
 ```
 
+圖裡沒有的符號是**錯誤**——結束碼 `1`，訊息 `no function named "X" is in the graph`（有相近名稱時一併列出），
+不是 `(none)`。結束碼 `0` 的 `(none)` 代表：這個函式在圖裡，只是沒有人呼叫它。
+（到 0.12.0 為止，兩者都印 `(none)` 並以 `0` 結束。）
+
 ### `callees <symbol> [--depth N]`
 
 `<symbol>`（可遞移，最多到 `--depth`，預設 1）所呼叫的函式。
@@ -181,7 +193,7 @@ egr feedback test_fail "src/api/server.ts#createServer"
 egr feedback human_fix ADR-002 --label Decision
 ```
 
-印出 `before → after`，若 id/label 沒命中則印 "node not found"。
+印出 `before → after`。圖裡沒有的 id/label 是錯誤（結束碼 `1`，`no Function node with id "X" is in the graph`）。
 
 ### `top <label> [--limit N]`
 
@@ -238,7 +250,14 @@ egr doctor --json
 ```
 
 回報 egr／Node 版本與平台、圖譜 DB 路徑、每個語言的原生模組是否載入成功（失敗則附原因）、
-這個平台有哪些原生相依必須從原始碼編譯、哪些指令需要連外，以及 MCP 的註冊指令。
+這個平台有哪些原生相依必須從原始碼編譯、**這台機器上**是否有指令需要連外，以及 MCP 的註冊指令。
+
+連外那一行是看磁碟上實際有什麼算出來的，不是一份固定清單。`god-nodes`、`communities`、`related`
+需要 ryugraph 的 ALGO 擴充；它通常來自 `npm install` 隨 `engramgraph` 一起裝進來的
+`@asiaostrich/engramgraph-algo-<platform>` 套件，以路徑載入，不下載。`doctor --json` 帶有
+`algo.source`（`bundled-package`｜`user-cache`｜`download`｜`undetermined`）、
+`networkStatus`（`none`｜`needed`｜`undetermined`）與 `networkCommands`（除非需要下載，否則為空）。
+判不出來的平台它會明說，不會猜。
 
 它不會開啟圖譜，所以在圖譜遺失或無法讀取時仍然答得出來——而那正是人們會跑它的時候。
 
@@ -276,8 +295,9 @@ egr mcp
 3. **`git worktree`**：每個分支各自 checkout 到獨立目錄，天然各有 `./.engram/graph.db`——
    零旗標、最乾淨,當分支對應長期獨立專案時最合適。
 
-> **MCP 注意**：MCP server 在啟動時綁定一張圖（路徑記到 stderr），**不會**跟著之後的
+> **MCP 注意**：MCP server 在啟動時綁定一張圖的路徑（記到 stderr），**不會**跟著之後的
 > `git checkout`——要切換需重連/重啟 server（或啟動時帶 `--graph` / `ENGRAM_ISOLATION`）。
+> 它在查詢之間不握著圖，所以 server 執行時 `egr index` 與其他終端機指令都能用（見 [MCP.md](./MCP.md)）。
 
 ## CI 範例
 
@@ -290,4 +310,7 @@ egr callers paymentGateway --depth 3 --json > callers.json
 
 ## 結束碼
 
-成功為 `0`；錯誤為 `1`（訊息以 `egr: <message>` 寫到 stderr）。
+成功為 `0`；錯誤為 `1`（訊息以 `egr: <message>` 寫到 stderr）。錯誤包括：圖被另一個行程鎖住，以及
+圖裡沒有的輸入——符號（`callers`、`callees`）、spec id（`impact`、`implementers`）、節點 id
+（`feedback`、`related`）或模組路徑（`implemented-by`）。到 0.12.0 為止，其中好幾個會印一行訊息然後以 `0`
+結束；依賴那個行為的腳本現在必須處理結束碼 `1`。結束碼 `0` 的 `(none)` 永遠代表「它在圖裡，只是沒有結果」。
