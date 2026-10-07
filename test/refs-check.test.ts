@@ -46,8 +46,27 @@ function writeMd(dir: string, name: string, content: string): string {
   return p;
 }
 
+/**
+ * The environment a fixture's git commands run in: this process's, minus every
+ * variable git itself exports to a hook (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE,
+ * ...). Git's own list is asked for rather than typed out.
+ *
+ * Why this matters: when this suite runs inside a pre-commit hook from a linked
+ * worktree, those variables name the REAL repository. Left in, every `git init`,
+ * `add` and `commit` below acts on it — on 2026-10-07 one hook run put 76 fixture
+ * commits ("add", "rename", "delete"...) on a feature branch and flipped the shared
+ * repository's `core.bare` to true, so the main checkout stopped answering `git status`.
+ * test/branch-isolation.test.ts has scrubbed these from the start; this file had not.
+ */
+function cleanGitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const names = execFileSync("git", ["rev-parse", "--local-env-vars"], { encoding: "utf8", env: process.env }).split("\n");
+  for (const name of names) if (name.trim()) delete env[name.trim()];
+  return env;
+}
+
 function git(cwd: string, ...args: string[]): void {
-  execFileSync("git", args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
+  execFileSync("git", args, { cwd, stdio: ["ignore", "ignore", "ignore"], env: cleanGitEnv() });
 }
 
 /** A minimal real git repo: `initFile` committed, then renamed to `renamedTo` in a second commit. */
