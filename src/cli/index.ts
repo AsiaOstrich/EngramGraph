@@ -244,11 +244,14 @@ async function main(): Promise<void> {
           "Setup steps: https://github.com/AsiaOstrich/EngramGraph#native-dependencies-and-platform-support",
         );
       }
-      lines.push(
-        "",
-        `needs network: ${t.networkCommands.join(", ")} (every other command works offline)`,
-        "connect an assistant: claude mcp add egr -- npx egr-mcp",
-      );
+      // Said from what this machine actually has (XSPEC-457 R3), not from a fixed list.
+      const network =
+        t.networkStatus === "none"
+          ? `needs network: none — ${t.algo.detail}`
+          : t.networkStatus === "needed"
+            ? `needs network: ${t.networkCommands.join(", ")} — ${t.algo.detail} (every other command works offline)`
+            : `needs network: cannot be determined — ${t.algo.detail}. ${t.networkCommands.join(", ")} are the commands affected.`;
+      lines.push("", network, "connect an assistant: claude mcp add egr -- npx egr-mcp");
       return lines.join("\n");
     });
     return;

@@ -48,6 +48,7 @@ import {
 } from "../code-graph/parse-manifest.js";
 import { walkFiles, summarizeUnindexed, type UnindexedSummary } from "./walk.js";
 import { checkRefs, type RefCheckResult } from "./refs-check.js";
+import { ALGO_BACKED_COMMAND_LIST, describeAlgoSource, type AlgoSource } from "../structural-memory/algo-extension.js";
 import { unavailableGrammars } from "../code-graph/grammar-registry.js";
 import { GRAMMARS, compiledFromSourceOn, currentPlatform } from "../../language-support.js";
 import type { SupportedLanguage } from "../code-graph/types.js";
@@ -748,11 +749,23 @@ export interface DoctorResult {
   unavailable: number;
   /** Native dependencies with no prebuilt binary for this platform. */
   compiledFromSource: Array<{ package: string; kind: string; languages: string[] }>;
-  /** Commands that need network access; everything else works offline. */
+  /**
+   * Commands that will need network access on THIS machine; everything else
+   * works offline. Empty when the ALGO extension is already local (XSPEC-457 R3).
+   * Meaningful only when `networkStatus` is "needed" — see there.
+   */
   networkCommands: string[];
+  /**
+   * `none`: nothing here reaches the network. `needed`: `networkCommands` will
+   * download on first use. `undetermined`: cannot be told from this machine
+   * (the commands are still listed in `networkCommands` as the ones affected).
+   */
+  networkStatus: "none" | "needed" | "undetermined";
+  /** Where the ALGO extension (god-nodes, communities, related) comes from on this machine. */
+  algo: AlgoSource;
 }
 
-export function cmdDoctor(dbPath: string): DoctorResult {
+export function cmdDoctor(dbPath: string, algoDeps?: Parameters<typeof describeAlgoSource>[0]): DoctorResult {
   const unavailable = new Map(
     unavailableGrammars().map((g) => [g.language, g]),
   );
@@ -771,6 +784,11 @@ export function cmdDoctor(dbPath: string): DoctorResult {
     };
   });
 
+  // Read the same resolver the three commands use, instead of restating a list
+  // (XSPEC-457 R3): the list said "needs network" on machines where it never did.
+  const algo = describeAlgoSource(algoDeps);
+  const local = algo.source === "bundled-package" || algo.source === "user-cache";
+
   return {
     egrVersion: EGR_VERSION,
     node: process.version,
@@ -784,7 +802,9 @@ export function cmdDoctor(dbPath: string): DoctorResult {
       kind: d.kind,
       languages: d.languages,
     })),
-    networkCommands: ["god-nodes", "communities", "related"],
+    networkCommands: local ? [] : [...ALGO_BACKED_COMMAND_LIST],
+    networkStatus: local ? "none" : algo.source === "download" ? "needed" : "undetermined",
+    algo,
   };
 }
 

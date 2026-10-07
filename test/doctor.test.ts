@@ -70,8 +70,48 @@ describe("cmdDoctor", () => {
     }
   });
 
-  it("names the commands that need network, and nothing else", () => {
-    expect(result.networkCommands).toEqual(["god-nodes", "communities", "related"]);
+  // XSPEC-457 R3: the list used to be fixed. It now follows where the ALGO
+  // extension actually comes from on the machine, so each arm is driven by an
+  // injected description of a machine rather than by whichever one runs the suite.
+  // The entry-level proof (the built CLI, a real package on disk) is in
+  // test/doctor-network.test.ts.
+  it("names the commands that need network only when the extension would be downloaded", () => {
+    const download = cmdDoctor("/x/graph.db", {
+      platform: "win32", arch: "x64", home: "/home/none",
+      bundled: { pkg: "@asiaostrich/engramgraph-algo-win32-x64", path: null }, exists: () => false,
+    });
+    expect(download.networkCommands).toEqual(["god-nodes", "communities", "related"]);
+    expect(download.networkStatus).toBe("needed");
+    expect(download.algo.source).toBe("download");
+  });
+
+  it("names no command when the platform package is installed", () => {
+    const bundled = cmdDoctor("/x/graph.db", {
+      platform: "win32", arch: "x64",
+      bundled: { pkg: "@asiaostrich/engramgraph-algo-win32-x64", path: "C:/n/libalgo.ryu_extension" },
+    });
+    expect(bundled.networkCommands).toEqual([]);
+    expect(bundled.networkStatus).toBe("none");
+    expect(bundled.algo).toMatchObject({ source: "bundled-package", path: "C:/n/libalgo.ryu_extension" });
+  });
+
+  it("names no command when ryugraph's own cache already holds the extension", () => {
+    const cached = cmdDoctor("/x/graph.db", {
+      platform: "linux", arch: "x64", home: "/home/u",
+      bundled: { pkg: "@asiaostrich/engramgraph-algo-linux-x64", path: null },
+      exists: (p) => p === "/home/u/.ryu/extension/25.9.0/linux_amd64/algo/libalgo.ryu_extension",
+    });
+    expect(cached.networkCommands).toEqual([]);
+    expect(cached.algo.source).toBe("user-cache");
+  });
+
+  it("says it cannot tell, instead of guessing, on a platform whose cache directory is unknown", () => {
+    const unknown = cmdDoctor("/x/graph.db", {
+      platform: "linux", arch: "arm64", bundled: { pkg: null, path: null }, exists: () => true,
+    });
+    expect(unknown.networkStatus).toBe("undetermined");
+    expect(unknown.algo.source).toBe("undetermined");
+    expect(unknown.algo.detail).toMatch(/cannot be determined/);
   });
 
   it("does not need a readable graph to answer", () => {
@@ -98,8 +138,10 @@ describe("egr doctor, invoked the way a user invokes it", () => {
     expect(out).toMatch(/Dart/);
   });
 
-  it("tells the reader which commands need network", () => {
-    expect(runDoctor()).toContain("needs network: god-nodes, communities, related");
+  it("tells the reader whether anything needs network, in a `needs network:` line", () => {
+    // What the line says depends on the machine (XSPEC-457 R3) — test/doctor-network.test.ts
+    // pins that to the files actually on disk. Here: the line exists and is not the old fixed list unconditionally.
+    expect(runDoctor()).toMatch(/needs network: (none —|god-nodes, communities, related —|cannot be determined —)/);
   });
 
   it("carries the MCP registration command", () => {

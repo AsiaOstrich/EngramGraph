@@ -28,7 +28,7 @@
  */
 
 import type { GraphConnection } from "../graph-db/connection.js";
-import { ALGO_EXTENSION_VERSION, algoLoadStatement, currentBundledAlgo } from "./algo-extension.js";
+import { ALGO_BACKED_COMMAND_LIST, ALGO_EXTENSION_VERSION, algoLoadStatement, currentBundledAlgo } from "./algo-extension.js";
 import { NODE_TABLES, REL_TABLES } from "../graph-db/schema.js";
 
 const PROJECTED_GRAPH = "egr_structural";
@@ -100,7 +100,7 @@ let algoInstalled = false;
  * tell the reader which part of `egr` just became unavailable rather than
  * leaving them to work it out from a stack trace.
  */
-const ALGO_BACKED_COMMANDS = "god-nodes, communities, related";
+const ALGO_BACKED_COMMANDS = ALGO_BACKED_COMMAND_LIST.join(", ");
 
 const ALGO_OFFLINE_HELP = [
   `This is the only part of egr that reaches the network. INSTALL ALGO downloads`,

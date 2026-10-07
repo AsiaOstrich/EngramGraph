@@ -22,6 +22,7 @@
  * instead of shipping a mismatch.
  */
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
@@ -101,4 +102,106 @@ export function setBundledAlgoResolver(fn: (() => BundledAlgo) | null): void {
 
 export function currentBundledAlgo(): BundledAlgo {
   return resolverOverride ? resolverOverride() : resolveBundledAlgo();
+}
+
+// --- Where the extension would come from on THIS machine (XSPEC-457 R3) ------
+
+/** The commands that load the ALGO extension. One list, shared by the error text, `doctor` and the tests. */
+export const ALGO_BACKED_COMMAND_LIST: readonly string[] = ["god-nodes", "communities", "related"];
+
+/**
+ * ryugraph's own platform directory names under `~/.ryu/extension/<version>/`.
+ * Only the three that have been observed are listed (linux_amd64 and win_amd64
+ * from this repo's CI and its offline help text; osx_arm64 from a real cache
+ * directory). darwin-x64 is deliberately absent: its spelling has not been
+ * seen, and a guessed directory name would turn "cache present" into a
+ * statement about a path that may never exist.
+ */
+const RYU_PLATFORM_DIR: Readonly<Record<string, string>> = {
+  "win32-x64": "win_amd64",
+  "linux-x64": "linux_amd64",
+  "darwin-arm64": "osx_arm64",
+};
+
+export type AlgoSourceKind =
+  /** The platform's `@asiaostrich/engramgraph-algo-*` package is installed; loaded by path, no network. */
+  | "bundled-package"
+  /** No package, but ryugraph's own cache already holds the extension; `INSTALL ALGO` finds it locally. */
+  | "user-cache"
+  /** Neither is present; the first `god-nodes`/`communities`/`related` will download it. */
+  | "download"
+  /** Cannot tell (a platform whose cache directory name is not known). Said as such, not guessed. */
+  | "undetermined";
+
+export interface AlgoSource {
+  source: AlgoSourceKind;
+  /** The platform package expected here, or null when none is built for this platform. */
+  package: string | null;
+  /** The extension file that would be loaded, when one is present. */
+  path: string | null;
+  /** One sentence for a human. */
+  detail: string;
+}
+
+export interface AlgoSourceDeps {
+  platform?: string;
+  arch?: string;
+  home?: string;
+  bundled?: BundledAlgo;
+  exists?: (path: string) => boolean;
+}
+
+/**
+ * Work out, from what is on disk, how this machine would get the extension —
+ * without loading it and without touching the network.
+ *
+ * `doctor` used to print a fixed list of commands "that need network". 0.12.0
+ * ships the extension inside the platform package, so on a normal install the
+ * list was wrong: a Windows 11 user with an empty `~/.ryu/extension/25.9.0/win_amd64`
+ * ran all three commands and got results. This reads the same resolver the
+ * commands use (`currentBundledAlgo`), so `doctor` and the commands cannot
+ * disagree about where the extension comes from.
+ */
+export function describeAlgoSource(deps: AlgoSourceDeps = {}): AlgoSource {
+  const platform = deps.platform ?? process.platform;
+  const arch = deps.arch ?? process.arch;
+  const bundled = deps.bundled ?? currentBundledAlgo();
+  const exists = deps.exists ?? existsSync;
+  if (bundled.path) {
+    return {
+      source: "bundled-package",
+      package: bundled.pkg,
+      path: bundled.path,
+      detail: `loaded from the installed package ${bundled.pkg}; no download`,
+    };
+  }
+  const dirName = RYU_PLATFORM_DIR[`${platform}-${arch}`];
+  if (!dirName) {
+    return {
+      source: "undetermined",
+      package: bundled.pkg,
+      path: null,
+      detail:
+        `no prebuilt package for ${platform}-${arch} and this platform's ryugraph cache directory is not known, ` +
+        `so whether the first run downloads the extension cannot be determined`,
+    };
+  }
+  const home = deps.home ?? homedir();
+  const cached = `${home.replace(/\\/g, "/")}/.ryu/extension/${ALGO_EXTENSION_VERSION}/${dirName}/algo/${ALGO_EXTENSION_FILE}`;
+  if (exists(cached)) {
+    return {
+      source: "user-cache",
+      package: bundled.pkg,
+      path: cached,
+      detail: `${bundled.pkg ?? "the platform package"} is not installed, but ryugraph's cache already holds the extension; no download`,
+    };
+  }
+  return {
+    source: "download",
+    package: bundled.pkg,
+    path: null,
+    detail:
+      `${bundled.pkg ?? "no platform package"} is not installed and ryugraph's cache has no extension, ` +
+      `so the first god-nodes/communities/related downloads it from extension.ryugraph.io`,
+  };
 }
