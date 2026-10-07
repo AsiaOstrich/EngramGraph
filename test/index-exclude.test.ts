@@ -53,7 +53,7 @@ afterAll(() => {
 });
 
 describe("XSPEC-457 R5: egr index --exclude", () => {
-  it("--exclude \".uds-backup-*\" keeps the backup documents out of the document count and the graph, and the summary says how many it excluded", () => {
+  it("--exclude '.uds-backup-*' keeps the backup documents out of the document count and the graph, and the summary says how many it excluded", () => {
     const root = makeProject("p1");
     const db = join(work, "p1.db");
 
