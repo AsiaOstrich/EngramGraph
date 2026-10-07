@@ -31,7 +31,7 @@ const HELP = `egr — code + knowledge graph memory CLI
 Usage: egr <command> [args] [options]
 
 Commands:
-  index <dir> [--docs] [--clean] [--scip <path>]
+  index <dir> [--docs] [--clean] [--scip <path>] [--exclude <glob>]...
                                   Index source (.ts/.js/.cs/.py/.go/.java/
                                   .kt/.rs/.cpp/.rb/.php/.dart) into the code
                                   graph;
@@ -45,6 +45,9 @@ Commands:
                                   upgrade/fill CALLS edges tree-sitter alone
                                   can't resolve; <path>'s SCIP document paths
                                   must be relative to this same <dir>.
+                                  --exclude <glob> skips matching paths
+                                  (repeatable; see "Excluding paths" below);
+                                  the summary says how many it kept out.
                                   Skips a fixed list of directories (see
                                   below); .gitignore is NOT read
   callers <symbol> [--depth N]    Functions that (transitively) call <symbol>.
@@ -96,6 +99,19 @@ Env ENGRAM_ISOLATION=git-branch enables per-branch isolation without the flag.
 
 Directories index never walks (fixed; .gitignore is NOT read):
   ${[...SKIP_DIRS].join(", ")}
+
+Excluding paths: egr index <dir> --exclude <glob> [--exclude <glob> ...]
+  Matched against the path relative to <dir>, '/'-separated on every OS.
+    *  any characters except '/'      **  any characters including '/'
+    ?  one character                  {a,b}  either; [abc]  one of
+  A pattern with no '/' matches an entry's name at any depth
+  (".uds-backup-*" skips every such directory); a pattern with a '/' is
+  anchored at <dir> ("docs/archive/**"); a trailing '/' means directories only.
+  Excluding a directory excludes everything under it. Applies to code and --docs.
+
+Exit status: 0 on success; 1 on any error, including a lock held by another
+process and an input (symbol, spec id, node id, module path) the graph does not
+contain. "(none)" with exit 0 means: it is in the graph and has no results.
 
 Connect a coding assistant (MCP): claude mcp add egr -- npx egr-mcp
   then confirm with: claude mcp list   (Codex/Cursor/Windsurf, and Windows: see docs/MCP.md)
@@ -161,6 +177,7 @@ async function main(): Promise<void> {
       isolation: { type: "string" },
       clean: { type: "boolean" },
       scip: { type: "string" },
+      exclude: { type: "string", multiple: true },
       "dry-run": { type: "boolean" },
     },
   });
@@ -336,7 +353,7 @@ async function main(): Promise<void> {
       // The parse-health manifest (XSPEC-334 R1b) lives beside this graph's DB
       // file; derive its path from the same resolution the connection used.
       const manifestPath = manifestPathForDb(resolveDbPath(loc));
-      const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean, scip: values.scip, manifestPath });
+      const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean, scip: values.scip, manifestPath, exclude: values.exclude });
       out(r, values.json, (d) => {
         const s = d as Awaited<ReturnType<typeof cmdIndex>>;
         // The counts carry their denominator (XSPEC-373 R1): `0 specs` alone
@@ -461,12 +478,20 @@ async function main(): Promise<void> {
             su.map((u) => `${u.files} ${u.ext} file(s)`).join(", ") +
             " — unrecognized extension, not parsed as any language."
           : "";
+        // What --exclude kept out (XSPEC-457 R5). Always printed when patterns were
+        // given, including "0 matched": a pattern that matches nothing is a typo
+        // the reader needs to see, and one that matches too much needs its size.
+        const ex = s.excluded;
+        const excludedLine = ex
+          ? `\nexcluded: ${ex.files} file(s) in ${ex.paths.length} path(s) matched --exclude ${ex.patterns.map((p) => `"${p}"`).join(" ")}` +
+            (ex.paths.length ? ` (${ex.paths.slice(0, 3).join(", ")}${ex.paths.length > 3 ? ", …" : ""}) — not in any count above` : ` — nothing matched; check the pattern`)
+          : "";
         // Next steps, only when the counts above show they would change something
         // (consumer feedback on 0.11.0 — see index-hints.ts).
         const hints =
           callResolutionHint(s.code, Boolean(s.scip)) +
           knowledgeNamingHint(s.knowledge, s.code.implements, clusters.length > 0);
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${unindexed}${hints}`;
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${excludedLine}${unindexed}${hints}`;
       });
       break;
     }

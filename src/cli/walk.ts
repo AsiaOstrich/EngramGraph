@@ -37,6 +37,8 @@
 import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 
+import type { ExcludeMatcher } from "./exclude.js";
+
 import { toPosixPath } from "../code-graph/path-utils.js";
 import type { SupportedLanguage } from "../code-graph/types.js";
 
@@ -209,6 +211,32 @@ export interface WalkResult {
    * `egr index` command.
    */
   unindexed: Array<{ path: string; ext: string }>;
+  /**
+   * What `--exclude` kept the walk out of (XSPEC-457 R5): the matched paths
+   * (directories carry a trailing `/`) and how many files lay under them. Present
+   * only when an exclude matcher was given — "0 matched" is then a real answer
+   * (a mistyped pattern), not an absence.
+   */
+  excluded?: { paths: string[]; files: number };
+}
+
+/** Files under `dir`, counted the way the walk would see them (same skip list, symlinked directories not followed). */
+function countFilesUnder(dir: string): number {
+  let n = 0;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      if (!SKIP_DIRS.has(e.name)) n += countFilesUnder(join(dir, e.name));
+    } else if (!e.isSymbolicLink() || !statSync(join(dir, e.name), { throwIfNoEntry: false })?.isDirectory()) {
+      n += 1;
+    }
+  }
+  return n;
 }
 
 /**
@@ -233,18 +261,34 @@ export interface WalkResult {
 export function walkFiles(
   root: string,
   exts: readonly string[],
-  opts: { detectShebangScripts?: boolean } = {},
+  opts: { detectShebangScripts?: boolean; exclude?: ExcludeMatcher } = {},
 ): WalkResult {
   const detectShebangScripts = opts.detectShebangScripts ?? false;
   const files: Array<{ path: string; source: string; language?: SupportedLanguage }> = [];
   const skippedSymlinkDirs: string[] = [];
   const unreadable: Array<{ path: string; reason: string }> = [];
   const unindexed: Array<{ path: string; ext: string }> = [];
+  const exclude = opts.exclude;
+  const excluded = exclude ? { paths: [] as string[], files: 0 } : undefined;
   const rec = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
+      const isSymlinkDir = entry.isSymbolicLink() && statSync(full, { throwIfNoEntry: false })?.isDirectory() === true;
+      const isDir = entry.isDirectory() || isSymlinkDir;
+      // The built-in skip list wins and is silent, as before; the user's patterns
+      // apply to everything else and are COUNTED, so a pattern that matched
+      // nothing (or far more than meant) shows up in the summary.
+      if (entry.isDirectory() && SKIP_DIRS.has(entry.name)) continue;
+      if (exclude && excluded) {
+        const rel = toPosixPath(relative(root, full));
+        if (exclude.matches(rel, entry.name, isDir)) {
+          excluded.paths.push(isDir ? `${rel}/` : rel);
+          excluded.files += entry.isDirectory() ? countFilesUnder(full) : 1;
+          continue;
+        }
+      }
       if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name)) rec(full);
+        rec(full);
         continue;
       }
       // `throwIfNoEntry: false` covers a broken symlink — a dangling link is
@@ -301,7 +345,7 @@ export function walkFiles(
     }
   };
   rec(root);
-  return { files, skippedSymlinkDirs, unreadable, unindexed };
+  return { files, skippedSymlinkDirs, unreadable, unindexed, ...(excluded ? { excluded } : {}) };
 }
 
 /** Default cap on how many distinct extensions {@link summarizeUnindexed} reports (XSPEC-414 R1). */

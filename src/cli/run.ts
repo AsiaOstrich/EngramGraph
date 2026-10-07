@@ -47,6 +47,7 @@ import {
   type ParseHealthSummary,
 } from "../code-graph/parse-manifest.js";
 import { walkFiles, summarizeUnindexed, type UnindexedSummary } from "./walk.js";
+import { compileExcludes } from "./exclude.js";
 import { checkRefs, type RefCheckResult } from "./refs-check.js";
 import { ALGO_BACKED_COMMAND_LIST, describeAlgoSource, type AlgoSource } from "../structural-memory/algo-extension.js";
 import { unavailableGrammars } from "../code-graph/grammar-registry.js";
@@ -114,6 +115,12 @@ export interface IndexResultSummary {
    * exceptional condition worth hiding on the happy path.
    */
   unindexedCode: UnindexedSummary;
+  /**
+   * What `--exclude` kept out of this run (XSPEC-457 R5). Present exactly when
+   * patterns were given, including when nothing matched — a pattern that
+   * matches nothing is the typo the summary must expose, not hide.
+   */
+  excluded?: { patterns: string[]; paths: string[]; files: number };
 }
 
 /**
@@ -329,13 +336,16 @@ export async function ingestScipOverlay(
  */
 export async function cmdIndex(
   conn: GraphConnection,
-  opts: { dir: string; docs?: boolean; clean?: boolean; scip?: string; manifestPath?: string },
+  opts: { dir: string; docs?: boolean; clean?: boolean; scip?: string; manifestPath?: string; exclude?: string[] },
 ): Promise<IndexResultSummary> {
   if (opts.clean) await clearGraph(conn); // drop existing data so deleted nodes are pruned
   if (opts.scip) await assertCallsSchemaHasProvenanceColumns(conn);
   // `detectShebangScripts: true` (XSPEC-414 R4 OQ2) only on the CODE walk —
   // see `walkFiles`' doc comment for why the docs walk below must NOT opt in.
-  const codeWalk = walkFiles(opts.dir, CODE_EXTS, { detectShebangScripts: true });
+  // `--exclude` applies to BOTH walks — the documents the user complained about
+  // were counted by the docs walk below, not this one.
+  const exclude = opts.exclude?.length ? compileExcludes(opts.exclude) : undefined;
+  const codeWalk = walkFiles(opts.dir, CODE_EXTS, { detectShebangScripts: true, exclude });
   const codeFiles = codeWalk.files;
 
   // Read the PREVIOUS manifest before this run rewrites this dir's section, so
@@ -367,8 +377,13 @@ export async function cmdIndex(
   // the docs walk below re-walks the same directories and would only repeat it.
   if (codeWalk.skippedSymlinkDirs.length > 0) result.skippedSymlinkDirs = codeWalk.skippedSymlinkDirs;
   if (codeWalk.unreadable.length > 0) result.unreadableFiles = codeWalk.unreadable;
+  // The code walk sees every non-skipped file in an excluded subtree, so its
+  // count is the whole one; the docs walk's would only repeat it.
+  if (exclude && codeWalk.excluded) {
+    result.excluded = { patterns: [...exclude.patterns], paths: codeWalk.excluded.paths, files: codeWalk.excluded.files };
+  }
   if (opts.docs) {
-    const docs = walkFiles(opts.dir, [".md"]).files.map((f) => ({ content: f.source, fallbackId: f.path }));
+    const docs = walkFiles(opts.dir, [".md"], { exclude }).files.map((f) => ({ content: f.source, fallbackId: f.path }));
     result.knowledge = await indexKnowledgeDocs(conn, docs);
   }
   if (opts.scip) {
