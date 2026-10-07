@@ -10,6 +10,16 @@
  * implementers, implemented_specs, related, blindspots, signatures, doctor,
  * refs_check.
  *
+ * ## The graph is held per query, not per session (XSPEC-457 R1)
+ *
+ * The server asks a {@link GraphSource} for the graph each time a tool needs
+ * it (`graph.use(...)`). Over stdio that source is a `GraphLease`: open
+ * read-only, answer, close. A server that stays open all day therefore does
+ * not keep the graph locked all day — `egr index` in a terminal succeeds while
+ * the editor is open, on every platform, and the next query sees its result.
+ * A query that meets a writer retries briefly and then says so; it never
+ * answers with an empty result it could not actually look up.
+ *
  * ## Tool annotations (DEC-115 L2)
  *
  * Every `registerTool` call below carries an `annotations` object (the MCP
@@ -28,6 +38,7 @@ import { z } from "zod";
 
 import pkg from "../../package.json" with { type: "json" };
 import type { GraphConnection } from "../graph-db/connection.js";
+import { fixedGraph, GraphBusyError, type GraphSource } from "../graph-db/lease.js";
 import { indexProject, callChain, definitionFiles, implementers, implementedSpecs, readIndexHealth } from "../code-graph/index.js";
 import { cmdBlindspots, cmdSignatures, cmdDoctor } from "../cli/run.js";
 import { existsSync } from "node:fs";
@@ -48,11 +59,23 @@ const fail = (message: string) => ({
   content: [{ type: "text" as const, text: `error: ${message}` }],
   isError: true,
 });
+/**
+ * One place that turns a thrown error into a tool result. A lock held by a
+ * writer is an ANSWER, not a crash — and it may not read as an empty result
+ * (XSPEC-457 R1).
+ */
+const failFrom = (e: unknown) => {
+  if (e instanceof GraphBusyError) return fail(e.message);
+  return failFrom(e);
+};
 
 /**
- * Register EngramGraph's tools on an MCP server backed by a graph connection.
- * The connection is long-lived (caller owns its lifecycle); never closed
- * per-call (ryugraph+tree-sitter teardown caveat).
+ * Register EngramGraph's tools on an MCP server backed by a graph.
+ *
+ * `graph` is either a {@link GraphSource} (the stdio server passes a
+ * `GraphLease`, which holds the graph only while a tool runs) or a bare
+ * {@link GraphConnection} the caller owns and keeps open (tests, embedding).
+ * A bare connection is never closed here.
  *
  * `opts.manifestPath` (XSPEC-334 R2) is the graph's parse-health manifest
  * sibling — when given, code queries attach an `indexHealth` field warning the
@@ -60,19 +83,25 @@ const fail = (message: string) => ({
  * `index-health.ts`). Omitting it disables the surfacing (queries behave
  * exactly as before R2).
  */
-export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: string } = {}): McpServer {
+export function createMcpServer(graph: GraphConnection | GraphSource, opts: { manifestPath?: string } = {}): McpServer {
   const server = new McpServer({ name: "engramgraph", version: "0.1.0" });
   const manifestPath = opts.manifestPath;
+  const source: GraphSource = "use" in graph ? graph : fixedGraph(graph);
 
   /**
-   * Refusal for a tool that writes, on a read-only connection (XSPEC-374).
-   * Names the alternative rather than just the restriction.
+   * Refusal for a tool that writes, on a read-only source (XSPEC-374). The
+   * engine is single-writer and two writers corrupt the graph, so this server
+   * never writes. Names the alternative, and that alternative has to work on
+   * every platform: it used to say "run `egr ...`", which on Windows failed
+   * for as long as this server was open (XSPEC-457 R1). It works now because
+   * the server only holds the graph while a query is running.
    */
   const readOnlyRefusal = (tool: string, cliEquivalent: string) =>
     fail(
-      `${tool} needs write access, and this MCP server holds the graph read-only so that queries here ` +
-        `and \`egr\` commands in a terminal can run at the same time. Run \`${cliEquivalent}\` instead; ` +
-        `this server sees the result on its next query.`,
+      `${tool} is not available through this MCP server: it only reads the graph, so a writer in a terminal ` +
+        `can never collide with it. Run \`${cliEquivalent}\` in a terminal — that works while this server is ` +
+        `running, because the server holds the graph only for the duration of a query. ` +
+        `This server sees the result on its next query; no restart is needed.`,
     );
 
   server.registerTool(
@@ -93,7 +122,7 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ files }) => {
-      if (conn.readOnly) return readOnlyRefusal("index_code", "egr index <dir>");
+      if (source.readOnly) return readOnlyRefusal("index_code", "egr index <dir>");
       try {
         // The per-file `parseHealth` array is not returned in the tool result
         // (that stays the pre-R2 shape — health is surfaced on QUERY responses
@@ -105,7 +134,7 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
         // graph it describes. Known limitation: successive index_code batches
         // replace this one section (one MCP "project" tracked at a time).
         // Best-effort — a manifest-write failure must not fail the index.
-        const { parseHealth, ...res } = await indexProject(conn, files);
+        const { parseHealth, ...res } = await source.use((conn) => indexProject(conn, files));
         if (manifestPath) {
           try {
             const next = upsertRun(readManifest(manifestPath), MCP_INDEX_ROOT, new Date().toISOString(), parseHealth, EGR_VERSION);
@@ -116,7 +145,7 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
         }
         return ok(res);
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -134,11 +163,11 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ docs }) => {
-      if (conn.readOnly) return readOnlyRefusal("index_docs", "egr index <dir> --docs");
+      if (source.readOnly) return readOnlyRefusal("index_docs", "egr index <dir> --docs");
       try {
-        return ok(await indexKnowledgeDocs(conn, docs));
+        return ok(await source.use((conn) => indexKnowledgeDocs(conn, docs)));
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -159,23 +188,25 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
     },
     async ({ symbol, direction, depth }) => {
       try {
-        const result = await callChain(conn, symbol, direction ?? "both", depth ?? 1);
-        // Coarse index-health (R2). The anchor set for the blindspot match is
-        // the queried symbol's OWN definition file(s) PLUS the result files —
-        // critically including the def file(s), because the flagship case is an
-        // EMPTY result ("nothing calls foo, safe to delete") which has no
-        // result files: without the def-file anchor that highest-risk answer
-        // would carry no warning even when foo's neighborhood has unparsed
-        // files. See `definitionFiles`' doc.
-        const anchor = [
-          ...(await definitionFiles(conn, symbol)),
-          ...result.callers.map((n) => n.file),
-          ...result.callees.map((n) => n.file),
-        ];
-        const health = readIndexHealth(manifestPath, anchor);
-        return ok(health ? { ...result, indexHealth: health } : result);
+        return await source.use(async (conn) => {
+          const result = await callChain(conn, symbol, direction ?? "both", depth ?? 1);
+          // Coarse index-health (R2). The anchor set for the blindspot match is
+          // the queried symbol's OWN definition file(s) PLUS the result files —
+          // critically including the def file(s), because the flagship case is an
+          // EMPTY result ("nothing calls foo, safe to delete") which has no
+          // result files: without the def-file anchor that highest-risk answer
+          // would carry no warning even when foo's neighborhood has unparsed
+          // files. See `definitionFiles`' doc.
+          const anchor = [
+            ...(await definitionFiles(conn, symbol)),
+            ...result.callers.map((n) => n.file),
+            ...result.callees.map((n) => n.file),
+          ];
+          const health = readIndexHealth(manifestPath, anchor);
+          return ok(health ? { ...result, indexHealth: health } : result);
+        });
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -195,9 +226,9 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
     },
     async ({ nodeId, maxHops }) => {
       try {
-        return ok(await impactAnalysis(conn, nodeId, maxHops ?? 3));
+        return ok(await source.use((conn) => impactAnalysis(conn, nodeId, maxHops ?? 3)));
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -220,17 +251,19 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async ({ nodeId, type, nodeLabel, weight }) => {
-      if (conn.readOnly) return readOnlyRefusal("ingest_feedback", "egr feedback <type> <node-id>");
+      if (source.readOnly) return readOnlyRefusal("ingest_feedback", "egr feedback <type> <node-id>");
       try {
         const mapped = feedbackForEventType(type);
-        const update = await applyFeedback(
-          conn,
-          { nodeId, signal: mapped.signal, weight: weight ?? mapped.weight, source: "mcp" },
-          nodeLabel ?? "Function",
+        const update = await source.use((conn) =>
+          applyFeedback(
+            conn,
+            { nodeId, signal: mapped.signal, weight: weight ?? mapped.weight, source: "mcp" },
+            nodeLabel ?? "Function",
+          ),
         );
         return update ? ok(update) : fail(`node not found: ${nodeLabel ?? "Function"} ${nodeId}`);
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -249,11 +282,11 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
     },
     async ({ specId }) => {
       try {
-        const result = await implementers(conn, specId);
+        const result = await source.use((conn) => implementers(conn, specId));
         const health = readIndexHealth(manifestPath, result.modules.map((m) => m.module));
         return ok(health ? { ...result, indexHealth: health } : result);
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -272,12 +305,12 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
     },
     async ({ moduleId }) => {
       try {
-        const result = await implementedSpecs(conn, moduleId);
+        const result = await source.use((conn) => implementedSpecs(conn, moduleId));
         // The queried file itself is the relevant "result file" here.
         const health = readIndexHealth(manifestPath, [result.module]);
         return ok(health ? { ...result, indexHealth: health } : result);
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -311,10 +344,10 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
         // engine's own error arrives only when the seed exists — `related`
         // returns early on an unknown id, so without this an agent would see
         // this tool work on ids that are absent and fail on ids that are there.
-        if (conn.readOnly) return readOnlyRefusal("related", `egr related <seed-id>`);
-        return ok(await related(conn, seedId, depth ?? 2, limit ?? 10));
+        if (source.readOnly) return readOnlyRefusal("related", `egr related <seed-id>`);
+        return ok(await source.use((conn) => related(conn, seedId, depth ?? 2, limit ?? 10)));
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -351,7 +384,7 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
         // when in fact nothing has ever been measured (XSPEC-373).
         return ok({ ...cmdBlindspots(manifestPath), manifestPresent: existsSync(manifestPath) });
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -376,7 +409,7 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
         }
         return ok({ ...cmdSignatures(manifestPath), manifestPresent: existsSync(manifestPath) });
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -396,9 +429,9 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
     },
     async () => {
       try {
-        return ok(cmdDoctor(conn.path));
+        return ok(cmdDoctor(source.path));
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );
@@ -425,9 +458,9 @@ export function createMcpServer(conn: GraphConnection, opts: { manifestPath?: st
     },
     async ({ paths }) => {
       try {
-        return ok(await checkRefs(conn, paths));
+        return ok(await source.use((conn) => checkRefs(conn, paths)));
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return failFrom(e);
       }
     },
   );

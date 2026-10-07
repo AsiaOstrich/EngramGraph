@@ -23,3 +23,6 @@ coverage/
 # Two repos had them swept in by `git add -A` before this rule existed
 # (dev-platform 4289d91: 3 files; EngramGraph 0a8e789: 360 files).
 .uds-backup-*/
+
+# Per-test builds of the CLI/MCP entry points (test/helpers/build-cli.ts); removed by the test that made them.
+dist-test-*/

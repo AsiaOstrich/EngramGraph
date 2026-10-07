@@ -24,6 +24,7 @@ import { unresolvedIdClusters } from "../knowledge-graph/parser.js";
 import { callResolutionHint, knowledgeNamingHint } from "./index-hints.js";
 import { READ_ONLY_COMMANDS } from "./read-only-commands.js";
 import { SKIP_DIRS } from "./walk.js";
+import { isLockContention } from "../graph-db/lease.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
 
@@ -607,10 +608,30 @@ async function main(): Promise<void> {
     default:
       throw new Error(`unknown command: ${cmd}\n\n${HELP}`);
   }
+  // A command that opened the graph for writing has not proven it could write
+  // until something is committed. Several of them (`related` on a seed with
+  // no neighbours, `god-nodes` on an empty graph) finish without touching the
+  // file, so a lock refusal could surface only in the engine's own exit
+  // output — printed, with exit status 0 (XSPEC-457 R2, reported on Windows).
+  // CHECKPOINT forces the engine to take and use the write lock now, turning
+  // that case into an error; it also folds the write-ahead log into the
+  // database file, so the next open (an MCP query, which now opens per call)
+  // does not replay it — measured 245 ms vs 49 ms per query on a 4 MB log.
+  if (!READ_ONLY_COMMANDS.has(cmd)) await conn.execute("CHECKPOINT;");
   process.exit(0); // do not await conn.close() (ryugraph+tree-sitter teardown caveat)
 }
 
 main().catch((err) => {
   process.stderr.write(`egr: ${err instanceof Error ? err.message : String(err)}\n`);
+  // The engine's own text ("Could not set lock on file") does not say who holds
+  // it or what to do. Another process has the graph open for writing — an
+  // `egr` command still running, or `egr serve`. An MCP server no longer holds
+  // it between queries (XSPEC-457 R1).
+  if (isLockContention(err)) {
+    process.stderr.write(
+      "egr: another process has this graph open for writing (an egr command that has not finished, or `egr serve`). " +
+        "Wait for it to finish and retry; an `egr mcp` server does not hold the graph between queries.\n",
+    );
+  }
   process.exit(1);
 });

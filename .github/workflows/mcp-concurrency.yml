@@ -1,0 +1,81 @@
+name: MCP vs terminal concurrency
+
+# XSPEC-457 R1. Does a running `egr-mcp` server stand between a terminal and the
+# graph? On a GitHub-hosted Windows runner, with the real stdio server and the
+# real `egr` CLI as separate processes.
+#
+# Why this exists as its own workflow and not as a step in windows-release-verify:
+# that one installs the already-PUBLISHED package from npm, so it can only judge
+# a release. This one builds THIS checkout, so it can judge a branch before it
+# is merged. Both run the same kind of script against a real graph.
+#
+# Why Windows cannot be reasoned about from macOS: the engine's file locking is
+# flock-like on macOS/Linux and byte-range locking on Windows. The defect was
+# reported on Windows 11 and reproduced on macOS; whether the fix holds on
+# Windows is only known by running it there.
+#
+# The script is scripts/mcp-concurrency-verify.mjs — the same one test/mcp-releases-graph.test.ts
+# runs on every platform CI covers. One script, no second copy to drift.
+#
+# Trigger by hand on a branch:
+#   gh workflow run mcp-concurrency.yml --ref <branch>
+# It also runs on a push to a feat/xspec-457-* branch that touches the files below.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feat/xspec-457-**']
+    paths:
+      - '.github/workflows/mcp-concurrency.yml'
+      - 'scripts/mcp-concurrency-verify.mjs'
+      - 'src/mcp/**'
+      - 'src/graph-db/**'
+      - 'src/cli/**'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # --legacy-peer-deps matches ci.yml and publish.yml: an install that differs
+      # from the one releases are built with proves less.
+      - name: Install
+        shell: bash
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build
+        shell: bash
+        run: npm run build
+
+      - name: Run the scenario (MCP server running, terminal commands alongside)
+        shell: bash
+        run: |
+          node scripts/mcp-concurrency-verify.mjs --json "$RUNNER_TEMP/mcp-concurrency.json"
+
+      - name: Keep the raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-concurrency-${{ matrix.os }}
+          path: ${{ runner.temp }}/mcp-concurrency.json
+          if-no-files-found: warn
+
+      # The same behaviour pinned as tests, so a failure here names the assertion
+      # rather than a step of the script. Runs even when the script failed.
+      - name: Tests for R1, R2, R4 on this platform
+        if: always()
+        shell: bash
+        run: npx vitest run test/mcp-releases-graph.test.ts test/cli-exit-codes.test.ts test/index-exclude.test.ts test/doctor-network.test.ts

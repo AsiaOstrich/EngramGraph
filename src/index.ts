@@ -18,6 +18,9 @@ export {
 export { resolveDbPath, openGraph } from "./graph-db/open.js";
 export type { IsolationMode, GraphLocationOptions } from "./graph-db/open.js";
 export { writeFragment } from "./graph-db/writer.js";
+// A graph held only while something uses it (XSPEC-457 R1) — what the MCP stdio server runs on.
+export { GraphLease, GraphBusyError, fixedGraph, isLockContention } from "./graph-db/lease.js";
+export type { GraphSource, GraphLeaseOptions } from "./graph-db/lease.js";
 export type {
   GraphRow,
   GraphNode,

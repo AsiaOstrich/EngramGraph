@@ -641,8 +641,9 @@ export async function migrateSchemaColumns(
         `  database: ${dbPath}\n` +
         `  pending:  ${cols}\n` +
         `  cause:    ${detail}\n` +
-        `On Windows this is usually another process holding the graph open — most often an editor's MCP ` +
-        `server (\`egr mcp\`). Close it and retry. If nothing else is using it, delete the .engram directory ` +
+        `On Windows this is usually another process holding the graph open — an \`egr\` command that has not ` +
+        `finished, or \`egr serve\`. (An \`egr mcp\` server only holds the graph while it answers a query.) ` +
+        `Close it and retry. If nothing else is using it, delete the .engram directory ` +
         `and re-index: the graph is derived from your repository, so rebuilding costs only the index time.`,
     );
   }
