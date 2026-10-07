@@ -2,6 +2,18 @@ export { extractCodeGraph, extractProject } from "./extractor.js";
 export type { Extraction, ProjectExtraction, RawCall } from "./extractor.js";
 export { indexFile, indexProject } from "./indexer.js";
 export { computeIndexHealth, readIndexHealth, type IndexHealth } from "./index-health.js";
+export {
+  NotInGraphError,
+  rankSimilar,
+  suggestSymbols,
+  suggestSpecs,
+  suggestModules,
+  requireFunction,
+  requireSpec,
+  requireNode,
+  nodeExists,
+} from "./lookup.js";
+export type { LookupKind } from "./lookup.js";
 export { callers, callees, callChain, definitionFiles, implementers, implementedSpecs } from "./query.js";
 export type {
   CallDirection,

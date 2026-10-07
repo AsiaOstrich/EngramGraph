@@ -117,13 +117,15 @@ describe("EngramGraph MCP server", () => {
     // ...and reported, not silently dropped.
     expect(indexed.skippedUnrecognized).toEqual([{ ext: ".zig", files: 1 }]);
 
-    // No JavaScript-shaped node exists for it in the graph.
-    const chain = (await callJson(client, "call_chain", { symbol: "greet", direction: "both" })) as {
-      callers: Array<{ name: string }>;
-      callees: Array<{ name: string }>;
+    // No JavaScript-shaped node exists for it in the graph. Since XSPEC-457 R4
+    // the answer to "who calls greet" is that the graph has no `greet` at all —
+    // an error, no longer an empty `callers: []` that reads as "nobody calls it".
+    const chain = (await client.callTool({ name: "call_chain", arguments: { symbol: "greet", direction: "both" } })) as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
     };
-    expect(chain.callers).toEqual([]);
-    expect(chain.callees).toEqual([]);
+    expect(chain.isError).toBe(true);
+    expect(chain.content[0]!.text).toMatch(/no function named "greet" is in the graph/);
   });
 
   it("index_docs + impact_analysis returns the impact chain", async () => {

@@ -368,8 +368,13 @@ export async function related(
   await ensureAlgoExtension(conn);
   try {
     await conn.execute(`CALL DROP_PROJECTED_GRAPH('${RELATED_PROJECTED_GRAPH}')`);
-  } catch {
-    // no prior projection under this name on this connection — fine
+  } catch (err) {
+    // ONLY "there is no such projection" is fine. This used to be a bare
+    // `catch {}`, which also swallowed a lock refusal or an I/O error from the
+    // very first write this command makes — the one place `related` could
+    // fail and carry on as if nothing had happened (XSPEC-457 R2). Measured
+    // message: "Projected graph <name> does not exists."
+    if (!/does not exist/i.test(err instanceof Error ? err.message : String(err))) throw err;
   }
 
   const ids = neighborhood.map((r) => cypherString(String(r.id))).join(", ");

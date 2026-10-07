@@ -39,6 +39,8 @@ export type {
 // --- code-graph (tree-sitter → Function/Class/Module + CALLS) ---
 export { extractCodeGraph, extractProject, indexFile, indexProject } from "./code-graph/index.js";
 export { callers, callees, callChain } from "./code-graph/index.js";
+// "Is it in the graph at all?" — kept apart from the queries (XSPEC-457 R4).
+export { NotInGraphError, requireFunction, requireSpec, requireNode } from "./code-graph/index.js";
 export type {
   ExtractOptions,
   IndexResult,

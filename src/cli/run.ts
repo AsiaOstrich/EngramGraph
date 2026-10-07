@@ -20,6 +20,12 @@ import {
   callees,
   implementers,
   implementedSpecs,
+  NotInGraphError,
+  requireFunction,
+  requireNode,
+  requireSpec,
+  suggestModules,
+  suggestSpecs,
   type CallNode,
   type ImplementersResult,
   type ImplementedSpecsResult,
@@ -390,36 +396,69 @@ export async function cmdIndex(
   return result;
 }
 
+/**
+ * Ask a symbol question only after the graph has confirmed it knows the symbol
+ * (XSPEC-457 R4).
+ *
+ * `callers(X)` and `callees(X)` both return `[]` for "X is in the graph and has
+ * none" and for "X is not in the graph" — and the CLI printed `(none)` and
+ * exited 0 for both, so a mistyped name read as "nothing calls it, safe to
+ * delete". Unknown symbols now throw {@link NotInGraphError}, which the CLI
+ * turns into a non-zero exit, like `top BogusLabel`. A known symbol with no
+ * callers still prints `(none)` and exits 0.
+ */
+async function knownSymbol<T>(conn: GraphConnection, symbol: string, ask: () => Promise<T>): Promise<T> {
+  await requireFunction(conn, symbol);
+  return ask();
+}
+
 /** `egr callers <symbol> [--depth N]`. */
 export function cmdCallers(conn: GraphConnection, symbol: string, depth = 1): Promise<CallNode[]> {
-  return callers(conn, symbol, depth);
+  return knownSymbol(conn, symbol, () => callers(conn, symbol, depth));
 }
 
 /** `egr callees <symbol> [--depth N]`. */
 export function cmdCallees(conn: GraphConnection, symbol: string, depth = 1): Promise<CallNode[]> {
-  return callees(conn, symbol, depth);
+  return knownSymbol(conn, symbol, () => callees(conn, symbol, depth));
 }
 
-/** `egr implementers <spec-id>` — files (+ functions) that implement a spec. */
-export function cmdImplementers(conn: GraphConnection, specId: string): Promise<ImplementersResult> {
-  return implementers(conn, specId);
+/**
+ * `egr implementers <spec-id>` — files (+ functions) that implement a spec.
+ * A spec id the graph has never seen throws (it used to print a message and
+ * exit 0; XSPEC-457 R2/R4). A spec that exists with no implementers does not.
+ */
+export async function cmdImplementers(conn: GraphConnection, specId: string): Promise<ImplementersResult> {
+  const result = await implementers(conn, specId);
+  if (result.origin === null) throw new NotInGraphError("spec", specId, await suggestSpecs(conn, specId));
+  return result;
 }
 
-/** `egr implemented-by <module-path>` — specs a file declares it implements. */
-export function cmdImplementedSpecs(
-  conn: GraphConnection,
-  moduleId: string,
-): Promise<ImplementedSpecsResult> {
-  return implementedSpecs(conn, moduleId);
+/**
+ * `egr implemented-by <module-path>` — specs a file declares it implements.
+ * A path that matches no module, or several, throws; a module that is indexed
+ * and declares nothing does not.
+ */
+export async function cmdImplementedSpecs(conn: GraphConnection, moduleId: string): Promise<ImplementedSpecsResult> {
+  const result = await implementedSpecs(conn, moduleId);
+  if (result.ambiguousMatches?.length) {
+    throw new Error(
+      `"${moduleId}" is ambiguous — ${result.ambiguousMatches.length} modules end with this path:\n` +
+        result.ambiguousMatches.map((m) => `  ${m}`).join("\n") +
+        `\nGive more of the path.`,
+    );
+  }
+  if (!result.moduleFound) throw new NotInGraphError("module", moduleId, await suggestModules(conn, moduleId));
+  return result;
 }
 
-/** `egr impact <spec-id> [--max-hops N]`. */
-export function cmdImpact(conn: GraphConnection, nodeId: string, maxHops = 3) {
+/** `egr impact <spec-id> [--max-hops N]`. A spec id the graph has never seen throws. */
+export async function cmdImpact(conn: GraphConnection, nodeId: string, maxHops = 3) {
+  await requireSpec(conn, nodeId);
   return impactAnalysis(conn, nodeId, maxHops);
 }
 
-/** `egr feedback <type> <node-id> [--label L]`. */
-export function cmdFeedback(
+/** `egr feedback <type> <node-id> [--label L]`. A node that is not there throws (it used to print and exit 0). */
+export async function cmdFeedback(
   conn: GraphConnection,
   type: string,
   nodeId: string,
@@ -427,11 +466,13 @@ export function cmdFeedback(
   weight?: number,
 ) {
   const mapped = feedbackForEventType(type);
-  return applyFeedback(
+  const update = await applyFeedback(
     conn,
     { nodeId, signal: mapped.signal, weight: weight ?? mapped.weight, source: "cli" },
     label,
   );
+  if (!update) throw new NotInGraphError("node", nodeId, [], label);
+  return update;
 }
 
 /** `egr top <label> [--limit N]`. */
@@ -450,8 +491,14 @@ export function cmdCommunities(conn: GraphConnection): Promise<CommunityMember[]
 }
 
 /** `egr related <node-id> [--depth N] [--limit N]` — seed-anchored ranking (DEC-028 L4a). */
-export function cmdRelated(conn: GraphConnection, seedId: string, depth = 2, limit = 10): Promise<RelatedNode[]> {
-  return related(conn, seedId, depth, limit);
+export async function cmdRelated(conn: GraphConnection, seedId: string, depth = 2, limit = 10): Promise<RelatedNode[]> {
+  const rows = await related(conn, seedId, depth, limit);
+  // `related` answers [] for both "no such seed" and "a seed with nothing around
+  // it"; only the second is an answer (XSPEC-457 R4). The seed's own node is
+  // inside its neighbourhood, so an unknown id is the only way to get here empty
+  // before the ranking runs.
+  if (rows.length === 0) await requireNode(conn, seedId);
+  return rows;
 }
 
 /** One blindspot file (a file that parsed partially or failed). */

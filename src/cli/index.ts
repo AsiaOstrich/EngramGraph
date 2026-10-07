@@ -47,8 +47,11 @@ Commands:
                                   must be relative to this same <dir>.
                                   Skips a fixed list of directories (see
                                   below); .gitignore is NOT read
-  callers <symbol> [--depth N]    Functions that (transitively) call <symbol>
+  callers <symbol> [--depth N]    Functions that (transitively) call <symbol>.
+                                  A symbol the graph does not contain is an
+                                  error (exit 1), not "(none)"
   callees <symbol> [--depth N]    Functions that <symbol> (transitively) calls
+                                  (same rule for an unknown symbol)
   implementers <spec-id>          Files (+ functions) that implement a spec (spec→code)
   implemented-by <module-path>    Specs a file declares it implements (code→spec)
   impact <spec-id> [--max-hops N] Decisions in a spec's impact chain
@@ -481,16 +484,12 @@ async function main(): Promise<void> {
     }
     case "implementers": {
       if (!a1) throw new Error("implementers requires a <spec-id>");
+      // An id the graph has never seen throws inside cmdImplementers (exit 1); what is
+      // left here is a spec that IS in the graph, with or without implementers.
       const r = await cmdImplementers(conn, a1);
       const health = readIndexHealth(manifestPathForDb(resolveDbPath(loc)), r.modules.map((m) => m.module));
       out(r, values.json, (d) => {
         const res = d as Awaited<ReturnType<typeof cmdImplementers>>;
-        // Four situations that all used to print `(none)` (XSPEC-373 R2), and
-        // they send you to four different places: fix the id, index the docs,
-        // write the spec, or write the code.
-        if (res.origin === null) {
-          return `implementers(${res.spec}):\n  no spec with this id is in the graph — check the id, or index the directory containing its document${healthNote(health)}`;
-        }
         const provenance =
           res.origin === "referenced"
             ? "  ⚠ this id is only referenced by another document — no spec document and no code declares it"
@@ -512,19 +511,11 @@ async function main(): Promise<void> {
       // user-typed <module-path> the same way so `implemented-by src\foo.ts`
       // still matches on a Windows shell where that's the natural way to
       // type a path.
+      // No module / an ambiguous path throws inside cmdImplementedSpecs (exit 1).
       const r = await cmdImplementedSpecs(conn, toPosixPath(a1));
       const health = readIndexHealth(manifestPathForDb(resolveDbPath(loc)), [r.module]);
       out(r, values.json, (d) => {
         const res = d as Awaited<ReturnType<typeof cmdImplementedSpecs>>;
-        // Three outcomes that used to print the same `(none)` (XSPEC-373 B4):
-        // not in the graph, ambiguous, or indexed-but-declaring-nothing. The
-        // first sends you to check the path; the third sends you to the code.
-        if (res.ambiguousMatches?.length) {
-          return `implemented-by(${a1}):\n  ambiguous — ${res.ambiguousMatches.length} modules end with this path:\n${res.ambiguousMatches.map((m) => `    ${m}`).join("\n")}`;
-        }
-        if (!res.moduleFound) {
-          return `implemented-by(${a1}):\n  no module with this path is in the graph — check the path, or index the directory containing it${healthNote(health)}`;
-        }
         const via = res.resolvedFrom ? ` (resolved from ${res.resolvedFrom})` : "";
         const body = res.specs.length
           ? res.specs.map((s) => `  ${s.id}${s.title ? ` — ${s.title}` : ""}`).join("\n")
@@ -546,7 +537,8 @@ async function main(): Promise<void> {
       if (!a1 || !a2) throw new Error("feedback requires <type> <node-id>");
       const label = values.label ? asConfidenceLabel(String(values.label), "feedback --label") : "Function";
       const r = await cmdFeedback(conn, a1, a2, label);
-      out(r, values.json, (d) => (d ? `${(d as { nodeId: string }).nodeId}: ${(d as { before: number }).before} → ${(d as { after: number }).after}` : `node not found: ${label} ${a2}`));
+      // A node that is not there throws inside cmdFeedback (exit 1).
+      out(r, values.json, (d) => `${(d as { nodeId: string }).nodeId}: ${(d as { before: number }).before} → ${(d as { after: number }).after}`);
       break;
     }
     case "top": {

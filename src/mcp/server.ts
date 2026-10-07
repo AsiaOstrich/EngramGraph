@@ -39,7 +39,16 @@ import { z } from "zod";
 import pkg from "../../package.json" with { type: "json" };
 import type { GraphConnection } from "../graph-db/connection.js";
 import { fixedGraph, GraphBusyError, type GraphSource } from "../graph-db/lease.js";
-import { indexProject, callChain, definitionFiles, implementers, implementedSpecs, readIndexHealth } from "../code-graph/index.js";
+import {
+  indexProject,
+  callChain,
+  implementers,
+  implementedSpecs,
+  readIndexHealth,
+  NotInGraphError,
+  requireFunction,
+  requireSpec,
+} from "../code-graph/index.js";
 import { cmdBlindspots, cmdSignatures, cmdDoctor } from "../cli/run.js";
 import { existsSync } from "node:fs";
 import { readManifest, upsertRun, writeManifest } from "../code-graph/parse-manifest.js";
@@ -61,11 +70,11 @@ const fail = (message: string) => ({
 });
 /**
  * One place that turns a thrown error into a tool result. A lock held by a
- * writer is an ANSWER, not a crash — and it may not read as an empty result
- * (XSPEC-457 R1).
+ * writer and a name that is not in the graph are both ANSWERS, not crashes —
+ * and neither may read as an empty result (XSPEC-457 R1, R4).
  */
 const failFrom = (e: unknown) => {
-  if (e instanceof GraphBusyError) return fail(e.message);
+  if (e instanceof NotInGraphError || e instanceof GraphBusyError) return fail(e.message);
   return failFrom(e);
 };
 
@@ -188,7 +197,12 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     },
     async ({ symbol, direction, depth }) => {
       try {
+        // `requireFunction` answers "is this symbol in the graph at all" before the
+        // query does: an unknown name used to come back as `callers: []`, which is
+        // the same answer as "nothing calls it" (XSPEC-457 R4). It also returns the
+        // symbol's own definition file(s), the anchor for the blindspot match.
         return await source.use(async (conn) => {
+          const defFiles = await requireFunction(conn, symbol);
           const result = await callChain(conn, symbol, direction ?? "both", depth ?? 1);
           // Coarse index-health (R2). The anchor set for the blindspot match is
           // the queried symbol's OWN definition file(s) PLUS the result files —
@@ -196,14 +210,14 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
           // EMPTY result ("nothing calls foo, safe to delete") which has no
           // result files: without the def-file anchor that highest-risk answer
           // would carry no warning even when foo's neighborhood has unparsed
-          // files. See `definitionFiles`' doc.
-          const anchor = [
-            ...(await definitionFiles(conn, symbol)),
-            ...result.callers.map((n) => n.file),
-            ...result.callees.map((n) => n.file),
-          ];
+          // files.
+          const anchor = [...defFiles, ...result.callers.map((n) => n.file), ...result.callees.map((n) => n.file)];
           const health = readIndexHealth(manifestPath, anchor);
-          return ok(health ? { ...result, indexHealth: health } : result);
+          // `symbolFound` is always true here (absence is an error above); it is in
+          // the payload so a consumer reading `callers: []` can see which kind of
+          // empty it is.
+          const found = { ...result, symbolFound: true as const };
+          return ok(health ? { ...found, indexHealth: health } : found);
         });
       } catch (e) {
         return failFrom(e);
@@ -226,7 +240,14 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     },
     async ({ nodeId, maxHops }) => {
       try {
-        return ok(await source.use((conn) => impactAnalysis(conn, nodeId, maxHops ?? 3)));
+        // An id that is not a spec in the graph is "unknown", not "no decisions
+        // affect it" — both used to come back as `decisions: []` (XSPEC-457 R4).
+        return ok(
+          await source.use(async (conn) => {
+            await requireSpec(conn, nodeId);
+            return impactAnalysis(conn, nodeId, maxHops ?? 3);
+          }),
+        );
       } catch (e) {
         return failFrom(e);
       }
