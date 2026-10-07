@@ -92,7 +92,7 @@ afterAll(() => {
 });
 
 describe("XSPEC-457 R3: egr doctor on a machine that has the platform package", () => {
-  it("says no command needs network when the platform package is on disk, with an empty ryugraph cache, and the three commands then run", () => {
+  it("says no command needs network when the platform package is on disk, with an empty ryugraph cache, and the three commands then run [xspec457-r3-doctor]", () => {
     const onDisk = packageFileOnDisk();
     if (!onDisk) {
       // A platform with no package (or an install that skipped optional dependencies): nothing to assert here;

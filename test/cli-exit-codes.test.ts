@@ -74,7 +74,7 @@ afterAll(() => {
 });
 
 describe("XSPEC-457 R4: an input the graph does not contain is an error, not '(none)'", () => {
-  it("callers of a symbol that is not in the graph exits 1 and says the graph has no such function", () => {
+  it("callers of a symbol that is not in the graph exits 1 and says the graph has no such function [xspec457-r4-callers]", () => {
     const r = egr(["callers", "NoSuchSymbolXYZ"]);
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/no function named "NoSuchSymbolXYZ" is in the graph/);
@@ -139,7 +139,7 @@ describe("XSPEC-457 R4: the same distinction over MCP stdio", () => {
     }
   }
 
-  it("call_chain for a symbol the graph does not contain is an error that says so, with near names — not callers: []", async () => {
+  it("call_chain for a symbol the graph does not contain is an error that says so, with near names — not callers: [] [xspec457-r4-mcp-call-chain]", async () => {
     await withServer(async (call) => {
       const missing = await call("call_chain", { symbol: "betta", direction: "callers" });
       expect(missing.isError).toBe(true);
@@ -172,7 +172,7 @@ describe("XSPEC-457 R4: the same distinction over MCP stdio", () => {
 });
 
 describe("XSPEC-457 R2: every command that said it could not do the thing now exits non-zero", () => {
-  it("feedback on a node that is not there exits 1 (it printed 'node not found' and exited 0)", () => {
+  it("feedback on a node that is not there exits 1 (it printed 'node not found' and exited 0) [xspec457-r2-feedback]", () => {
     const r = egr(["feedback", "test_fail", "NoSuchNode"]);
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/no Function node with id "NoSuchNode" is in the graph/);
@@ -193,7 +193,7 @@ describe("XSPEC-457 R2: every command that said it could not do the thing now ex
     expect(r.stdout).toContain("related(a.ts#beta):");
   });
 
-  it("implementers of a spec id the graph has never seen exits 1; of a spec nobody implements exits 0", () => {
+  it("implementers of a spec id the graph has never seen exits 1; of a spec nobody implements exits 0 [xspec457-r2-implementers]", () => {
     const missing = egr(["implementers", "SPEC-999"]);
     expect(missing.status).toBe(1);
     expect(missing.stderr).toMatch(/no spec with id "SPEC-999" is in the graph/);
