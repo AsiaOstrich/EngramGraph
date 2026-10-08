@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MCP: an unexpected error no longer loses its message** (affects `0.13.0-beta.1` only). The shared error handler of the MCP server (`failFrom`, added in beta.1 with R1) answered `NotInGraphError` and `GraphBusyError` but, for any other error, called itself. A corrupt graph file, an engine or SDK exception or a plain bug therefore overflowed the stack, and the agent read *"Right-hand side of 'instanceof' is not an object"* instead of the cause. Every such error now comes back as an error result (`isError`) carrying the original message. Releases before beta.1 did not have this handler and are not affected. Covered by `test/mcp-unexpected-error.test.ts`, which drives all nine graph-opening tools through a real MCP client with a graph source that throws.
+
 ## [0.13.0-beta.1] — 2026-10-09
 
 *Beta on npm `next` (`npm install -g engramgraph@next`); `latest` stays 0.12.0 until this beta has been tested. Verified on Windows by `.github/workflows/windows-release-verify.yml` (run by hand; it does not start on publish): 14 of 14 steps passed on 2026-10-09 (run 37821840964), after the verifier itself was fixed to recognise the new MCP refusal wording.*

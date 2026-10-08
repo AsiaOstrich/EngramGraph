@@ -73,10 +73,24 @@ const fail = (message: string) => ({
  * One place that turns a thrown error into a tool result. A lock held by a
  * writer and a name that is not in the graph are both ANSWERS, not crashes —
  * and neither may read as an empty result (XSPEC-457 R1, R4).
+ *
+ * Any OTHER error (a corrupt graph file, an engine or SDK exception, a bug) is
+ * reported the same way: `isError: true` with the original message. Chosen over
+ * re-throwing because the MCP SDK's own handler would produce the same shape
+ * (`isError` with the message, minus our `error: ` prefix) — so re-throwing buys
+ * nothing and makes the visible result depend on the SDK version; and because
+ * the tool's caller is an agent that needs to read what failed in the tool
+ * result, not a protocol-level error it may not surface. What this must never
+ * do is lose the message or turn into an empty result: beta.1 shipped a default
+ * branch that called `failFrom` again, so every such error overflowed the stack
+ * and the caller read "Right-hand side of 'instanceof' is not an object" (what
+ * V8 raises when the overflow lands inside the `instanceof` above) instead of
+ * the real cause.
  */
 const failFrom = (e: unknown) => {
   if (e instanceof NotInGraphError || e instanceof GraphBusyError) return fail(e.message);
-  return failFrom(e);
+  const message = e instanceof Error ? e.message || e.name : String(e);
+  return fail(message);
 };
 
 /**
