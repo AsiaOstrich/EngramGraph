@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0-beta.1] — 2026-10-09
+
+*Beta on npm `next` (`npm install -g engramgraph@next`); `latest` stays 0.12.0 until this beta has been tested. Verified on Windows by `.github/workflows/windows-release-verify.yml` when the release is published.*
+
 *Fixes for the five problems in the 0.12.0 Windows 11 report (XSPEC-457). Two of them change exit codes — read "Changed" before upgrading a script.*
 
 **A running MCP server no longer stands between a terminal and the graph.**
