@@ -11,15 +11,27 @@
  * machine; this runs the same steps on any machine, and CI runs it on Windows.
  *
  * Usage:  node scripts/windows-release-verify.mjs --target <dir> --expect-version <x.y.z> [--summary <file>] [--json <file>]
+ *                                                  [--package-dir <dir> [--dist <subdir>]]
  *
- * It uses the globally installed package (`npm root -g`), not this checkout —
- * the thing under test is what users install. Every check prints its raw
- * output; a failure names the step and what it saw.
+ * By default it uses the globally installed package (`npm root -g`), not this
+ * checkout — the thing under test is what users install. Every check prints its
+ * raw output; a failure names the step and what it saw.
+ *
+ * `--package-dir` / `--dist` point it at a package directory instead (default
+ * `dist` inside it). They exist so `test/windows-release-verify.test.ts` can run
+ * THIS script, every step, against a build of the current `src/` — nothing else
+ * ever ran it before a release, so the strings it matches on product output
+ * (the MCP refusal, `top`, `related`, `doctor`, `index` lines) went stale
+ * unnoticed and the first run was the one on a Windows machine after publishing.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+
+// The refusal's wording is defined next to the server that says it, not copied
+// here — see that file for the failure this replaced.
+import { isReadOnlyRefusal } from "../src/mcp/read-only-refusal.mjs";
 
 const args = Object.fromEntries(
   process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith("--") ? [...acc, [a.slice(2), all[i + 1]]] : acc), []),
@@ -35,10 +47,13 @@ function record(step, ok, detail, raw = "") {
 }
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-const globalRoot = spawnSync(npm, ["root", "-g"], { encoding: "utf8", shell: process.platform === "win32" }).stdout.trim();
-const pkgDir = join(globalRoot, "engramgraph");
-const CLI = join(pkgDir, "dist", "cli", "index.js");
-const MCP = join(pkgDir, "dist", "mcp", "stdio.js");
+const globalRoot = args["package-dir"]
+  ? resolve(args["package-dir"], "node_modules")
+  : spawnSync(npm, ["root", "-g"], { encoding: "utf8", shell: process.platform === "win32" }).stdout.trim();
+const pkgDir = args["package-dir"] ? resolve(args["package-dir"]) : join(globalRoot, "engramgraph");
+const distDir = join(pkgDir, args.dist ?? "dist");
+const CLI = join(distDir, "cli", "index.js");
+const MCP = join(distDir, "mcp", "stdio.js");
 
 function egr(argv, opts = {}) {
   const r = spawnSync(process.execPath, [CLI, ...argv], { cwd: target, encoding: "utf8", env: { ...process.env, ...opts.env } });
@@ -194,7 +209,7 @@ async function main() {
     // Step 6 — the MCP `related` tool must REFUSE (refusal is the pass condition).
     const call = await mcp.request("tools/call", { name: "related", arguments: { seedId: seed } });
     const text = JSON.stringify(call.result ?? call.error ?? {});
-    record("6 MCP related refuses", /needs write access/.test(text), "refusal text expected", text);
+    record("6 MCP related refuses", isReadOnlyRefusal(call.result), "read-only refusal expected (isError + the refusal phrase)", text);
   } catch (e) {
     record("4-6 MCP session", false, e.message, mcp.stderr());
   } finally {

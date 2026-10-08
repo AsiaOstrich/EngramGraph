@@ -25,6 +25,7 @@ on:
     paths:
       - '.github/workflows/windows-release-verify.yml'
       - 'scripts/windows-release-verify.mjs'
+      - 'src/mcp/read-only-refusal.mjs'
 
 permissions:
   contents: read

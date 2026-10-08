@@ -56,6 +56,7 @@ import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js"
 import { applyFeedback, feedbackForEventType, CONFIDENCE_LABELS } from "../sage/index.js";
 import { related } from "../structural-memory/index.js";
 import { checkRefs } from "../cli/refs-check.js";
+import { READ_ONLY_REFUSAL_MARKER } from "./read-only-refusal.mjs";
 
 /** Sentinel manifest root for MCP-side `index_code` (R2). See its use below. */
 const MCP_INDEX_ROOT = "mcp:index_code";
@@ -104,10 +105,14 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
    * every platform: it used to say "run `egr ...`", which on Windows failed
    * for as long as this server was open (XSPEC-457 R1). It works now because
    * the server only holds the graph while a query is running.
+   *
+   * The phrase that identifies this as a refusal is NOT written here: it is
+   * `READ_ONLY_REFUSAL_MARKER`, shared with the release verifier that has to
+   * recognise it (see `read-only-refusal.mjs` for why that is one definition).
    */
   const readOnlyRefusal = (tool: string, cliEquivalent: string) =>
     fail(
-      `${tool} is not available through this MCP server: it only reads the graph, so a writer in a terminal ` +
+      `${tool} ${READ_ONLY_REFUSAL_MARKER}: it only reads the graph, so a writer in a terminal ` +
         `can never collide with it. Run \`${cliEquivalent}\` in a terminal — that works while this server is ` +
         `running, because the server holds the graph only for the duration of a query. ` +
         `This server sees the result on its next query; no restart is needed.`,
