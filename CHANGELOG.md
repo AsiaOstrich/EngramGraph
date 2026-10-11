@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0-beta.3] — 2026-10-12
+
+*Beta on npm `next`; `latest` stays 0.12.0 until the beta has been tested. Two output corrections found while trying beta.2 (XSPEC-457 R6, R7). Neither changes an exit code.*
+
+### Fixed
+
+- **"Did you mean" only offers names that resemble what you typed** (R6). `egr callers NoSuchFunctionXyz` on a real graph answered *"Did you mean: n, t, T, u, on?"*: a one-letter name is a substring of almost any query, so the hint matched on that and offered names with nothing in common with the input, which reads as a broken tool. A candidate now has to be at least half as long as the longer of the two names, and an edit-distance match may change fewer than half the characters of the shorter one. When no name is that close, the "Did you mean" sentence is left out and only the "not in the graph" explanation remains. One rule serves every symbol-, spec- and module-keyed query, in the CLI (`callers`, `callees`, `impact`, `implementers`, `implemented-by`) and over MCP (`call_chain`, `impact_analysis`). Covered by `test/xspec457-r6-r7.test.ts` (CLI and MCP stdio).
+- **`egr index <dir> --docs` no longer lists the documents it indexed as "unindexed"** (R7). A directory holding one spec `.md` got the spec into the graph and, in the same summary, `unindexed: 1 source file(s) seen but not covered by any supported language — top extensions: .md (1)`, which reads as if the document had not been indexed. With `--docs`, a file the document pass took in no longer counts as unindexed (`unindexedCode` in `--json` follows); other unindexed files stay listed. Without `--docs` nothing indexes a `.md`, so it is still listed, as before.
+
 ## [0.13.0-beta.2] — 2026-10-09
 
 *Beta on npm `next`; `latest` stays 0.12.0 until the beta has been tested. Replaces 0.13.0-beta.1, which overflowed the stack on any unexpected error inside an MCP tool (below). Windows: run `.github/workflows/windows-release-verify.yml` by hand.*
