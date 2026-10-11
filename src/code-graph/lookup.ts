@@ -79,9 +79,20 @@ function editDistance(a: string, b: string, max: number): number {
 }
 
 /**
+ * A candidate must be at least this fraction as long as the longer of the two
+ * strings to count as "near" (XSPEC-457 R6). Without it every one-letter name
+ * is a substring of almost any query, so `callers NoSuchFunctionXyz` was told
+ * "Did you mean: n, t, T, u, on?" — names with nothing in common with the
+ * input, which reads as a broken tool rather than as help.
+ */
+const MIN_LENGTH_RATIO = 0.5;
+
+/**
  * Rank candidate names by closeness to `query`: case-insensitive equal, then
- * prefix/substring (either direction), then small edit distance. Pure — the
- * graph lookups below only feed it.
+ * prefix/substring (either direction), then small edit distance. A candidate
+ * far shorter (or longer) than the query is never near, whichever rule would
+ * have matched it; when nothing is near the result is `[]` and the caller
+ * prints no suggestion at all. Pure — the graph lookups below only feed it.
  */
 export function rankSimilar(query: string, candidates: Iterable<string>, limit = 5): string[] {
   const q = query.toLowerCase();
@@ -92,11 +103,19 @@ export function rankSimilar(query: string, candidates: Iterable<string>, limit =
     const n = name.toLowerCase();
     let score: number | null = null;
     if (n === q) score = 0;
-    else if (n.startsWith(q) || q.startsWith(n)) score = 1;
-    else if (n.includes(q) || q.includes(n)) score = 2;
     else {
-      const d = editDistance(q, n, maxEdit);
-      if (d <= maxEdit) score = 2 + d;
+      const shorter = Math.min(q.length, n.length);
+      const longer = Math.max(q.length, n.length);
+      if (shorter / longer < MIN_LENGTH_RATIO) continue;
+      if (n.startsWith(q) || q.startsWith(n)) score = 1;
+      else if (n.includes(q) || q.includes(n)) score = 2;
+      else {
+        const d = editDistance(q, n, maxEdit);
+        // `d * 2 < shorter`: fewer than half of the shorter name's characters
+        // may need changing, so a 3-letter name is never "near" through a
+        // two-letter edit.
+        if (d <= maxEdit && d * 2 < shorter) score = 2 + d;
+      }
     }
     if (score !== null) scored.push({ name, score });
   }

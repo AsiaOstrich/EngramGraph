@@ -383,8 +383,17 @@ export async function cmdIndex(
     result.excluded = { patterns: [...exclude.patterns], paths: codeWalk.excluded.paths, files: codeWalk.excluded.files };
   }
   if (opts.docs) {
-    const docs = walkFiles(opts.dir, [".md"], { exclude }).files.map((f) => ({ content: f.source, fallbackId: f.path }));
+    const docFiles = walkFiles(opts.dir, [".md"], { exclude }).files;
+    const docs = docFiles.map((f) => ({ content: f.source, fallbackId: f.path }));
     result.knowledge = await indexKnowledgeDocs(conn, docs);
+    // XSPEC-457 R7: the code walk saw every `.md` as "not covered by any
+    // supported language", and with `--docs` the same files went into the graph
+    // a moment later — so the summary said a document was indexed and, on the
+    // next line, that it was not. A file the docs pass took in is not unindexed;
+    // without `--docs` nothing took it in and it stays listed. Paths are
+    // relative to the same root in both walks.
+    const taken = new Set(docFiles.map((f) => f.path));
+    result.unindexedCode = summarizeUnindexed(codeWalk.unindexed.filter((u) => !taken.has(u.path)));
   }
   if (opts.scip) {
     result.scip = await ingestScipOverlay(conn, opts.dir, opts.scip, codeFiles);
