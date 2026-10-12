@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0-beta.4] - 2026-10-12
+
 *Fixes for the new findings in the 0.13.0-beta.3 Windows consumer report (XSPEC-476).*
 
 ### Fixed
