@@ -14,7 +14,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, cmdRefsCheck, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
+import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, limitCommunities, countCommunities, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, cmdRefsCheck, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
 import type { RefCheckResult } from "./refs-check.js";
 import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
@@ -62,7 +62,9 @@ Commands:
                                   Evolve confidence (type: test_fail|test_pass|human_fix)
   top <label> [--limit N]         Highest-confidence nodes (label: Function|Spec|Decision|Doc)
   god-nodes [--limit N]           Highest-importance nodes across code + knowledge (PageRank)
-  communities                     Function-call clusters (Louvain over CALLS edges)
+  communities [--limit N]         Function-call clusters (Louvain over CALLS edges);
+                                  --limit keeps the N largest communities (all
+                                  their members), not N rows
   related <node-id> [--depth N] [--limit N]
                                   Nodes important *around* a seed (seeded PageRank approx.)
   refs check <path...>            Check file-path/symbol references (in
@@ -615,8 +617,22 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? "nothing matched; check the pa
       break;
     }
     case "communities": {
-      const rows = await cmdCommunities(conn);
-      out(rows, values.json, (d) => `communities:\n${fmtNodes(d as Array<{ name: string; communityId: number }>)}`);
+      // --limit counts communities (the N largest, whole), not rows — see limitCommunities.
+      // Checked before the graph is queried so a bad value costs nothing.
+      if (values.limit !== undefined && !/^[1-9]\d*$/.test(values.limit)) {
+        throw new Error(`communities --limit must be a positive whole number (got "${values.limit}")`);
+      }
+      const all = await cmdCommunities(conn);
+      const rows = values.limit !== undefined ? limitCommunities(all, Number(values.limit)) : all;
+      const total = countCommunities(all);
+      const shown = countCommunities(rows);
+      out(
+        rows,
+        values.json,
+        (d) =>
+          `communities:\n${fmtNodes(d as Array<{ name: string; communityId: number }>)}` +
+          (shown < total ? `\n(showing the ${shown} largest of ${total} communities; --limit counts communities, not rows)` : ""),
+      );
       break;
     }
     case "related": {

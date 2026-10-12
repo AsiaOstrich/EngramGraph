@@ -523,6 +523,32 @@ export function cmdCommunities(conn: GraphConnection): Promise<CommunityMember[]
   return communities(conn);
 }
 
+/**
+ * `egr communities --limit N` (XSPEC-476 R5b): keep the N LARGEST communities —
+ * every member of each, never half of one — largest first, ties to the smaller
+ * community id; the rows keep the order `communities` gave them.
+ *
+ * It counts communities, not rows: a cut through the middle of a community
+ * would show a cluster that is not the cluster. Without `--limit` the answer is
+ * unchanged (all of them), which on a real project is megabytes of JSON.
+ */
+export function limitCommunities<T extends { communityId: number }>(rows: readonly T[], limit: number): T[] {
+  const sizes = new Map<number, number>();
+  for (const m of rows) sizes.set(m.communityId, (sizes.get(m.communityId) ?? 0) + 1);
+  const keep = new Set(
+    [...sizes.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+      .slice(0, limit)
+      .map(([id]) => id),
+  );
+  return rows.filter((m) => keep.has(m.communityId));
+}
+
+/** How many distinct communities `rows` hold — for saying "showing N of M". */
+export function countCommunities(rows: ReadonlyArray<{ communityId: number }>): number {
+  return new Set(rows.map((r) => r.communityId)).size;
+}
+
 /** `egr related <node-id> [--depth N] [--limit N]` — seed-anchored ranking (DEC-028 L4a). */
 export async function cmdRelated(conn: GraphConnection, seedId: string, depth = 2, limit = 10): Promise<RelatedNode[]> {
   const rows = await related(conn, seedId, depth, limit);

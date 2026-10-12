@@ -243,6 +243,21 @@ egr top Function --limit 20
 egr top Decision --json
 ```
 
+### `communities [--limit N] [--json]`
+
+Function-call clusters (Louvain over `CALLS` edges), one row per member with
+its `communityId`. On a real project that is every function in the graph —
+megabytes of `--json`. `--limit N` keeps the **N largest communities**, each
+with all of its members (largest first on ties, the smaller community id);
+it counts communities, not rows, because half a cluster is not a cluster. The
+text output says `showing the N largest of M communities` when it cut
+something. `N` must be a positive whole number. Needs the ALGO extension (see
+below).
+
+```bash
+egr communities --limit 5 --json
+```
+
 ### `refs check <path...> [--json]`
 
 Check file-path and symbol/function references (in backticks) inside

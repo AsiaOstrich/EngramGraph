@@ -1,6 +1,7 @@
 // implements XSPEC-476
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -52,6 +53,85 @@ describe("XSPEC-476 R5a: MCP serverInfo.version", () => {
       expect(info?.version).not.toBe("0.1.0");
     } finally {
       await client.close();
+    }
+  });
+});
+
+function egr(args: string[], db: string, cwd = work): { status: number | null; stdout: string; stderr: string } {
+  const r = spawnSync(process.execPath, [built.cli, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, ENGRAM_DB: db },
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 120_000,
+  });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+
+describe("XSPEC-476 R5b: egr communities --limit", () => {
+  type Member = { name: string; communityId: number };
+  let db: string;
+
+  beforeAll(() => {
+    db = join(work, "r5b.db");
+    const proj = join(work, "r5b-proj");
+    mkdirSync(proj, { recursive: true });
+    // Two groups that never call each other: four functions calling in a ring, and two calling each other.
+    writeFileSync(
+      join(proj, "big.ts"),
+      [
+        "export function bigOne() { bigTwo(); }",
+        "export function bigTwo() { bigThree(); }",
+        "export function bigThree() { bigFour(); }",
+        "export function bigFour() { bigOne(); }",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(proj, "small.ts"),
+      ["export function smallOne() { smallTwo(); }", "export function smallTwo() { smallOne(); }", ""].join("\n"),
+    );
+    const r = egr(["index", proj], db);
+    if (r.status !== 0) throw new Error(`fixture index failed: ${r.stderr}`);
+  }, 120_000);
+
+  const members = (args: string[]): Member[] => {
+    const r = egr(["communities", ...args, "--json"], db);
+    expect(r.status, r.stderr).toBe(0);
+    return JSON.parse(r.stdout) as Member[];
+  };
+
+  it("--limit N keeps the N largest communities whole, and without it the answer is unchanged [xspec476-r5b-communities-limit]", () => {
+    const all = members([]);
+    const ids = [...new Set(all.map((m) => m.communityId))];
+    expect(ids.length).toBeGreaterThanOrEqual(2); // fixture sanity: the two groups did not merge
+
+    const size = (id: number) => all.filter((m) => m.communityId === id).length;
+    const largest = ids.sort((a, b) => size(b) - size(a) || a - b)[0]!;
+    const expected = all.filter((m) => m.communityId === largest).map((m) => m.name).sort();
+    expect(expected.every((n) => n.startsWith("big"))).toBe(true); // the four-function group
+
+    const limited = members(["--limit", "1"]);
+    expect([...new Set(limited.map((m) => m.communityId))]).toEqual([largest]);
+    expect(limited.map((m) => m.name).sort()).toEqual(expected); // every member of it, none of the other group
+    expect(limited.length).toBeLessThan(all.length);
+
+    // A limit at or above the number of communities changes nothing.
+    expect(members(["--limit", String(ids.length)])).toEqual(all);
+  });
+
+  it("the text output says it cut something, and a limit that is not a positive whole number is an error [xspec476-r5b-communities-limit-text]", () => {
+    const cut = egr(["communities", "--limit", "1"], db);
+    expect(cut.status, cut.stderr).toBe(0);
+    expect(cut.stdout).toMatch(/showing the 1 largest of \d+ communities/);
+
+    const whole = egr(["communities"], db);
+    expect(whole.stdout).not.toMatch(/showing the/);
+
+    for (const bad of ["0", "-3", "abc", "1.5"]) {
+      const r = egr(["communities", `--limit=${bad}`], db);
+      expect(r.status, `--limit ${bad}`).toBe(1);
+      expect(r.stderr).toMatch(/--limit must be a positive whole number/);
     }
   });
 });
