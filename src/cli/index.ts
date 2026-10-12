@@ -118,6 +118,8 @@ Excluding paths: egr index <dir> --exclude <glob> [--exclude <glob> ...]
 Exit status: 0 on success; 1 on any error, including a lock held by another
 process and an input (symbol, spec id, node id, module path) the graph does not
 contain. "(none)" with exit 0 means: it is in the graph and has no results.
+"refs check" also exits 1 when any reference is "missing" (the full report is
+still printed); "unresolvable" does not fail it.
 
 Connect a coding assistant (MCP): claude mcp add egr -- npx egr-mcp
   then confirm with: claude mcp list   (Codex/Cursor/Windsurf, and Windows: see docs/MCP.md)
@@ -353,6 +355,9 @@ async function main(): Promise<void> {
 
   // Data commands: open graph, run, print, exit.
   const conn = await openGraph(loc, { readOnly: READ_ONLY_COMMANDS.has(cmd) });
+  // Set by a command whose RESULT is a failure verdict although it ran fine
+  // (`refs check` found a missing reference). Applied at the single exit below.
+  let exitCode = 0;
   switch (cmd) {
     case "index": {
       if (!a1) throw new Error("index requires a <dir>");
@@ -652,6 +657,14 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? "nothing matched; check the pa
         });
         return `refs check: ${res.items.length} reference(s) in ${res.filesScanned.length} file(s) (${summary}):\n${lines.join("\n")}`;
       });
+      // A `missing` reference is a finding a script must be able to stop on
+      // (XSPEC-476 R4): the report is printed in full above, and the exit status
+      // carries the verdict. `unresolvable` is "cannot tell" and does not fail.
+      const missingCount = r.items.filter((it) => it.status === "missing").length;
+      if (missingCount > 0) {
+        exitCode = 1;
+        process.stderr.write(`egr: refs check: ${missingCount} reference(s) are missing (exit 1) — the list is above\n`);
+      }
       break;
     }
     default:
@@ -667,7 +680,7 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? "nothing matched; check the pa
   // database file, so the next open (an MCP query, which now opens per call)
   // does not replay it — measured 245 ms vs 49 ms per query on a 4 MB log.
   if (!READ_ONLY_COMMANDS.has(cmd)) await conn.execute("CHECKPOINT;");
-  process.exit(0); // do not await conn.close() (ryugraph+tree-sitter teardown caveat)
+  process.exit(exitCode); // do not await conn.close() (ryugraph+tree-sitter teardown caveat)
 }
 
 main().catch((err) => {

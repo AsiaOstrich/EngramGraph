@@ -268,6 +268,19 @@ considered, a bare word with no path shape or `(...)` call shape is not
 extracted at all, and same-named functions in different files are reported
 as candidates rather than guessed at.
 
+A call-shaped token is checked as a symbol only in the form `name()` or
+`a.b()`. One that contains whitespace, an operator character
+(`+ - * % < > = ! & | ^ ~ ? : , ;`) or anything between its parentheses —
+`Sum(SendCnt)`, `min(x, y)`, `Count(a) + Count(b)` — is an expression quoted
+from some other language, not a symbol of the repository: it is reported
+`unresolvable` and nothing is searched for it. A `missing` symbol names the
+commit where its definition last changed, and that commit contains the
+definition text.
+
+**Exit status**: `1` when any reference is `missing` (the full report is still
+printed), `0` otherwise — `unresolvable` never fails the run. Until 0.13.0 the
+status was `0` either way.
+
 ```bash
 egr refs check MEMORY.md
 egr refs check ./notes --json

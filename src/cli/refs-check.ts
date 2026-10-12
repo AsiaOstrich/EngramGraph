@@ -289,10 +289,42 @@ function looksLikeSymbolCall(tok: string): boolean {
   return true;
 }
 
+/**
+ * Is this call-shaped backtick token an EXTERNAL EXPRESSION rather than a
+ * reference to a symbol? (XSPEC-476 R4; `looksLikeSymbolCall` has already
+ * accepted its shape.)
+ *
+ * `Sum(SendCnt)`, `Count(a) + Count(b)` and `min(x, y)` quote a piece of some
+ * other language — SQL, a formula, a call with arguments — they do not name a
+ * function of this repository. Looking them up in the graph and in git history
+ * answered `missing` and attached an unrelated commit (a consumer report: 213
+ * references, the expressions among them all `missing`). The rule is three
+ * conditions, any one of which makes the token an expression:
+ *
+ *   1. it contains whitespace;
+ *   2. it contains an operator character, one of `+ - * % < > = ! & | ^ ~ ? : , ;`
+ *      (`/` and the `=>`, `===`, `!==` shapes never get this far: they are not
+ *      accepted as symbol-shaped at all);
+ *   3. the parentheses hold an argument list — anything at all between the first
+ *      `(` and the last `)`.
+ *
+ * What is left is `name()` and `a.b()`: the only call shape that names a symbol
+ * without quoting a use of it. An expression is reported `unresolvable` and
+ * nothing is looked up for it.
+ */
+export function isExternalExpression(tok: string): boolean {
+  if (/\s/.test(tok)) return true;
+  if (/[+\-*%<>=!&|^~?:,;]/.test(tok)) return true;
+  const m = /^[A-Za-z_$][\w$.]*\(([^`]*)\)$/.exec(tok);
+  return m !== null && m[1]!.length > 0;
+}
+
 interface RawRef {
   kind: RefKind;
   raw: string;
   line: number;
+  /** Set for a symbol-shaped token that {@link isExternalExpression} says is an expression, not a symbol. */
+  expression?: boolean;
   /** The raw text of the adjacent token this one was paired with (symbol↔path), if any. */
   pairedPath?: string;
 }
@@ -327,13 +359,19 @@ function extractReferences(text: string): { refs: RawRef[]; skipped: number } {
       if (!isPair) continue;
       const symTok = a.kind === "symbol" ? a : b;
       const pathTok = a.kind === "path" ? a : b;
-      refs.push({ kind: "symbol", raw: symTok.raw, line: lineNo, pairedPath: pathTok.raw });
+      refs.push({
+        kind: "symbol",
+        raw: symTok.raw,
+        line: lineNo,
+        pairedPath: pathTok.raw,
+        ...(isExternalExpression(symTok.raw) ? { expression: true } : {}),
+      });
       consumed.add(i);
       consumed.add(i + 1);
     }
     tokens.forEach((t, i) => {
       if (consumed.has(i) || t.kind === "skip") return;
-      refs.push({ kind: t.kind, raw: t.raw, line: lineNo });
+      refs.push({ kind: t.kind, raw: t.raw, line: lineNo, ...(t.kind === "symbol" && isExternalExpression(t.raw) ? { expression: true } : {}) });
     });
   });
 
@@ -1103,7 +1141,17 @@ function symbolEverExisted(roots: string[], cwd: string, name: string): { root: 
 
 async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: string[], cwd: string): Promise<PartialItem> {
   const base = { kind: "symbol" as const, raw: ref.raw };
-  const fullName = ref.raw.replace(/\(.*\)$/s, "");
+  if (ref.expression) {
+    // Before ANY lookup (XSPEC-476 R4): searching the graph or the history for the
+    // callee's name is how `Sum(SendCnt)` came back `missing` with someone else's commit.
+    return {
+      ...base,
+      status: "unresolvable",
+      reason:
+        "an expression (it has arguments, whitespace or an operator), not a reference to a symbol of this repository; nothing was looked up. Write `name()` to have a symbol checked",
+    };
+  }
+  const fullName =ref.raw.replace(/\(.*\)$/s, "");
   const expectedFile = ref.pairedPath ? normalizePathToken(ref.pairedPath) : undefined;
   const matchesExpected = (file: string): boolean =>
     expectedFile != null && (file === expectedFile || file.endsWith(`/${expectedFile}`) || expectedFile.endsWith(`/${file}`));
