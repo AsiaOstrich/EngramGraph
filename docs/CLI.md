@@ -44,6 +44,15 @@ Recursively indexes source files under `<dir>` into the **code graph**
 With `--docs`, also indexes `*.md` files into the **knowledge graph**
 (front-matter → `Spec` / `Decision` + `IMPACTS` / `SUPERSEDES`).
 
+- Which document is which id (`--docs`): a document is a spec or decision when
+  its front-matter `id`, its filename, or its first `#` heading **starts with**
+  `XSPEC-`, `SPEC-`, `DEC-`, `ADR-` (or `XADR-`) followed by a number or a name.
+  Punctuation before the id in a heading is ignored (`# [XSPEC-476] Fix`), a word
+  before it is not: `# Deploy SOP (ADR-006)` is about ADR-006, it is not ADR-006.
+  When several documents claim one id, the front-matter `id` wins over the
+  filename, which wins over a heading; the smaller path decides a tie. The others
+  are left out of the graph (their links too) and each conflict is printed in the
+  summary and listed under `knowledge.conflicts` with `--json`.
 - Code extensions: `.ts .tsx .js .jsx .mts .cts .mjs .cjs .cs .py .go .java
   .kt .kts .rs .cpp .cc .cxx .hpp .h .hh .rb .php .dart` (`.d.ts` excluded).
 - Skipped directories: `node_modules`, `dist`, `.engram`, `.git`, `coverage`,

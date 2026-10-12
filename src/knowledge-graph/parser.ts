@@ -17,12 +17,25 @@ import { extractRefs, parseFrontMatter } from "../adapters/knowledge-source.js";
 import type { GraphConnection } from "../graph-db/connection.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
 import { writeFragment } from "../graph-db/writer.js";
-import { classifyRef, extractRefIds, type ClassifiedRef } from "./linker.js";
+import { classifyLeadingRef, classifyRef, extractRefIds, type ClassifiedRef } from "./linker.js";
 import type { KnowledgeDoc, KnowledgeNodeKind } from "./types.js";
+
+/**
+ * Where a document's id came from (XSPEC-476 R2). The order is the priority when
+ * several documents claim the same id: front-matter `id`, then the filename,
+ * then the first heading.
+ */
+export type DocIdSource = "front-matter" | "filename" | "heading";
+
+const SOURCE_RANK: Record<DocIdSource, number> = { "front-matter": 0, filename: 1, heading: 2 };
 
 export interface ParsedKnowledgeDoc {
   id: string;
   kind: KnowledgeNodeKind;
+  /** Which of the three places the id was taken from. */
+  idSource: DocIdSource;
+  /** The document's path (its `fallbackId`), or a placeholder when it had none. */
+  path: string;
   title: string;
   /** Classified outbound references (self-references removed). */
   refs: Array<{ kind: KnowledgeNodeKind; id: string }>;
@@ -72,13 +85,29 @@ function lastSegment(s: string): string {
  * to its heading. Picking the first non-null candidate and classifying only
  * that would let a non-conforming filename mask a perfectly good `# SPEC-X`
  * heading — the file would be dropped for having been named badly.
+ *
+ * ## The heading must START with the id (XSPEC-476 R2)
+ *
+ * Front-matter `id` and the filename are set on purpose to name the document.
+ * A heading is prose: "Unattended Deploy SOP (ADR-006)" is about ADR-006, it is
+ * not ADR-006. The heading candidate therefore uses `classifyLeadingRef`; the
+ * other two keep `classifyRef`. The returned `source` is what lets `ingest`
+ * rank two documents that claim the same id.
  */
-function resolveRef(fields: Record<string, string>, doc: KnowledgeDoc, body: string): ClassifiedRef | null {
-  const candidates = [fields.id, doc.fallbackId ? lastSegment(doc.fallbackId) : null, firstHeading(body)];
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const classified = classifyRef(candidate);
-    if (classified) return classified;
+function resolveRef(
+  fields: Record<string, string>,
+  doc: KnowledgeDoc,
+  body: string,
+): { classified: ClassifiedRef; source: DocIdSource } | null {
+  const candidates: Array<{ text: string | null | undefined; source: DocIdSource; classify: (t: string) => ClassifiedRef | null }> = [
+    { text: fields.id, source: "front-matter", classify: classifyRef },
+    { text: doc.fallbackId ? lastSegment(doc.fallbackId) : null, source: "filename", classify: classifyRef },
+    { text: firstHeading(body), source: "heading", classify: classifyLeadingRef },
+  ];
+  for (const { text, source, classify } of candidates) {
+    if (!text) continue;
+    const classified = classify(text);
+    if (classified) return { classified, source };
   }
   return null;
 }
@@ -122,10 +151,10 @@ function stubNode(kind: KnowledgeNodeKind, id: string): GraphNode {
  */
 export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null {
   const { fields, body } = parseFrontMatter(doc.content);
-  const classified = resolveRef(fields, doc, body);
-  if (!classified) return null;
+  const resolved = resolveRef(fields, doc, body);
+  if (!resolved) return null;
 
-  const { kind, id } = classified;
+  const { kind, id } = resolved.classified;
   const title = fields.title ?? firstHeading(body) ?? id;
 
   // Refs come from two sources: inline [[ref]] links in the body, and the
@@ -154,7 +183,15 @@ export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null 
     for (const id of extractRefIds(value)) addRef(id);
   }
 
-  return { id, kind, title, refs, node: makeNode(kind, id, title, fields) };
+  return {
+    id,
+    kind,
+    idSource: resolved.source,
+    path: doc.fallbackId ?? "<unnamed document>",
+    title,
+    refs,
+    node: makeNode(kind, id, title, fields),
+  };
 }
 
 /** Front-matter relationship fields (knowledge-graph-memory standard §"Quick Reference"). */
@@ -181,15 +218,29 @@ export class SpecDecisionKnowledgeSource {
    */
   readonly unresolved: string[] = [];
 
+  /**
+   * Ids claimed by more than one document (XSPEC-476 R2), each with the
+   * document that was kept and the ones set aside.
+   *
+   * Two documents resolving to the same id used to push two nodes for it into
+   * one fragment: the writer MERGEd them in order, so the LAST document
+   * silently replaced the first, and the summary counted both. A runbook titled
+   * "ADR-008 時區重構：Runbook" overwrote the real ADR-008, and the summary said
+   * 20 decisions where the graph held 12. Now one document owns each id,
+   * chosen by a fixed rule, and every loss is recorded here.
+   */
+  readonly conflicts: DocIdConflict[] = [];
+
   constructor(private readonly docs: KnowledgeDoc[]) {}
 
   async ingest(): Promise<GraphFragment> {
-    const parsed: ParsedKnowledgeDoc[] = [];
+    const named: ParsedKnowledgeDoc[] = [];
     for (const doc of this.docs) {
       const p = parseKnowledgeDoc(doc);
-      if (p) parsed.push(p);
+      if (p) named.push(p);
       else this.unresolved.push(doc.fallbackId ?? "<unnamed document>");
     }
+    const parsed = this.chooseOwners(named);
 
     const nodes: GraphNode[] = [];
     const edges: GraphEdge[] = [];
@@ -226,6 +277,39 @@ export class SpecDecisionKnowledgeSource {
 
     return { nodes, edges };
   }
+
+  /**
+   * One document per id. Priority: front-matter `id` over filename over first
+   * heading; within the same source the path decides (the lexicographically
+   * smaller wins) so the outcome does not depend on the order the filesystem
+   * listed the files in. A document set aside contributes nothing — no node and
+   * no links: its `[[refs]]` were written about whatever it is, not about the
+   * artifact that happens to share its id.
+   */
+  private chooseOwners(named: ParsedKnowledgeDoc[]): ParsedKnowledgeDoc[] {
+    const byId = new Map<string, ParsedKnowledgeDoc[]>();
+    for (const p of named) {
+      const group = byId.get(p.id);
+      if (group) group.push(p);
+      else byId.set(p.id, [p]);
+    }
+    const owners: ParsedKnowledgeDoc[] = [];
+    for (const [id, group] of byId) {
+      const ranked = [...group].sort(
+        (a, b) => SOURCE_RANK[a.idSource] - SOURCE_RANK[b.idSource] || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+      );
+      owners.push(ranked[0]!);
+      if (ranked.length > 1) {
+        this.conflicts.push({
+          id,
+          kind: ranked[0]!.kind,
+          kept: { path: ranked[0]!.path, source: ranked[0]!.idSource },
+          setAside: ranked.slice(1).map((d) => ({ path: d.path, source: d.idSource })),
+        });
+      }
+    }
+    return owners;
+  }
 }
 
 function impacts(decisionId: string, specId: string): GraphEdge {
@@ -259,6 +343,20 @@ export interface KnowledgeIndexResult {
   docsScanned: number;
   /** Fallback ids of the documents that yielded no artifact id — raw, unclassified. */
   docsUnresolved: string[];
+  /**
+   * Ids that more than one document claimed (XSPEC-476 R2). Empty when every id
+   * has one owner. The counts above are taken after this resolution, so they
+   * equal the nodes in the graph (plus none lost to a silent overwrite).
+   */
+  conflicts: DocIdConflict[];
+}
+
+/** One id claimed by several documents: who owns it, and who was set aside. */
+export interface DocIdConflict {
+  id: string;
+  kind: KnowledgeNodeKind;
+  kept: { path: string; source: DocIdSource };
+  setAside: Array<{ path: string; source: DocIdSource }>;
 }
 
 /** A prefix that appears repeatedly among documents that could not be named. */
@@ -368,5 +466,6 @@ export async function indexKnowledgeDocs(
     relates: fragment.edges.filter((e) => e.label === "RELATES").length,
     docsScanned: docs.length,
     docsUnresolved: source.unresolved,
+    conflicts: source.conflicts,
   };
 }

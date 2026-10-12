@@ -116,6 +116,39 @@ export function classifyRef(ref: string): ClassifiedRef | null {
   return { kind, id };
 }
 
+/** The id pattern pinned to the start of the text — no `\b`, the `^` is the boundary. */
+const LEADING_ID_RE = new RegExp(`^(${PREFIX})-${SUFFIX}`, "i");
+
+/**
+ * Anything before the first letter or digit: Markdown and punctuation that
+ * decorates a title without being part of it (`[XSPEC-476] Fix: …`,
+ * `**ADR-5** …`, `(SPEC-7) …`, a backtick).
+ */
+const LEADING_DECORATION_RE = /^[^\p{L}\p{N}]+/u;
+
+/**
+ * Classify `text` only when it STARTS with an artifact id (XSPEC-476 R2).
+ *
+ * The precise condition, so it can be tested rather than argued about: drop the
+ * leading run of characters that are neither a letter nor a digit; what is left
+ * must begin with an id. So `[XSPEC-476] Fix: …`, `ADR-008 時區重構` and
+ * `**DEC-3** …` start with an id; `Unattended Deploy SOP (ADR-006)`,
+ * `Re: ADR-008` and `2026 notes on SPEC-5` do not.
+ *
+ * Used for the first heading only. A heading that merely MENTIONS an id is not
+ * that artifact: `classifyRef` (anywhere in the text) let a runbook titled
+ * "Unattended Deploy SOP (ADR-006)" become ADR-006, and one titled
+ * "ADR-008 時區重構：Runbook" overwrite the real ADR-008 (0.12.0 onward; the
+ * hint text under `egr index` has always said "starts with").
+ */
+export function classifyLeadingRef(text: string): ClassifiedRef | null {
+  const match = LEADING_ID_RE.exec(text.replace(LEADING_DECORATION_RE, ""));
+  if (!match) return null;
+  const id = match[0].toUpperCase();
+  const prefix = (match[1] ?? "").toUpperCase();
+  return { kind: isSpecPrefix(prefix) ? "Spec" : "Decision", id };
+}
+
 /**
  * Markers that turn a comment into an implementation declaration.
  *

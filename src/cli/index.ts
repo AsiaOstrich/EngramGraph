@@ -362,8 +362,22 @@ async function main(): Promise<void> {
         // defect this line used to have.
         const k = s.knowledge
           ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relates} relates` +
-            ` (${s.knowledge.docsScanned} doc(s) scanned, ${s.knowledge.docsUnresolved.length} unnamed)`
+            ` (${s.knowledge.docsScanned} doc(s) scanned, ${s.knowledge.docsUnresolved.length} unnamed` +
+            // Documents set aside because another document owns their id (XSPEC-476 R2).
+            // Named in the count so scanned = nodes' sources + unnamed + set aside adds up.
+            `${s.knowledge.conflicts.length ? `, ${s.knowledge.conflicts.reduce((n, c) => n + c.setAside.length, 0)} set aside: duplicate id` : ""})`
           : "";
+        // One line per id claimed by more than one document (XSPEC-476 R2). Never
+        // collapsed into a count: the reader has to be able to open both files.
+        const idSourceLabel = { "front-matter": "front-matter id", filename: "filename", heading: "heading" } as const;
+        const kConflicts = (s.knowledge?.conflicts ?? [])
+          .map(
+            (c) =>
+              `\nknowledge: WARNING — ${c.id} is claimed by ${c.setAside.length + 1} documents; kept ${c.kept.path} (${idSourceLabel[c.kept.source]}), ` +
+              `set aside ${c.setAside.map((d) => `${d.path} (${idSourceLabel[d.source]})`).join(", ")} — their links are not in the graph. ` +
+              `An id goes to the front-matter \`id\` first, then the filename, then a heading that starts with it.`,
+          )
+          .join("");
         // A prefix rejected over and over is a naming convention this tool does
         // not know — as opposed to a README, which is simply not a spec. See
         // `unresolvedIdClusters` for why neither "unresolved > 0" nor
@@ -491,7 +505,7 @@ async function main(): Promise<void> {
         const hints =
           callResolutionHint(s.code, Boolean(s.scip)) +
           knowledgeNamingHint(s.knowledge, s.code.implements, clusters.length > 0);
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kWarning}${scip}${parse}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${excludedLine}${unindexed}${hints}`;
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kConflicts}${kWarning}${scip}${parse}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${excludedLine}${unindexed}${hints}`;
       });
       break;
     }
