@@ -67,13 +67,20 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
   and `.gitignore` is not read — a project root that holds `.uds-backup-*`
   directories would otherwise count every backup document. The summary always
   says what it kept out (`excluded: N file(s) in M path(s) matched --exclude …`),
-  including `nothing matched` when a pattern is mistyped. Patterns are matched
+  including `nothing matched` when a pattern is mistyped. With several patterns
+  each is also reported on its own (`excluded: "zzz-*" — nothing matched; …`,
+  and `excluded.byPattern` with `--json`: `pattern`, `paths`, `files`,
+  `nothingMatched`), so a typo cannot hide behind a pattern that matched plenty;
+  a path two patterns both cover counts for both. Patterns are matched
   against the path relative to `<dir>`, `/`-separated on every OS: `*` any
   characters except `/`, `**` any characters including `/`, `?` one character,
   `{a,b}` either, `[abc]` one of. A pattern with no `/` matches an entry's name
-  at any depth (`.uds-backup-*`); one with a `/` is anchored at `<dir>`
-  (`docs/archive/**`); a trailing `/` means directories only. Excluding a
-  directory excludes everything under it.
+  at any depth (`.uds-backup-*`); a `/` at the start or in the middle anchors it
+  at `<dir>` (`docs/archive/**`, `/logs`). A trailing `/` means directories only
+  and does **not** anchor: `logs/` excludes every directory named `logs` at any
+  depth (`api/logs` too); `/logs/` excludes only `<dir>/logs`. A leading `./` is
+  dropped, so `./logs/` is not anchored either. Excluding a directory excludes
+  everything under it.
 
 ```bash
 egr index ./src

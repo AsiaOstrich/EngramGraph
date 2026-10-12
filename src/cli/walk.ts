@@ -217,7 +217,22 @@ export interface WalkResult {
    * only when an exclude matcher was given — "0 matched" is then a real answer
    * (a mistyped pattern), not an absence.
    */
-  excluded?: { paths: string[]; files: number };
+  excluded?: { paths: string[]; files: number; byPattern: ExcludedByPattern[] };
+}
+
+/**
+ * What ONE `--exclude` pattern matched (XSPEC-476 R3). Reported per pattern
+ * because the total cannot say which of several patterns did nothing: a typo
+ * hides behind a sibling that matched plenty.
+ */
+export interface ExcludedByPattern {
+  pattern: string;
+  /** Entries the pattern matched, outermost only: a matched directory counts once, not once per file in it. */
+  paths: number;
+  /** Files at or under those entries. */
+  files: number;
+  /** `paths === 0` — the pattern matched nothing the walk could see. */
+  nothingMatched: boolean;
 }
 
 /** Files under `dir`, counted the way the walk would see them (same skip list, symlinked directories not followed). */
@@ -237,6 +252,59 @@ function countFilesUnder(dir: string): number {
     }
   }
   return n;
+}
+
+/**
+ * Per-pattern tally for an entry the walk has just excluded (XSPEC-476 R3).
+ *
+ * Every pattern that matches the entry is credited. Then, for the patterns that
+ * did NOT match it, the excluded directory's contents are searched: the walk
+ * never descends into it, so without this a pattern like `docs/archive/**`
+ * reads `nothing matched` whenever another pattern (`docs`) already covered
+ * the directory — which would send the reader to "fix" a pattern that works.
+ */
+function tallyExcluded(
+  exclude: ExcludeMatcher,
+  tally: ExcludedByPattern[],
+  fullPath: string,
+  relPath: string,
+  name: string,
+  isDir: boolean,
+  isRealDir: boolean,
+  hits: boolean[],
+): void {
+  const covered = [...hits];
+  hits.forEach((h, i) => {
+    if (!h) return;
+    tally[i]!.paths += 1;
+    tally[i]!.files += isRealDir ? countFilesUnder(fullPath) : 1;
+  });
+  if (!isRealDir || covered.every(Boolean)) return;
+  const rec = (dir: string, rel: string, cov: boolean[]): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const childFull = join(dir, e.name);
+      const childRel = `${rel}/${e.name}`;
+      const symlinkDir = e.isSymbolicLink() && statSync(childFull, { throwIfNoEntry: false })?.isDirectory() === true;
+      const childIsDir = e.isDirectory() || symlinkDir;
+      if (e.isDirectory() && SKIP_DIRS.has(e.name)) continue;
+      const childHits = exclude.matchEach(childRel, e.name, childIsDir);
+      const childCov = [...cov];
+      childHits.forEach((h, i) => {
+        if (!h || cov[i]) return;
+        childCov[i] = true;
+        tally[i]!.paths += 1;
+        tally[i]!.files += e.isDirectory() ? countFilesUnder(childFull) : 1;
+      });
+      if (e.isDirectory() && !childCov.every(Boolean)) rec(childFull, childRel, childCov);
+    }
+  };
+  rec(fullPath, relPath, covered);
 }
 
 /**
@@ -269,7 +337,13 @@ export function walkFiles(
   const unreadable: Array<{ path: string; reason: string }> = [];
   const unindexed: Array<{ path: string; ext: string }> = [];
   const exclude = opts.exclude;
-  const excluded = exclude ? { paths: [] as string[], files: 0 } : undefined;
+  const excluded = exclude
+    ? {
+        paths: [] as string[],
+        files: 0,
+        byPattern: exclude.patterns.map((pattern): ExcludedByPattern => ({ pattern, paths: 0, files: 0, nothingMatched: true })),
+      }
+    : undefined;
   const rec = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
@@ -281,9 +355,11 @@ export function walkFiles(
       if (entry.isDirectory() && SKIP_DIRS.has(entry.name)) continue;
       if (exclude && excluded) {
         const rel = toPosixPath(relative(root, full));
-        if (exclude.matches(rel, entry.name, isDir)) {
+        const hits = exclude.matchEach(rel, entry.name, isDir);
+        if (hits.some(Boolean)) {
           excluded.paths.push(isDir ? `${rel}/` : rel);
           excluded.files += entry.isDirectory() ? countFilesUnder(full) : 1;
+          tallyExcluded(exclude, excluded.byPattern, full, rel, entry.name, isDir, entry.isDirectory(), hits);
           continue;
         }
       }
@@ -345,6 +421,7 @@ export function walkFiles(
     }
   };
   rec(root);
+  if (excluded) for (const t of excluded.byPattern) t.nothingMatched = t.paths === 0;
   return { files, skippedSymlinkDirs, unreadable, unindexed, ...(excluded ? { excluded } : {}) };
 }
 

@@ -22,9 +22,15 @@
  *
  *   - a pattern with no `/` matches an entry's NAME at any depth
  *     (`.uds-backup-*` excludes `./.uds-backup-1/` and `./pkg/.uds-backup-2/`);
- *   - a pattern containing a `/` is anchored at the root and must match the whole
- *     relative path (`docs/archive/**`, `src/generated`);
- *   - a trailing `/` restricts the pattern to directories;
+ *   - a pattern with a `/` at the START or in the MIDDLE is anchored at the root
+ *     and must match the whole relative path (`docs/archive/**`, `src/generated`,
+ *     `/logs`);
+ *   - a trailing `/` restricts the pattern to directories and does NOT anchor
+ *     it: `logs/` excludes `logs` and `api/logs` alike, because the trailing
+ *     slash is removed before the "does it contain a /" question is asked (found
+ *     by a consumer, XSPEC-476 R3: the help said the opposite). `/logs/` is the
+ *     anchored form. A leading `./` is dropped the same way, so `./logs/` is not
+ *     anchored either;
  *   - excluding a directory excludes everything under it.
  */
 
@@ -33,6 +39,12 @@ export interface ExcludeMatcher {
   readonly patterns: readonly string[];
   /** Whether the entry at `relPath` (POSIX, relative to the root) is excluded. */
   matches(relPath: string, name: string, isDir: boolean): boolean;
+  /**
+   * For each pattern, in the order given, whether it matches the entry —
+   * every pattern is asked, not just up to the first that says yes, so an entry
+   * two patterns both cover is counted for both (XSPEC-476 R3).
+   */
+  matchEach(relPath: string, name: string, isDir: boolean): boolean[];
 }
 
 function globToRegexSource(glob: string): string {
@@ -84,6 +96,10 @@ interface Compiled {
   dirOnly: boolean;
 }
 
+function hit(c: Compiled, relPath: string, name: string, isDir: boolean): boolean {
+  return (!c.dirOnly || isDir) && c.re.test(c.anchored ? relPath : name);
+}
+
 /** Compile `--exclude` patterns. Throws on an empty or malformed pattern — a silently ignored pattern is a silently wrong index. */
 export function compileExcludes(patterns: readonly string[]): ExcludeMatcher {
   const compiled: Compiled[] = patterns.map((raw) => {
@@ -99,7 +115,10 @@ export function compileExcludes(patterns: readonly string[]): ExcludeMatcher {
   return {
     patterns: [...patterns],
     matches(relPath, name, isDir) {
-      return compiled.some((c) => (!c.dirOnly || isDir) && c.re.test(c.anchored ? relPath : name));
+      return compiled.some((c) => hit(c, relPath, name, isDir));
+    },
+    matchEach(relPath, name, isDir) {
+      return compiled.map((c) => hit(c, relPath, name, isDir));
     },
   };
 }

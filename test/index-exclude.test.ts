@@ -169,3 +169,63 @@ describe("XSPEC-457 R5: the glob language", () => {
     expect(() => compileExcludes(["{a,b"])).toThrow(/unclosed/);
   });
 });
+
+// implements XSPEC-476
+describe("XSPEC-476 R3: every --exclude pattern reports what it matched", () => {
+  type ByPattern = { pattern: string; paths: number; files: number; nothingMatched: boolean };
+  type ExcludedJson = { excluded: { patterns: string[]; paths: string[]; files: number; byPattern: ByPattern[] } };
+
+  it("with a pattern that matches and one that does not, the summary and --json name the one that did nothing [xspec476-r3-per-pattern]", () => {
+    const root = makeProject("r3a");
+    const args = ["index", ".", "--docs", "--exclude", "zzz-nomatch-*", "--exclude", ".uds-backup-*"];
+
+    const text = egr(args, join(work, "r3a.db"), root);
+    expect(text.status, text.stderr).toBe(0);
+    expect(text.stdout).toContain('excluded: "zzz-nomatch-*" — nothing matched; check the pattern');
+    expect(text.stdout).toContain('excluded: ".uds-backup-*" — 6 file(s) in 2 path(s)');
+    // The total line is still there and still counts what was kept out.
+    expect(text.stdout).toMatch(/excluded: 6 file\(s\) in 2 path\(s\) matched --exclude "zzz-nomatch-\*" "\.uds-backup-\*"/);
+
+    const json = egr([...args, "--json"], join(work, "r3a-json.db"), root);
+    const by = (JSON.parse(json.stdout) as ExcludedJson).excluded.byPattern;
+    expect(by).toEqual([
+      { pattern: "zzz-nomatch-*", paths: 0, files: 0, nothingMatched: true },
+      { pattern: ".uds-backup-*", paths: 2, files: 6, nothingMatched: false },
+    ]);
+  });
+
+  it("a pattern whose files another pattern already excluded still reports them, and one path is counted for each pattern that covers it [xspec476-r3-overlap]", () => {
+    const root = makeProject("r3b");
+    // `docs` excludes the whole directory, so the walk never goes into docs/archive; the second
+    // pattern must still be credited with docs/archive/old.md rather than read "nothing matched".
+    const r = egr(["index", ".", "--exclude", "docs", "--exclude", "docs/archive/**", "--json"], join(work, "r3b.db"), root);
+    expect(r.status, r.stderr).toBe(0);
+    const by = (JSON.parse(r.stdout) as ExcludedJson).excluded.byPattern;
+    expect(by).toEqual([
+      { pattern: "docs", paths: 1, files: 2, nothingMatched: false }, // real.md, archive/old.md
+      { pattern: "docs/archive/**", paths: 1, files: 1, nothingMatched: false }, // archive/old.md
+    ]);
+  });
+
+  it("the help text and the behaviour agree: a trailing slash does not anchor, a leading slash does [xspec476-r3-trailing-slash]", () => {
+    const root = makeProject("r3c");
+    mkdirSync(join(root, "logs"), { recursive: true });
+    mkdirSync(join(root, "api", "logs"), { recursive: true });
+    writeFileSync(join(root, "logs", "l.md"), "---\nid: SPEC-LOG-ROOT\n---\n# SPEC-LOG-ROOT\nroot logs\n");
+    writeFileSync(join(root, "api", "logs", "a.md"), "---\nid: SPEC-LOG-API\n---\n# SPEC-LOG-API\napi logs\n");
+
+    const excludedPaths = (pattern: string, dbName: string): string[] => {
+      const r = egr(["index", ".", "--docs", "--exclude", pattern, "--json"], join(work, dbName), root);
+      expect(r.status, r.stderr).toBe(0);
+      return (JSON.parse(r.stdout) as ExcludedJson).excluded.paths.sort();
+    };
+    expect(excludedPaths("logs/", "r3c-1.db")).toEqual(["api/logs/", "logs/"]); // trailing slash: any depth
+    expect(excludedPaths("./logs/", "r3c-2.db")).toEqual(["api/logs/", "logs/"]); // ./ is dropped
+    expect(excludedPaths("/logs/", "r3c-3.db")).toEqual(["logs/"]); // leading slash: anchored
+
+    const help = egr(["--help"], join(work, "x.db"), work).stdout.replace(/\s+/g, " ");
+    expect(help).toContain(`A trailing '/' only means directories and does NOT anchor: "logs/" skips every directory named logs at any depth, api/logs included`);
+    expect(help).toContain(`"/logs/" skips only <dir>/logs`);
+    expect(help).toContain("excluded.byPattern");
+  });
+});

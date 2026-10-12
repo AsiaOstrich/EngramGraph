@@ -46,7 +46,7 @@ import {
   writeManifest,
   type ParseHealthSummary,
 } from "../code-graph/parse-manifest.js";
-import { walkFiles, summarizeUnindexed, type UnindexedSummary } from "./walk.js";
+import { walkFiles, summarizeUnindexed, type ExcludedByPattern, type UnindexedSummary } from "./walk.js";
 import { compileExcludes } from "./exclude.js";
 import { checkRefs, type RefCheckResult } from "./refs-check.js";
 import { ALGO_BACKED_COMMAND_LIST, describeAlgoSource, type AlgoSource } from "../structural-memory/algo-extension.js";
@@ -119,8 +119,11 @@ export interface IndexResultSummary {
    * What `--exclude` kept out of this run (XSPEC-457 R5). Present exactly when
    * patterns were given, including when nothing matched — a pattern that
    * matches nothing is the typo the summary must expose, not hide.
+   *
+   * `byPattern` (XSPEC-476 R3) says what each pattern matched on its own; the
+   * totals above cannot tell which of several patterns did nothing.
    */
-  excluded?: { patterns: string[]; paths: string[]; files: number };
+  excluded?: { patterns: string[]; paths: string[]; files: number; byPattern: ExcludedByPattern[] };
 }
 
 /**
@@ -380,7 +383,12 @@ export async function cmdIndex(
   // The code walk sees every non-skipped file in an excluded subtree, so its
   // count is the whole one; the docs walk's would only repeat it.
   if (exclude && codeWalk.excluded) {
-    result.excluded = { patterns: [...exclude.patterns], paths: codeWalk.excluded.paths, files: codeWalk.excluded.files };
+    result.excluded = {
+      patterns: [...exclude.patterns],
+      paths: codeWalk.excluded.paths,
+      files: codeWalk.excluded.files,
+      byPattern: codeWalk.excluded.byPattern,
+    };
   }
   if (opts.docs) {
     const docFiles = walkFiles(opts.dir, [".md"], { exclude }).files;
