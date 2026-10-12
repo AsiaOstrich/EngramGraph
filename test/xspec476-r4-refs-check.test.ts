@@ -1,12 +1,13 @@
 // implements XSPEC-476
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { isExternalExpression } from "../src/cli/refs-check.js";
 import { buildEgr, type BuiltEgr } from "./helpers/build-cli.js";
+import { runEgr } from "./helpers/run-egr.js";
 
 /**
  * XSPEC-476 R4 — `egr refs check` and the things that are not references.
@@ -52,20 +53,14 @@ function put(root: string, rel: string, content: string): void {
 }
 
 function egr(args: string[], cwd = work): { status: number | null; stdout: string; stderr: string } {
-  const r = spawnSync(process.execPath, [built.cli, ...args], {
-    encoding: "utf8",
-    env: { ...process.env, ENGRAM_DB: db },
-    cwd,
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 120_000,
-  });
-  return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+  return runEgr(built.cli, args, { env: { ...process.env, ENGRAM_DB: db }, cwd });
 }
 
 type Item = { raw: string; status: string; reason?: string; location?: string };
 function refsCheck(note: string): { status: number | null; stdout: string; stderr: string; items: Item[] } {
   const r = egr(["refs", "check", note, "--json"]);
-  return { ...r, items: r.stdout ? ((JSON.parse(r.stdout) as { items: Item[] }).items) : [] };
+  // No `r.stdout ? … : []` here: empty output is a failure to explain, not "no items".
+  return { ...r, items: (JSON.parse(r.stdout) as { items: Item[] }).items };
 }
 const byRaw = (items: Item[]): Record<string, Item> => Object.fromEntries(items.map((i) => [i.raw, i]));
 
