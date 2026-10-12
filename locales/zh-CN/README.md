@@ -285,7 +285,8 @@ AI 的记忆／笔记会用文件路径或符号名称引用代码，而代码�
 每个引用回报 `present`（仍存在）｜`moved`（附新位置，通过图与 `git` 查出）｜
 `missing`（找不到）｜`unresolvable`（信息不足——例如引用的是这个图从未索引过的
 另一个 repo；绝不会跟 `missing` 混为一谈）。只读——不会写入图，也不会修改被检查的
-文件（见下方[「EngramGraph 不存储什么」](#engramgraph-不存储什么)）。
+文件（见下方[「EngramGraph 不存储什么」](#engramgraph-不存储什么)）。只要有任何引用是
+`missing`，命令就以 `1` 结束（报告仍会完整打印），让脚本能据此中止；`unresolvable` 不算失败。
 
 ```bash
 egr refs check MEMORY.md

@@ -368,6 +368,8 @@ CLAUDE.md/AGENTS.md, a directory of notes) and reports each reference as
 graph was never told to index; never conflated with `missing`). Read-only —
 it never writes to the graph or the files it checks (see
 ["What EngramGraph does not store"](#what-engramgraph-does-not-store) below).
+It exits `1` when any reference is `missing` (the report is still printed in
+full), so a script can stop on it; `unresolvable` does not fail the run.
 
 ```bash
 egr refs check MEMORY.md
