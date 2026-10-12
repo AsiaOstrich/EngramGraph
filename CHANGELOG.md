@@ -6,16 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **`egr refs check` could crash or never answer when it looked up a symbol that is in the graph** (affects `0.13.0-beta.4` and earlier releases that have `refs check`; found by CI hanging twice). The lookup asked the graph two questions at once on one connection (`Promise.all` over "is it a Function" and "is it a Class"), and the engine does not survive two statements in flight on one connection: about one process in twenty died with SIGSEGV or stayed silent forever (measured on Linux: 21 of 480 runs; 0 of 960 when the same two queries ran one after the other). `GraphConnection.query` now runs statements one at a time in the order issued, whoever calls it, and `close()` waits for the statement that is running. Covered by `test/xspec476-refs-hang.test.ts`.
-
 ## [0.13.0-beta.4] - 2026-10-12
 
 *Fixes for the new findings in the 0.13.0-beta.3 Windows consumer report (XSPEC-476).*
 
 ### Fixed
 
+- **`egr refs check` could crash or never answer when it looked up a symbol that is in the graph** (affects earlier releases that have `refs check`; found by CI hanging twice before this beta was published). The lookup asked the graph two questions at once on one connection (`Promise.all` over "is it a Function" and "is it a Class"), and the engine does not survive two statements in flight on one connection: about one process in twenty died with SIGSEGV or stayed silent forever (measured on Linux: 21 of 480 runs; 0 of 960 when the same two queries ran one after the other). `GraphConnection.query` now runs statements one at a time in the order issued, whoever calls it, and `close()` waits for the statement that is running. Covered by `test/xspec476-refs-hang.test.ts`.
 - **`CHANGELOG.md` is in the published package** (R1). 0.13.0-beta.3 went out without it while the README tells the reader to look there for what changed — which in this release included exit codes. `package.json` `files` now lists it. Covered by `test/packaging.test.ts`, which builds the tarball npm would publish and reads its file list.
 - **The MCP server reports the package version** (R5a). `serverInfo.version` in the `initialize` answer was the constant `0.1.0`; it is now the installed `engramgraph` version, so a client's server list and a bug report name the real release. Covered by `test/xspec476-r5-small-fixes.test.ts` (built stdio server, real MCP client).
 - **A document is a spec or decision only when its heading *starts with* the id; documents sharing an id no longer overwrite each other within one run** (R2; present since 0.12.0). The rule applies to the documents of a single `egr index --docs` run (or one `index_docs` call); two separate runs over different directories still MERGE into the same node, the later one winning. On a real project a runbook titled "ADR-008 時區重構：Runbook" replaced the genuine ADR-008, a document titled "Unattended Deploy SOP (ADR-006)" became ADR-006, and the `--docs` summary said 6 specs / 20 decisions while the graph held 4 / 12, because two documents with one id were both counted and the last one written won. Now:
