@@ -182,6 +182,22 @@ describe("the published tarball contains what the install hooks need", () => {
     expect(files).not.toContain("preinstall.d.ts");
   });
 
+  // implements XSPEC-476 R1
+  it("ships CHANGELOG.md, and the CHANGELOG link in README.md points at a file in the tarball", () => {
+    // 0.13.0-beta.3 went out without it while README.md told the reader to look
+    // there for what changed — and what changed included exit codes (found on a
+    // Windows consumer install, 2026-10-12). `package.json`'s `files` listing is
+    // not the evidence; the tarball npm builds from it is.
+    expect(files).toContain("CHANGELOG.md");
+
+    // The README that ships is the README in the repo; read the link out of it
+    // rather than assuming its target.
+    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+    const link = /\]\(\.\/(CHANGELOG\.md)\)/.exec(readme);
+    expect(link, "README.md no longer links to CHANGELOG.md").not.toBeNull();
+    expect(files).toContain(link![1]);
+  });
+
   it("no longer ships postinstall.js", () => {
     // Removed in 0.9.1. It ran an MCP registration notice that npm suppressed,
     // so it delivered nothing while looking like a feature; its content moved

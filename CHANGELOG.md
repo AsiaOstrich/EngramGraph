@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+*Fixes for the new findings in the 0.13.0-beta.3 Windows consumer report (XSPEC-476).*
+
+### Fixed
+
+- **`CHANGELOG.md` is in the published package** (R1). 0.13.0-beta.3 went out without it while the README tells the reader to look there for what changed — which in this release included exit codes. `package.json` `files` now lists it. Covered by `test/packaging.test.ts`, which builds the tarball npm would publish and reads its file list.
+
 ## [0.13.0-beta.3] — 2026-10-12
 
 *Beta on npm `next`; `latest` stays 0.12.0 until the beta has been tested. Two output corrections found while trying beta.2 (XSPEC-457 R6, R7). Neither changes an exit code.*

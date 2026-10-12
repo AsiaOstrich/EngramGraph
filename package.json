@@ -33,6 +33,7 @@
     "language-support.js",
     "preinstall.js",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {
