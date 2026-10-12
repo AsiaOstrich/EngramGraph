@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`egr refs check` could crash or never answer when it looked up a symbol that is in the graph** (affects `0.13.0-beta.4` and earlier releases that have `refs check`; found by CI hanging twice). The lookup asked the graph two questions at once on one connection (`Promise.all` over "is it a Function" and "is it a Class"), and the engine does not survive two statements in flight on one connection: about one process in twenty died with SIGSEGV or stayed silent forever (measured on Linux: 21 of 480 runs; 0 of 960 when the same two queries ran one after the other). `GraphConnection.query` now runs statements one at a time in the order issued, whoever calls it, and `close()` waits for the statement that is running. Covered by `test/xspec476-refs-hang.test.ts`.
+
 ## [0.13.0-beta.4] - 2026-10-12
 
 *Fixes for the new findings in the 0.13.0-beta.3 Windows consumer report (XSPEC-476).*

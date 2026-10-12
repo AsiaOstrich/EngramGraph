@@ -23,6 +23,8 @@ export class GraphConnection {
   private readonly dbFilePath: string;
   private closed = false;
   private readonly readOnlyMode: boolean;
+  /** The statement most recently queued; the next one starts when it settles. See {@link query}. */
+  private tail: Promise<unknown> = Promise.resolve();
 
   private constructor(dbPath: string, readOnly: boolean) {
     // 4th positional arg is ryugraph's readOnly flag.
@@ -66,10 +68,32 @@ export class GraphConnection {
   /**
    * Run a Cypher statement and return all rows.
    *
+   * ## One statement in flight per connection (XSPEC-476)
+   *
+   * Statements that overlap on one connection are queued and run in the order
+   * they were issued. The engine does not survive two statements in flight on a
+   * single connection: `Promise.all([q1, q2])` — which `egr refs check` did to
+   * look a symbol up as both a Function and a Class — killed about one process
+   * in twenty with SIGSEGV or left it waiting forever (measured on Linux: 21 of
+   * 480 runs of that pair, 0 of 960 when the same two queries ran one after the
+   * other). CI saw it as a CLI child that never answered, twice. The guard
+   * lives here, not at the one call site that was found, so that no caller can
+   * reintroduce it.
+   *
    * @param cypher A Cypher query or DDL statement.
    * @param params Optional parameters for a prepared/parameterised statement.
    */
-  async query(
+  query(
+    cypher: string,
+    params?: Record<string, RyuValue>,
+  ): Promise<GraphRow[]> {
+    const run = this.tail.then(() => this.runStatement(cypher, params));
+    // A failure belongs to its own caller; it must not stop the statements queued behind it.
+    this.tail = run.catch(() => undefined);
+    return run;
+  }
+
+  private async runStatement(
     cypher: string,
     params?: Record<string, RyuValue>,
   ): Promise<GraphRow[]> {
@@ -136,6 +160,8 @@ export class GraphConnection {
       return;
     }
     this.closed = true;
+    // Let the statement already running finish (the ones queued behind it now fail as "closed").
+    await this.tail;
     await this.conn.close();
     await this.db.close();
   }
