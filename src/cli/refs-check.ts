@@ -85,11 +85,14 @@
  *
  * Performance: a git call per candidate is what round 2's design implied and
  * is NOT what round 3 does. Each indexed root's full set of ever-committed
- * paths is fetched ONCE (`git log --all --name-only`) and cached for the
- * whole `checkRefs` run; a candidate is checked against that in-memory set,
- * and only a CONFIRMED hit pays for a second, cheap call to find its last
- * commit. Symbol pickaxe search (`git log -S`) only runs at all for the
- * (typically much smaller) set of symbols with zero graph matches.
+ * paths is fetched ONCE (`git log --all --name-only`, each path with the
+ * newest commit that touched it) and cached for the whole `checkRefs` run; a
+ * candidate is checked against that in-memory index, and its last commit is
+ * read from the same index (XSPEC-476 R5c — it used to cost a further call per
+ * confirmed hit). The definition search for symbols with zero graph matches is
+ * batched too: one `git log -G` per root for ALL the run's symbols, see
+ * {@link SymbolHistory}. The number of git processes a run starts is
+ * independent of the number of references.
  *
  * ## This module ONLY reads: the graph, the filesystem, and `git log`
  *
@@ -511,26 +514,27 @@ function directoryRenameTarget(repoRoot: string, dirPrefix: string, cache: Renam
 }
 
 /** Does ANY path in `history` sit under `dirPrefix`? Git only records files, never directories, so a directory's "existence" in history is this prefix scan over the same file-path set {@link historyPathSet} already collects. */
-function directoryEverExisted(history: Set<string>, dirPrefix: string): boolean {
+function directoryEverExisted(history: HistoryIndex, dirPrefix: string): boolean {
   const prefix = dirPrefix.endsWith("/") ? dirPrefix : `${dirPrefix}/`;
-  for (const p of history) {
+  for (const p of history.keys()) {
     if (p.startsWith(prefix)) return true;
   }
   return false;
 }
 
-/** The most recent commit touching anything under `dirPrefix` — a trailing-slash pathspec, verified empirically to match every file below it. */
-function lastSeenCommitForDir(repoRoot: string, dirPrefix: string): string | null {
+/**
+ * The most recent commit touching anything under `dirPrefix`, read from the
+ * history already in memory (XSPEC-476 R5c). It used to be one more `git log -1
+ * -- <dir>/` per confirmed directory; the same answer is the lowest `order`
+ * (newest commit) among the paths under the prefix.
+ */
+function lastSeenCommitForDir(history: HistoryIndex, dirPrefix: string): string | null {
   const prefix = dirPrefix.endsWith("/") ? dirPrefix : `${dirPrefix}/`;
-  try {
-    const out = execFileSync("git", ["-C", repoRoot, "log", "--all", "--format=%h", "-1", "--", prefix], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    return out.length > 0 ? out : null;
-  } catch {
-    return null;
+  let best: HistoryEntry | null = null;
+  for (const [p, entry] of history) {
+    if (p.startsWith(prefix) && (best === null || entry.order < best.order)) best = entry;
   }
+  return best?.commit ?? null;
 }
 
 /** Does a directory named `firstSeg` exist as a sibling of any indexed root? (grounded "probably another checked-out repo" signal.) */
@@ -675,26 +679,50 @@ function repoRelativeCandidates(roots: string[], normalized: string, topCache: T
  * module-level, so nothing here persists between runs or leaks across tests
  * using different fixture repos at coincidentally-reused paths.
  */
-type HistoryCache = Map<string, Set<string> | "unavailable">;
+type HistoryCache = Map<string, HistoryIndex | "unavailable">;
+
+/** The newest commit that touched a path, and where it sits in the log (0 = newest). */
+interface HistoryEntry {
+  commit: string;
+  order: number;
+}
+
+/** Every path ever touched in a repository's history → the newest commit that touched it. */
+type HistoryIndex = Map<string, HistoryEntry>;
 
 /**
  * Every path ANY commit in `repoRoot`'s full history ever touched (added,
- * modified, deleted, or the source/target of a rename) — one `git log`
- * call, cached, and then a plain Set membership check per candidate. This is
- * the batching DEC-115 H1 R3 asks for: checking hundreds of `missing`
- * candidates against a per-root call each, not a call each.
+ * modified, deleted, or the source/target of a rename), each with the newest
+ * commit that touched it — ONE `git log` call, cached.
+ *
+ * This is the batching DEC-115 H1 R3 asks for, and since XSPEC-476 R5c it also
+ * answers "which commit last touched this path" from the same output. That
+ * question used to be a further `git log -1 -- <path>` per `missing` path: a
+ * document with a hundred stale paths ran a hundred extra processes.
  */
-function historyPathSet(repoRoot: string, cache: HistoryCache): Set<string> | "unavailable" {
+function historyPathSet(repoRoot: string, cache: HistoryCache): HistoryIndex | "unavailable" {
   const cached = cache.get(repoRoot);
   if (cached) return cached;
-  let result: Set<string> | "unavailable";
+  let result: HistoryIndex | "unavailable";
   try {
-    const out = execFileSync("git", ["-C", repoRoot, "log", "--all", "--name-only", "--format="], {
+    const out = execFileSync("git", ["-C", repoRoot, "log", "--all", "--name-only", "--format=%x00%h"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      maxBuffer: 64 * 1024 * 1024,
+      maxBuffer: 256 * 1024 * 1024,
     });
-    result = new Set(out.split("\n").map((l) => l.trim()).filter((l) => l.length > 0));
+    const index: HistoryIndex = new Map();
+    // One chunk per commit, newest first: "<hash>\n\n<path>\n<path>\n…". The
+    // first time a path is seen is therefore its newest commit.
+    const chunks = out.split("\0");
+    for (let order = 1; order < chunks.length; order++) {
+      const lines = chunks[order]!.split("\n");
+      const commit = lines[0]!.trim();
+      for (let i = 1; i < lines.length; i++) {
+        const path = lines[i]!.trim();
+        if (path.length > 0 && !index.has(path)) index.set(path, { commit, order });
+      }
+    }
+    result = index;
   } catch {
     result = "unavailable";
   }
@@ -702,17 +730,9 @@ function historyPathSet(repoRoot: string, cache: HistoryCache): Set<string> | "u
   return result;
 }
 
-/** The most recent commit that touched `relPath` — only called for a CONFIRMED history hit, so this is a small, bounded number of extra calls, not one per candidate. */
-function lastSeenCommit(repoRoot: string, relPath: string): string | null {
-  try {
-    const out = execFileSync("git", ["-C", repoRoot, "log", "--all", "--format=%h", "-1", "--", relPath], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    return out.length > 0 ? out : null;
-  } catch {
-    return null;
-  }
+/** The newest commit that touched `relPath`, from the history already loaded — null when there is none. */
+function lastSeenCommit(history: HistoryIndex, relPath: string): string | null {
+  return history.get(relPath)?.commit ?? null;
 }
 
 /**
@@ -794,7 +814,9 @@ function findEvidence(
       if (existsSync(join(toplevel, moved))) {
         return { kind: "found", item: { ...base, status: "moved", location: moved } };
       }
-      const commit = isDir ? lastSeenCommitForDir(toplevel, moved) : lastSeenCommit(toplevel, moved);
+      const movedHistory = historyPathSet(toplevel, cache);
+      const commit =
+        movedHistory === "unavailable" ? null : isDir ? lastSeenCommitForDir(movedHistory, moved) : lastSeenCommit(movedHistory, moved);
       return {
         kind: "found",
         item: {
@@ -822,7 +844,7 @@ function findEvidence(
       // wrong root/coordinate returned nothing even on a confirmed hit
       // ("last commit could not be determined"), because `-- <path>` is a
       // pathspec, and a pathspec IS resolved relative to `-C`'s cwd.
-      const commit = isDir ? lastSeenCommitForDir(toplevel, repoRelativePath) : lastSeenCommit(toplevel, repoRelativePath);
+      const commit = isDir ? lastSeenCommitForDir(history, repoRelativePath) : lastSeenCommit(history, repoRelativePath);
       return {
         kind: "found",
         item: {
@@ -1112,34 +1134,178 @@ function definitionPattern(name: string): string {
   ].join("|");
 }
 
-/**
- * Evidence a symbol was once DEFINED somewhere in an indexed root's history
- * — `git log -G<definition pattern>`, restricted to source-code paths
- * ({@link CODE_PATHSPECS}) so a `.md`/`.yaml` mention can never count. Only
- * called when the graph already found zero matches (see the lazy call site
- * in {@link resolveSymbolRef}), so this is never batched — the candidate
- * volume at that point is small.
- */
-function symbolEverExisted(roots: string[], cwd: string, name: string): { root: string; commit: string } | null | "unavailable" {
-  const searchRoots = roots.length > 0 ? roots : [cwd];
-  const pattern = definitionPattern(name);
-  let sawUnavailable = false;
-  for (const root of searchRoots) {
-    try {
-      const out = execFileSync(
-        "git",
-        ["-C", root, "log", "--all", "-G", pattern, "--format=%h", "-1", "--", ...CODE_PATHSPECS],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-      ).trim();
-      if (out.length > 0) return { root, commit: out };
-    } catch {
-      sawUnavailable = true;
-    }
-  }
-  return sawUnavailable ? "unavailable" : null;
+/** `definitionPattern` for JavaScript's regex engine: the same text, with the POSIX class spelled `\s`. */
+function definitionRegex(name: string): RegExp {
+  return new RegExp(definitionPattern(name).replace(/\[\[:space:\]\]/g, "\\s"));
 }
 
-async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: string[], cwd: string): Promise<PartialItem> {
+/**
+ * The longest `-G` pattern one `git log` call is given. Windows allows 32,767
+ * characters for a whole command line, so the names of a document are split
+ * across as many calls as that needs — a handful, never one per name.
+ */
+const MAX_PATTERN_CHARS = 12_000;
+
+/**
+ * Evidence that symbols were once DEFINED in an indexed root's history — `git
+ * log -G<definition pattern>`, restricted to source-code paths
+ * ({@link CODE_PATHSPECS}) so a `.md`/`.yaml` mention can never count.
+ *
+ * ## Batched (XSPEC-476 R5c)
+ *
+ * This used to run one `git log -G` per symbol per root: a pickaxe scan of the
+ * whole history each time, which is where a 12-file, 213-reference run spent 75
+ * seconds. Now every candidate symbol of the run is searched for in ONE call
+ * per root (split only to respect {@link MAX_PATTERN_CHARS}), the patterns
+ * joined with `|`.
+ *
+ * ## The commit named is the one that contains the text
+ *
+ * A joined pattern tells git "some commit defines SOME of these names", not
+ * which. So the call also prints each matching commit's diff (`-p -U0`), and
+ * the attribution is done here, by testing each changed line against THAT
+ * symbol's own definition pattern. The first commit — newest first — with such
+ * a line is the answer for that symbol; a symbol no line matches gets no commit
+ * at all, however many commits matched the others. (Taking git's first hit for
+ * the joined pattern would hand every symbol the newest commit of whichever
+ * name was defined last.)
+ */
+class SymbolHistory {
+  private readonly byRoot = new Map<string, Map<string, string | null> | "unavailable">();
+
+  /** `candidates`: every symbol name the run may ask about, so the first question about a root answers them all. */
+  constructor(private readonly candidates: readonly string[]) {}
+
+  /** The newest commit in which `name` was defined in one of `roots`, `null` when none, `"unavailable"` when git could not tell. */
+  everDefined(roots: string[], cwd: string, name: string): { root: string; commit: string } | null | "unavailable" {
+    let sawUnavailable = false;
+    for (const root of roots.length > 0 ? roots : [cwd]) {
+      const known = this.ensure(root, name);
+      if (known === "unavailable") {
+        sawUnavailable = true;
+        continue;
+      }
+      const commit = known.get(name);
+      if (commit) return { root, commit };
+    }
+    return sawUnavailable ? "unavailable" : null;
+  }
+
+  private ensure(root: string, wanted: string): Map<string, string | null> | "unavailable" {
+    let known = this.byRoot.get(root);
+    if (known === "unavailable") return known;
+    let names: string[];
+    if (known === undefined) {
+      known = new Map();
+      names = [...new Set([...this.candidates, wanted])];
+    } else if (known.has(wanted)) {
+      return known;
+    } else {
+      names = [wanted]; // a name nobody announced: ask for it alone rather than answer "never defined"
+    }
+    const scanned = scanDefinitions(root, names);
+    if (scanned === "unavailable") {
+      if (this.byRoot.get(root) === undefined) this.byRoot.set(root, "unavailable");
+      return "unavailable";
+    }
+    for (const [n, c] of scanned) known.set(n, c);
+    this.byRoot.set(root, known);
+    return known;
+  }
+}
+
+/** For each name, the newest commit in `root`'s history with a line defining it, or null. `"unavailable"` when git cannot be run there. */
+function scanDefinitions(root: string, names: readonly string[]): Map<string, string | null> | "unavailable" {
+  const result = new Map<string, string | null>(names.map((n) => [n, null]));
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let size = 0;
+  for (const n of names) {
+    const len = definitionPattern(n).length + 3;
+    if (current.length > 0 && size + len > MAX_PATTERN_CHARS) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(n);
+    size += len;
+  }
+  if (current.length > 0) chunks.push(current);
+
+  for (const chunk of chunks) {
+    let out: string;
+    try {
+      out = execFileSync(
+        "git",
+        [
+          "-C", root, "log", "--all", "-G", chunk.map((n) => `(${definitionPattern(n)})`).join("|"),
+          "--format=%x00%h", "-p", "-U0", "--no-color", "--no-ext-diff", "--", ...CODE_PATHSPECS,
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 512 * 1024 * 1024 },
+      );
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOBUFS") return "unavailable";
+      // The matching diffs did not fit in memory: fall back to one bounded question per name.
+      for (const n of chunk) {
+        try {
+          const hash = execFileSync(
+            "git",
+            ["-C", root, "log", "--all", "-G", definitionPattern(n), "--format=%h", "-1", "--", ...CODE_PATHSPECS],
+            { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+          ).trim();
+          result.set(n, hash.length > 0 ? hash : null);
+        } catch {
+          return "unavailable";
+        }
+      }
+      continue;
+    }
+    const pending = new Map(chunk.map((n) => [n, definitionRegex(n)]));
+    for (const commitChunk of out.split("\0").slice(1)) {
+      if (pending.size === 0) break;
+      const lines = commitChunk.split("\n");
+      const commit = lines[0]!.trim();
+      let inHeader = false;
+      for (let i = 1; i < lines.length && pending.size > 0; i++) {
+        const line = lines[i]!;
+        // `diff --git` … up to the first `@@` is the file header (`--- a/x`, `+++ b/x`), not changed text.
+        if (line.startsWith("diff --git")) {
+          inHeader = true;
+          continue;
+        }
+        if (inHeader) {
+          if (line.startsWith("@@")) inHeader = false;
+          continue;
+        }
+        if (line[0] !== "+" && line[0] !== "-") continue;
+        const text = line.slice(1);
+        for (const [n, re] of pending) {
+          if (re.test(text)) {
+            result.set(n, commit);
+            pending.delete(n);
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * The name a symbol reference is looked up under: the last segment of a dotted
+ * name. Null for a reference that is never looked up at all (a built-in
+ * namespace, a test-framework global) — those are not candidates.
+ */
+function symbolLookupName(raw: string): string | null {
+  const fullName = raw.replace(/\(.*\)$/s, "");
+  if (fullName.includes(".")) {
+    const parts = fullName.split(".");
+    return BUILTIN_NAMESPACES.has(parts[0]!) ? null : parts[parts.length - 1]!;
+  }
+  return isBareTestFrameworkGlobal(fullName) ? null : fullName;
+}
+
+async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: string[], cwd: string, symbols: SymbolHistory): Promise<PartialItem> {
   const base = { kind: "symbol" as const, raw: ref.raw };
   if (ref.expression) {
     // Before ANY lookup (XSPEC-476 R4): searching the graph or the history for the
@@ -1151,7 +1317,7 @@ async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: strin
         "an expression (it has arguments, whitespace or an operator), not a reference to a symbol of this repository; nothing was looked up. Write `name()` to have a symbol checked",
     };
   }
-  const fullName =ref.raw.replace(/\(.*\)$/s, "");
+  const fullName = ref.raw.replace(/\(.*\)$/s, "");
   const expectedFile = ref.pairedPath ? normalizePathToken(ref.pairedPath) : undefined;
   const matchesExpected = (file: string): boolean =>
     expectedFile != null && (file === expectedFile || file.endsWith(`/${expectedFile}`) || expectedFile.endsWith(`/${file}`));
@@ -1170,7 +1336,7 @@ async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: strin
 
   const finish = (files: string[]): PartialItem => {
     if (files.length === 0) {
-      const evidence = symbolEverExisted(roots, cwd, lookupName);
+      const evidence = symbols.everDefined(roots, cwd, lookupName);
       if (evidence === "unavailable") {
         return { ...base, status: "missing", reason: "no Function/Class with this name was found in the graph; git was unavailable so its history could not be checked" };
       }
@@ -1278,15 +1444,26 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
   const items: RefCheckItem[] = [];
   let skippedTokens = 0;
 
-  for (const file of files) {
-    const text = readFileSync(file, "utf8");
-    const { refs, skipped } = extractReferences(text);
+  // Extract every file first (XSPEC-476 R5c), so the history search for symbols
+  // can be asked about all of them at once instead of once per reference.
+  const extracted = files.map((file) => ({ file, ...extractReferences(readFileSync(file, "utf8")) }));
+  const candidates = new Set<string>();
+  for (const { refs } of extracted) {
+    for (const ref of refs) {
+      if (ref.kind !== "symbol" || ref.expression) continue;
+      const name = symbolLookupName(ref.raw);
+      if (name) candidates.add(name);
+    }
+  }
+  const symbols = new SymbolHistory([...candidates]);
+
+  for (const { file, refs, skipped } of extracted) {
     skippedTokens += skipped;
     for (const ref of refs) {
       const partial =
         ref.kind === "path"
           ? await resolvePathRef(conn, ref, roots, cwd, historyCache, topCache, renameCache)
-          : await resolveSymbolRef(conn, ref, roots, cwd);
+          : await resolveSymbolRef(conn, ref, roots, cwd, symbols);
       items.push({ ...partial, sourceFile: file, sourceLine: ref.line });
     }
   }

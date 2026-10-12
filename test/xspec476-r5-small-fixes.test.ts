@@ -1,9 +1,10 @@
 // implements XSPEC-476
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -133,5 +134,120 @@ describe("XSPEC-476 R5b: egr communities --limit", () => {
       expect(r.status, `--limit ${bad}`).toBe(1);
       expect(r.stderr).toMatch(/--limit must be a positive whole number/);
     }
+  });
+});
+
+describe("XSPEC-476 R5c: egr refs check asks the history in batches, not once per reference", () => {
+  const N = 12;
+  let repo: string;
+  let db: string;
+
+  /** The environment for fixture git commands: this process's, minus every variable git exports to a hook. */
+  const cleanGitEnv = (): NodeJS.ProcessEnv => {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    const names = execFileSync("git", ["rev-parse", "--local-env-vars"], { encoding: "utf8", env: process.env }).split("\n");
+    for (const name of names) if (name.trim()) delete env[name.trim()];
+    return env;
+  };
+  const git = (...args: string[]): string =>
+    execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@test.com", ...args], {
+      cwd: repo,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      env: cleanGitEnv(),
+    });
+  const put = (rel: string, content: string): void => {
+    mkdirSync(dirname(join(repo, rel)), { recursive: true });
+    writeFileSync(join(repo, rel), content);
+  };
+
+  /** Run `egr refs check <note> --json` with every git process it starts recorded. */
+  const check = (note: string): { status: number | null; items: Array<{ raw: string; status: string; reason?: string }>; gitCalls: string[][] } => {
+    const callLog = join(work, `git-calls-${Math.random().toString(36).slice(2)}.log`);
+    writeFileSync(callLog, "");
+    const r = spawnSync(process.execPath, [built.cli, "refs", "check", note, "--json"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ENGRAM_DB: db,
+        EGR_GIT_CALL_LOG: callLog,
+        NODE_OPTIONS: `--import ${pathToFileURL(join(REPO_ROOT, "test", "helpers", "git-call-log.mjs")).href}`,
+      },
+      cwd: work,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 120_000,
+    });
+    const gitCalls = readFileSync(callLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string[]);
+    return { status: r.status, items: (JSON.parse(r.stdout) as { items: Array<{ raw: string; status: string; reason?: string }> }).items, gitCalls };
+  };
+
+  beforeAll(() => {
+    repo = join(work, "r5c-repo");
+    db = join(work, "r5c.db");
+    mkdirSync(repo, { recursive: true });
+    git("init", "-q");
+    put("src/lib.ts", "export function realFn() { return 0; }\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "lib");
+    // N functions, each in its own file, each deleted in its own later commit — so each has its own last commit.
+    for (let i = 0; i < N; i++) {
+      put(`src/gone${i}.ts`, `export function goneFn${i}() { return ${i}; }\n`);
+    }
+    git("add", "-A");
+    git("commit", "-q", "-m", "add the functions that will go");
+    for (let i = 0; i < N; i++) {
+      git("rm", "-q", `src/gone${i}.ts`);
+      git("commit", "-q", "-m", `drop ${i}`);
+    }
+    const r = egr(["index", repo], db);
+    if (r.status !== 0) throw new Error(`fixture index failed: ${r.stderr}`);
+
+    const many = [];
+    for (let i = 0; i < N; i++) many.push(`- symbol: \`goneFn${i}()\``, `- path: \`src/gone${i}.ts\``);
+    many.push("- never existed: `neverDefinedFn()`", "- here: `realFn()`", "");
+    writeFileSync(join(work, "many.md"), many.join("\n"));
+    writeFileSync(join(work, "few.md"), ["- symbol: `goneFn0()`", "- path: `src/gone0.ts`", ""].join("\n"));
+  }, 180_000);
+
+  it("a document with 12 deleted symbols and 12 deleted paths starts as many git processes as one with a single of each, and each symbol gets its own commit [xspec476-r5c-batched-history]", () => {
+    const many = check(join(work, "many.md"));
+    const few = check(join(work, "few.md"));
+    expect(many.status).toBe(1); // missing references were found
+    expect(few.status).toBe(1);
+
+    // The number of git processes does not depend on the number of references...
+    expect(many.gitCalls.length).toBe(few.gitCalls.length);
+    // ...and is small in absolute terms: the toplevel, the renames, the path history, the symbol history.
+    expect(many.gitCalls.length).toBeLessThanOrEqual(6);
+    expect(many.gitCalls.filter((a) => a.includes("log")).length).toBeLessThanOrEqual(4);
+
+    // Batching did not blur the answers: every symbol and every path got a commit that contains it.
+    const byRaw = Object.fromEntries(many.items.map((i) => [i.raw, i]));
+    const symbolCommits = new Set<string>();
+    for (let i = 0; i < N; i++) {
+      const sym = byRaw[`goneFn${i}()`]!;
+      expect(sym.status, sym.reason).toBe("missing");
+      const hash = /commit ([0-9a-f]{7,})/.exec(sym.reason ?? "")?.[1];
+      expect(hash, sym.reason).toBeDefined();
+      symbolCommits.add(hash!);
+      const shown = git("show", hash!);
+      expect(shown).toContain(`goneFn${i}`);
+      expect(shown, `commit for goneFn${i} must not be another symbol's`).not.toContain(`goneFn${(i + 1) % N}`);
+      // The NEWEST commit that changed it: the one that dropped it, not the one that added it.
+      expect(git("show", "-s", "--format=%s", hash!).trim()).toBe(`drop ${i}`);
+
+      const path = byRaw[`src/gone${i}.ts`]!;
+      expect(path.status, path.reason).toBe("missing");
+      const pathHash = /commit ([0-9a-f]{7,})/.exec(path.reason ?? "")?.[1];
+      expect(pathHash, path.reason).toBeDefined();
+      expect(git("show", "--stat", pathHash!)).toContain(`src/gone${i}.ts`);
+      expect(git("show", "-s", "--format=%s", pathHash!).trim()).toBe(`drop ${i}`); // the newest, not the commit that added it
+    }
+    expect(symbolCommits.size).toBe(N); // twelve different commits, not one shared by all
+
+    // A symbol that was never defined stays unresolvable with no commit, however many others matched.
+    expect(byRaw["neverDefinedFn()"]!.status).toBe("unresolvable");
+    expect(byRaw["neverDefinedFn()"]!.reason).not.toMatch(/commit/);
+    expect(byRaw["realFn()"]!.status).toBe("present");
   });
 });
