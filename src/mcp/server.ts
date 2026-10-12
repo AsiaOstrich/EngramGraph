@@ -108,7 +108,7 @@ const failFrom = (e: unknown) => {
  * exactly as before R2).
  */
 export function createMcpServer(graph: GraphConnection | GraphSource, opts: { manifestPath?: string } = {}): McpServer {
-  const server = new McpServer({ name: "engramgraph", version: "0.1.0" });
+  const server = new McpServer({ name: "engramgraph", version: EGR_VERSION });
   const manifestPath = opts.manifestPath;
   const source: GraphSource = "use" in graph ? graph : fixedGraph(graph);
 

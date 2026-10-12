@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`CHANGELOG.md` is in the published package** (R1). 0.13.0-beta.3 went out without it while the README tells the reader to look there for what changed — which in this release included exit codes. `package.json` `files` now lists it. Covered by `test/packaging.test.ts`, which builds the tarball npm would publish and reads its file list.
+- **The MCP server reports the package version** (R5a). `serverInfo.version` in the `initialize` answer was the constant `0.1.0`; it is now the installed `engramgraph` version, so a client's server list and a bug report name the real release. Covered by `test/xspec476-r5-small-fixes.test.ts` (built stdio server, real MCP client).
 
 ## [0.13.0-beta.3] — 2026-10-12
 
