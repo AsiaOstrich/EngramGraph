@@ -67,10 +67,11 @@ usually be omitted.
 Codex / Cursor / Windsurf, all 8 tools, and an example flow:
 **[docs/MCP.md](./docs/MCP.md)**.
 
-> **Indexing from the assistant has one limit worth knowing.** The `index_code`
-> tool takes file *contents*, not a directory — it does not walk the filesystem.
-> That makes it a good fit for updating the files an assistant just edited, and
-> a poor one for indexing a whole repository. For that, run `egr index ./src`.
+> **Indexing is a terminal job, not an assistant one.** The stdio server is
+> read-only, so it does not offer the tools that write — `index_code`,
+> `index_docs`, `ingest_feedback`, `related` (see "MCP" below). Index with
+> `egr index ./src` (add `--docs` for specs and decisions); that works while the
+> server is running and the server sees the result on its next query.
 
 ### Native dependencies and platform support
 
@@ -335,14 +336,21 @@ Or just `egr serve --port 3000`. API reference: **[docs/API.md](./docs/API.md)**
 
 ## MCP — use EngramGraph from a coding assistant
 
-EngramGraph ships an MCP server (stdio) exposing 12 tools — the code/knowledge
-graph queries (`index_code`, `index_docs`, `call_chain`, `impact_analysis`,
-`ingest_feedback`, `implementers`, `implemented_specs`, `related`),
-diagnostics (`blindspots`, `signatures`, `doctor`), and a Markdown reference
-checker (`refs_check`, DEC-115 — see below) — so any MCP-capable assistant can
-use it as a code + knowledge graph. Zero LLM, deterministic, **no Docker**.
-Every tool declares MCP annotations (`readOnlyHint`/`destructiveHint`/
-`idempotentHint`/`openWorldHint`) so a client can tell what it's about to run.
+EngramGraph ships an MCP server (stdio) so any MCP-capable assistant can use
+it as a code + knowledge graph. Zero LLM, deterministic, **no Docker**. It has
+12 tools in two sets, and **the stdio server (`egr-mcp`, `egr mcp`) is
+read-only: it lists the 8 that read** — the graph queries (`call_chain`,
+`impact_analysis`, `implementers`, `implemented_specs`), diagnostics
+(`blindspots`, `signatures`, `doctor`) and a Markdown reference checker
+(`refs_check`, DEC-115 — see below). The other 4 write to the graph —
+`index_code`, `index_docs`, `ingest_feedback` and `related` (ranking builds a
+projected graph) — so `tools/list` over stdio does not include them, and the
+server's `instructions` name the terminal command for each: `egr index <dir>`,
+`egr index <dir> --docs`, `egr feedback <type> <node-id>`, `egr related <seed-id>`.
+They exist only on a server created on a writable connection (embedding
+`createMcpServer(conn)`). Every tool declares MCP annotations
+(`readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`) so a client
+can tell what it's about to run.
 
 ```bash
 # Claude Code, from an installed package:
@@ -355,8 +363,8 @@ other terminal commands work alongside it, on Windows too, and the next query
 sees what they wrote. A query that meets a writer mid-way waits briefly and then
 says the graph is busy; it never answers with an empty result it could not look up.
 
-Full setup (Claude Code / Codex / Cursor / Windsurf), all 12 tools with their
-annotations, and an example flow: **[docs/MCP.md](./docs/MCP.md)**.
+Full setup (Claude Code / Codex / Cursor / Windsurf), which tools each mode
+offers with their annotations, and an example flow: **[docs/MCP.md](./docs/MCP.md)**.
 
 ### Checking whether a memory note's code references still hold (DEC-115)
 

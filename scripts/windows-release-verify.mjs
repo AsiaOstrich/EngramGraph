@@ -206,10 +206,25 @@ async function main() {
     record("5b god-nodes offline", gn.status === 0 && /rank/.test(gn.stdout) && newFiles.length === 0,
       `exit ${gn.status}; new files under ~/.ryu: ${newFiles.length}`, `${gn.out}${newFiles.length ? `\n[new]\n${newFiles.join("\n")}` : ""}`);
 
-    // Step 6 — the MCP `related` tool must REFUSE (refusal is the pass condition).
+    // Step 6 — the MCP `related` tool must not work through the read-only server. It can fail in two ways, and
+    // both are a pass: releases up to 0.13.0-beta.4 list the tool and REFUSE the call (isError + the refusal
+    // phrase); from beta.5 (XSPEC-481 R3) the tool is not offered at all and calling it is an error. What is
+    // never a pass: the tool is listed and answers, or it is not listed and the call still succeeds.
+    // This script judges released packages too (`latest` is 0.12.x), so it has to understand both.
+    const listed = await mcp.request("tools/list", {});
+    const offers = (listed.result?.tools ?? []).some((t) => t.name === "related");
     const call = await mcp.request("tools/call", { name: "related", arguments: { seedId: seed } });
     const text = JSON.stringify(call.result ?? call.error ?? {});
-    record("6 MCP related refuses", isReadOnlyRefusal(call.result), "read-only refusal expected (isError + the refusal phrase)", text);
+    const refused = isReadOnlyRefusal(call.result);
+    const failedUnoffered = !offers && (call.error !== undefined || call.result?.isError === true);
+    record(
+      "6 MCP related is not usable here (refused, or not offered)",
+      offers ? refused : failedUnoffered,
+      offers
+        ? `listed in tools/list; read-only refusal expected (isError + the refusal phrase): ${refused ? "got it" : "did not get it"}`
+        : `not listed in tools/list; calling it ${failedUnoffered ? "failed" : "SUCCEEDED"}`,
+      text,
+    );
   } catch (e) {
     record("4-6 MCP session", false, e.message, mcp.stderr());
   } finally {

@@ -62,16 +62,22 @@ the command/args/env are the same:
 
 ## Tools
 
+The table lists all twelve. **The stdio server (`egr-mcp`, `egr mcp`) is read-only and offers eight of them**: every
+tool except `index_code`, `index_docs`, `ingest_feedback` and `related`, which write to the graph and are marked
+*writable only* below. `tools/list` over stdio does not include those four (0.13.0-beta.4 listed them and refused
+each call); they exist on a server created on a writable connection, such as `createMcpServer(conn)` in an embedding.
+Why, and the terminal command for each, is under "Tools not offered over stdio".
+
 | Tool | Input | Returns |
 |------|-------|---------|
-| `index_code` | `files: { path, source }[]` | Indexes source into the code graph (cross-file `CALLS`). Counts of files/functions/classes/calls (+ ambiguous/unresolved). |
-| `index_docs` | `docs: { content, fallbackId? }[]` | Indexes front-matter markdown into the knowledge graph. Counts of specs/decisions/impacts/supersedes, plus `conflicts`: each id claimed by more than one document, with the document kept and those set aside. |
+| `index_code` *(writable only)* | `files: { path, source }[]` | Indexes source into the code graph (cross-file `CALLS`). Counts of files/functions/classes/calls (+ ambiguous/unresolved). |
+| `index_docs` *(writable only)* | `docs: { content, fallbackId? }[]` | Indexes front-matter markdown into the knowledge graph. Counts of specs/decisions/impacts/supersedes, plus `conflicts`: each id claimed by more than one document, with the document kept and those set aside. |
 | `call_chain` | `symbol`, `direction?` (`callers`\|`callees`\|`both`), `depth?` | Who calls / is called by a function symbol. "What breaks if I change X?" |
 | `impact_analysis` | `nodeId`, `maxHops?` | Decisions in a spec's impact chain (`IMPACTS` + multi-hop `SUPERSEDES`). |
-| `ingest_feedback` | `nodeId`, `type`, `nodeLabel?` (`Function`\|`Spec`\|`Decision`\|`Doc`), `weight?` | Evolve a node's SAGE confidence from a feedback event (`test_fail`/`test_pass`/`human_fix`). |
+| `ingest_feedback` *(writable only)* | `nodeId`, `type`, `nodeLabel?` (`Function`\|`Spec`\|`Decision`\|`Doc`), `weight?` | Evolve a node's SAGE confidence from a feedback event (`test_fail`/`test_pass`/`human_fix`). |
 | `implementers` | `specId` | Files declaring `// implements <specId>` and the functions they define. "Which code implements this spec?" Reads `IMPLEMENTS(Module→Spec)` + `DEFINES`. |
 | `implemented_specs` | `moduleId` | Specs a file declares it implements. "Which spec governs this code?" `moduleId` is the file's indexed path. Reads `IMPLEMENTS(Module→Spec)`. |
-| `related` | `seedId`, `depth?`, `limit?` | Structurally important nodes around a seed id (seeded PageRank over all edge types, crosses `Function`/`Spec`/`Module`/`Decision`). "What's connected to X?" **Refused over stdio** — see below. |
+| `related` *(writable only)* | `seedId`, `depth?`, `limit?` | Structurally important nodes around a seed id (seeded PageRank over all edge types, crosses `Function`/`Spec`/`Module`/`Decision`). "What's connected to X?" **Not offered over stdio** — see below. |
 | `blindspots` | — | Files that parsed partially or failed, from the parse-health manifest — where the graph may be missing nodes/edges. Use after a query reports `indexHealth.possiblyIncomplete` to find out WHAT is missing. `manifestPresent` distinguishes "nothing wrong" from "never measured". |
 | `signatures` | — | The same files grouped by root cause instead of listed individually — turns "584 files" into "1 problem". Use when `blindspots` returns a long list. |
 | `doctor` | — | Which languages are available and why any are not, what was compiled on this machine, which commands need network. Does not open the graph, so it answers when indexing itself is what is broken. |
@@ -92,7 +98,7 @@ result:
   (`ENGRAM_LOCK_WAIT_MS` changes it) and then returns `the graph … is being
   written by another process … This is not an empty result`.
 
-### Tools refused over stdio, and why
+### Tools not offered over stdio, and why
 
 The stdio server opens the graph **read-only, for the length of one query**, and
 closes it again. The engine is single-writer, and the server is long-lived — it
@@ -107,8 +113,10 @@ engine takes its lock when the file is opened, on every platform. (That is what
 So the server holds nothing between queries — each tool call costs one open and
 close, about 20 ms on a small graph, and a terminal command only ever meets a
 query that is running right now. Overlapping tool calls share one open. Four
-tools are refused here, each naming the command that does the job — and that
-command works while the server is running:
+tools can therefore not work here, so they are **not offered**: `tools/list`
+omits them (calling one by name is "not found"), and the server's `instructions`
+— sent to the client when it connects — name the command that does each job.
+That command works while the server is running:
 
 | Tool | Run instead |
 |------|-------------|
@@ -157,15 +165,17 @@ capability is real; only this transport cannot provide it.
 
 ## Example assistant flow
 
-1. **Index** the repo: the assistant calls `index_code` with the project's
-   source files, and `index_docs` with its spec/decision markdown.
+1. **Index** the repo in a terminal: `egr index ./src --docs` (a writable
+   embedding of the server can be fed through `index_code` and `index_docs`
+   instead; the stdio server does not offer them).
 2. **Ask "what calls `execute`?"** → `call_chain` with
    `{ symbol: "execute", direction: "callers", depth: 2 }` returns the callers.
 3. **Ask "which decisions sit behind SPEC-001?"** → `impact_analysis` with
    `{ nodeId: "SPEC-001" }` returns e.g. `[ADR-001, ADR-002]`.
-4. **Record an outcome**: after a test fails for a function, `ingest_feedback`
-   with `{ nodeId, type: "test_fail" }` lowers that node's confidence, so the
-   next ranked query surfaces the more-reinforced nodes first.
+4. **Record an outcome**: after a test fails for a function,
+   `egr feedback test_fail <node-id>` in a terminal (or `ingest_feedback` with
+   `{ nodeId, type: "test_fail" }` on a writable server) lowers that node's
+   confidence, so the next ranked query surfaces the more-reinforced nodes first.
 
 ## Notes
 

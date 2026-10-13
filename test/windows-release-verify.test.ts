@@ -83,30 +83,93 @@ function step(prefix: string): { step: string; ok: boolean; detail: string; raw:
   return r;
 }
 
-/** What a real server answers for `related`, asked over stdio the way a client does. */
-async function callOnRealServer<T>(fn: (call: (name: string, args: Record<string, unknown>) => Promise<unknown>) => Promise<T>): Promise<T> {
+/** What a real server answers, asked over stdio the way a client does: tool calls, and the names `tools/list` offers. */
+async function callOnRealServer<T>(
+  fn: (call: (name: string, args: Record<string, unknown>) => Promise<unknown>, list: () => Promise<string[]>) => Promise<T>,
+): Promise<T> {
   const home = join(work, "home");
   const client = new Client({ name: "t", version: "0" });
   await client.connect(
     new StdioClientTransport({ command: process.execPath, args: [built.mcp], cwd: target, env: cleanEnv(home), stderr: "ignore" }),
   );
   try {
-    return await fn((name, args) => client.callTool({ name, arguments: args }));
+    return await fn(
+      (name, args) => client.callTool({ name, arguments: args }),
+      async () => (await client.listTools()).tools.map((t) => t.name),
+    );
   } finally {
     await client.close();
   }
 }
 
 describe("XSPEC-457: the release verifier recognises the MCP's refusal", () => {
-  it("the real MCP server's refusal of related is recognised, and the verifier's step 6 passes on it [verify-refusal-real-server]", async () => {
-    const res = await callOnRealServer((call) => call("related", { seedId: "a.ts#alpha" }));
-    // The server really refused — a server that answered would fail here, not slip through as "recognised".
-    expect((res as { isError?: boolean }).isError).toBe(true);
-    expect(isReadOnlyRefusal(res), JSON.stringify(res)).toBe(true);
-    // And the verifier, which judged the same call in its own run, agrees.
-    const s = step("6 MCP related refuses");
+  it("the real MCP server does not offer related, a call to it fails, and the verifier's step 6 passes on that [verify-related-not-offered]", async () => {
+    // XSPEC-481 R3: the read-only server no longer lists the writing tools, so there is no refusal to recognise
+    // in the current build — what step 6 judges is that `related` cannot be used. A server that listed it and
+    // answered would fail here, and so would step 6.
+    const { listed, outcome } = await callOnRealServer(async (call, list) => ({
+      listed: await list(),
+      outcome: await call("related", { seedId: "a.ts#alpha" }).then(
+        (r) => ({ threw: false as const, result: r }),
+        (e: unknown) => ({ threw: true as const, result: String(e) }),
+      ),
+    }));
+    expect(listed).not.toContain("related");
+    expect(outcome.threw || (outcome.result as { isError?: boolean }).isError === true, JSON.stringify(outcome)).toBe(true);
+    // And the verifier, which judged the same thing in its own run, agrees.
+    const s = step("6 MCP related");
     expect(s.ok, `${s.detail}\n${s.raw}`).toBe(true);
+    expect(s.detail).toMatch(/not listed in tools\/list; calling it failed/);
   }, 60_000);
+
+  it("the verifier's step 6 still judges a release that lists related and refuses it, and fails one that lists it and answers [verify-step6-both-shapes]", () => {
+    // Releases up to 0.13.0-beta.4 (and `latest`, 0.12.x) list the tool and refuse the call. The script is what
+    // decides whether they may move to `latest`, so it must keep passing that shape. Run it against a stub
+    // package whose MCP server behaves like one of those, and against one that answers.
+    const run = (behaviour: "refuses" | "answers") => {
+      const stubPkg = join(work, `stub-${behaviour}`);
+      mkdirSync(join(stubPkg, "dist", "mcp"), { recursive: true });
+      mkdirSync(join(stubPkg, "dist", "cli"), { recursive: true });
+      // The stub reuses the real CLI for everything but the MCP server.
+      writeFileSync(
+        join(stubPkg, "dist", "cli", "index.js"),
+        `import { spawnSync } from "node:child_process";\nconst r = spawnSync(process.execPath, [${JSON.stringify(built.cli)}, ...process.argv.slice(2)], { stdio: "inherit" });\nprocess.exit(r.status ?? 1);\n`,
+      );
+      writeFileSync(
+        join(stubPkg, "dist", "mcp", "stdio.js"),
+        [
+          `import readline from "node:readline";`,
+          `const rl = readline.createInterface({ input: process.stdin });`,
+          `const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\\n");`,
+          `rl.on("line", (line) => {`,
+          `  const m = JSON.parse(line);`,
+          `  if (m.method === "initialize") send({ id: m.id, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "stub", version: "0" } } });`,
+          `  else if (m.method === "tools/list") send({ id: m.id, result: { tools: [{ name: "related", inputSchema: { type: "object" } }] } });`,
+          `  else if (m.method === "tools/call") send({ id: m.id, result: ${
+            behaviour === "refuses"
+              ? `{ isError: true, content: [{ type: "text", text: "error: related ${READ_ONLY_REFUSAL_MARKER}: it only reads the graph" }] }`
+              : `{ content: [{ type: "text", text: "[]" }] }`
+          } });`,
+          `});`,
+        ].join("\n"),
+      );
+      const out = join(work, `stub-${behaviour}.json`);
+      spawnSync(process.execPath, [join(REPO_ROOT, "scripts", "windows-release-verify.mjs"), "--target", target, "--package-dir", stubPkg, "--json", out], {
+        cwd: work,
+        encoding: "utf8",
+        env: cleanEnv(join(work, "home")),
+        timeout: 240_000,
+      });
+      const rep = JSON.parse(readFileSync(out, "utf8")) as typeof report;
+      return rep.results.find((r) => r.step.startsWith("6 MCP related"));
+    };
+    const refuses = run("refuses");
+    expect(refuses, "the script did not reach step 6 against the refusing stub").toBeDefined();
+    expect(refuses!.ok, `${refuses!.detail}\n${refuses!.raw}`).toBe(true);
+    const answers = run("answers");
+    expect(answers, "the script did not reach step 6 against the answering stub").toBeDefined();
+    expect(answers!.ok, `${answers!.detail}\n${answers!.raw}`).toBe(false);
+  }, 240_000);
 
   it("a reply that is not the refusal is not recognised: a successful answer, and an error that is not a refusal [verify-refusal-negatives]", async () => {
     const { answer, notFound } = await callOnRealServer(async (call) => ({

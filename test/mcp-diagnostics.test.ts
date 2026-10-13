@@ -96,21 +96,20 @@ describe("MCP diagnostics tools (XSPEC-373 B6)", () => {
     expect(data.filesWithSignatures).toBe(1);
   });
 
-  it("a read-only server refuses the writing tools by name, and points at the CLI", async () => {
+  it("a read-only server does not offer the writing tools, calling one fails, and it says which egr command does each job", async () => {
     // XSPEC-374: the stdio server holds the graph read-only so terminal
-    // commands keep working alongside it. The writing tools cannot run there —
-    // they must say so and name the alternative, not fail at some lower layer
-    // with a lock error the assistant cannot act on.
+    // commands keep working alongside it. The writing tools cannot run there.
+    // Until 0.13.0-beta.4 they were listed and every call refused; since
+    // XSPEC-481 R3 they are not listed at all (an assistant calls what it
+    // finds in `tools/list`), and the server `instructions` name the CLI
+    // command that does each job.
     //
-    // `related` joined this list after shipping in the read-only set by
-    // mistake. It reads in the sense that matters to a caller and writes in the
-    // sense that matters to the engine: ranking installs the algo extension and
-    // builds a projected graph. It looked fine under test because it returns
-    // early on an unknown seed id, so the write was never reached — hence the
-    // case below passes a seed that EXISTS.
+    // `related` is in this list although it reads like a query: ranking
+    // installs the algo extension and builds a projected graph. The graph below
+    // has a real node, so a server that DID offer `related` would reach its
+    // write path here instead of returning [] for an unknown id.
     const conn = GraphConnection.open(join(dir, "ro.db"));
     await initSchema(conn);
-    // A real node, so `related` reaches its write path instead of returning [].
     await conn.query(`CREATE (s:Spec {id: 'SPEC-1', title: 'Real', confidence: 0.9})`);
     await conn.close();
     const ro = GraphConnection.open(join(dir, "ro.db"), { readOnly: true });
@@ -119,20 +118,23 @@ describe("MCP diagnostics tools (XSPEC-373 B6)", () => {
     const [ct, st] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(st), client.connect(ct)]);
 
-    for (const [tool, args, cli] of [
-      ["index_code", { files: [] }, "egr index"],
-      ["index_docs", { docs: [] }, "egr index"],
-      ["ingest_feedback", { nodeId: "x", type: "test_pass" }, "egr feedback"],
-      ["related", { seedId: "SPEC-1" }, "egr related"],
-    ] as const) {
-      const res = (await client.callTool({ name: tool, arguments: args })) as {
-        content: Array<{ text: string }>;
-        isError?: boolean;
-      };
-      expect(res.isError).toBe(true);
-      expect(res.content[0]!.text).toContain(tool);
-      expect(res.content[0]!.text).toContain(cli);
+    const offered = (await client.listTools()).tools.map((t) => t.name);
+    const writing = [
+      ["index_code", { files: [] }, "egr index <dir>"],
+      ["index_docs", { docs: [] }, "egr index <dir> --docs"],
+      ["ingest_feedback", { nodeId: "x", type: "test_pass" }, "egr feedback <type> <node-id>"],
+      ["related", { seedId: "SPEC-1" }, "egr related <seed-id>"],
+    ] as const;
+    const instructions = client.getInstructions() ?? "";
+    for (const [tool, args, cli] of writing) {
+      expect(offered, `${tool} is listed by a read-only server`).not.toContain(tool);
+      // The SDK answers an unlisted name with an error result, not a refusal and not a success.
+      const res = (await client.callTool({ name: tool, arguments: args })) as { isError?: boolean; content: Array<{ text: string }> };
+      expect(res.isError, `${tool} answered`).toBe(true);
+      expect(res.content[0]!.text).toMatch(/not found/i);
+      expect(instructions, `the instructions do not name the command for ${tool}`).toContain(cli);
     }
+    expect(offered).toHaveLength(8);
   });
 
   it("doctor answers without a manifest, and without opening the graph", async () => {

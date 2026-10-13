@@ -3,10 +3,15 @@
 /**
  * What a read-only MCP server's refusal looks like, defined in ONE place.
  *
- * Two parties need to agree on this wording:
- *   - the server, which says it (`readOnlyRefusal` in `server.ts`);
- *   - anyone who has to recognise it — `scripts/windows-release-verify.mjs`
- *     step 6, whose pass condition is "the MCP `related` tool refused".
+ * **Since XSPEC-481 R3 the current server no longer says it**: a read-only server
+ * does not offer the writing tools at all, so there is nothing to refuse. This
+ * file stays because `scripts/windows-release-verify.mjs` step 6 also judges
+ * RELEASED packages — 0.12.x and 0.13.0-beta.1 to beta.4 list the tool and refuse
+ * the call — and has to recognise their refusal. Do not delete it while those
+ * releases can still be verified.
+ *
+ * (Before R3 two parties had to agree on this wording: the server, which said it
+ * as `readOnlyRefusal` in `server.ts`, and the verifier, which had to recognise it.)
  *
  * They used to agree by each carrying a copy. XSPEC-457 R1 rewrote the
  * server's sentence, the verifier kept the old one, and nothing connected
@@ -22,11 +27,10 @@
  */
 
 /**
- * The fixed phrase every read-only refusal contains. The server builds its
- * sentence around it (`<tool> <MARKER>: it only reads the graph, …`), so the
- * wording cannot change here without the server changing with it; and
+ * The fixed phrase every read-only refusal contains. 0.13.0-beta.1 to beta.4
+ * built their sentence around it (`<tool> <MARKER>: it only reads the graph, …`);
  * `test/windows-release-verify.test.ts` pins a real sample of what a published
- * server said, so it cannot be changed on both sides at once unnoticed either.
+ * server said, so the wording cannot be changed here unnoticed.
  */
 export const READ_ONLY_REFUSAL_MARKER = "is not available through this MCP server";
 

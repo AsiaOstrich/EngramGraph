@@ -68,16 +68,21 @@ command/args/env 都一样：
 
 ## 工具
 
+下表列出全部十二个。**stdio server（`egr-mcp`、`egr mcp`）是只读的，只提供其中八个**：除了 `index_code`、
+`index_docs`、`ingest_feedback`、`related` 之外的所有工具；这四个会写入图，下表标为*仅可写入模式*。
+stdio 的 `tools/list` 不含这四个（0.13.0-beta.4 会列出它们、再在每次调用时拒绝）；它们只存在于以可写入连接创建的
+server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对应的终端命令见下方“通过 stdio 不提供的工具”。
+
 | 工具 | 输入 | 返回 |
 |------|------|------|
-| `index_code` | `files: { path, source }[]` | 将源代码索引进代码图谱（跨文件 `CALLS`）。返回 files/functions/classes/calls（+ ambiguous/unresolved）计数。 |
-| `index_docs` | `docs: { content, fallbackId? }[]` | 将带 front-matter 的 markdown 索引进知识图谱。返回 specs/decisions/impacts/supersedes 计数。 |
+| `index_code` *(仅可写入模式)* | `files: { path, source }[]` | 将源代码索引进代码图谱（跨文件 `CALLS`）。返回 files/functions/classes/calls（+ ambiguous/unresolved）计数。 |
+| `index_docs` *(仅可写入模式)* | `docs: { content, fallbackId? }[]` | 将带 front-matter 的 markdown 索引进知识图谱。返回 specs/decisions/impacts/supersedes 计数。 |
 | `call_chain` | `symbol`、`direction?`（`callers`\|`callees`\|`both`）、`depth?` | 谁调用某函数符号 / 被它调用。“改 X 会坏掉什么？” |
 | `impact_analysis` | `nodeId`、`maxHops?` | 某 spec 影响链中的决策（`IMPACTS` + 多跳 `SUPERSEDES`）。 |
-| `ingest_feedback` | `nodeId`、`type`、`nodeLabel?`（`Function`\|`Spec`\|`Decision`\|`Doc`）、`weight?` | 按反馈事件（`test_fail`/`test_pass`/`human_fix`）演化节点的 SAGE 置信度。 |
+| `ingest_feedback` *(仅可写入模式)* | `nodeId`、`type`、`nodeLabel?`（`Function`\|`Spec`\|`Decision`\|`Doc`）、`weight?` | 按反馈事件（`test_fail`/`test_pass`/`human_fix`）演化节点的 SAGE 置信度。 |
 | `implementers` | `specId` | 声明 `// implements <specId>` 的文件及其定义的函数。「哪些代码实现了这个 spec？」读取 `IMPLEMENTS(Module→Spec)` + `DEFINES`。 |
 | `implemented_specs` | `moduleId` | 一个文件声明自己实现了哪些 spec。「这段代码受哪个 spec 规范？」`moduleId` 是该文件被索引时的路径。读取 `IMPLEMENTS(Module→Spec)`。 |
-| `related` | `seedId`、`depth?`、`limit?` | 从某个种子 id 出发、结构上重要的节点（对所有边类型跑 seeded PageRank，横跨 `Function`/`Spec`/`Module`/`Decision`）。「有什么跟 X 相关？」 |
+| `related` *(仅可写入模式)* | `seedId`、`depth?`、`limit?` | 从某个种子 id 出发、结构上重要的节点（对所有边类型跑 seeded PageRank，横跨 `Function`/`Spec`/`Module`/`Decision`）。「有什么跟 X 相关？」 |
 | `blindspots` | — | 解析不完全或失败的文件（来自 parse-health manifest）——图可能缺少节点／边的地方。当查询报告 `indexHealth.possiblyIncomplete` 时用它查出**缺的是什么**。`manifestPresent` 用来区分「没有问题」与「从未测量过」。 |
 | `signatures` | — | 同一批文件改以**根本原因**分组而非逐一列出——把「584 个文件」变成「1 个问题」。当 `blindspots` 返回很长的列表时使用。 |
 | `doctor` | — | 哪些语言可用、不可用的原因、这台机器上有哪些是自行编译的、哪些命令需要网络。**不打开图**，所以在「索引本身坏掉」时仍然回答得出来。 |
@@ -93,7 +98,7 @@ command/args/env 都一样：
 - **另一个进程正在写图。** 查询会重试约 5 秒（可用 `ENGRAM_LOCK_WAIT_MS` 调整），然后返回
   `the graph … is being written by another process … This is not an empty result`。
 
-### 通过 stdio 被拒绝的工具，以及原因
+### 通过 stdio 不提供的工具，以及原因
 
 stdio server 只在**一次查询的期间**把图**只读**打开，查完就关。这个引擎是单一写入者，而 server 是
 长生命的——它跟你的编辑器开多久就活多久。如果它握有写入句柄，你在终端同时执行的任何 `egr`
@@ -103,8 +108,9 @@ Windows 11 上，编辑器开着的整段时间里 `egr index`、`egr feedback`�
 都会失败。）
 
 所以 server 在查询之间什么都不握——每次工具调用付出一次打开与关闭（小图约 20 ms），终端命令只会碰到
-“此刻正在跑”的那一次查询；同时重叠的工具调用共用同一次打开。有四个工具在这里被拒绝，每个都会指名该改跑
-哪个命令——而那个命令在 server 运行时就能用：
+“此刻正在跑”的那一次查询；同时重叠的工具调用共用同一次打开。所以有四个工具在这里无法工作，因此**不提供**：
+`tools/list` 不含它们（用名称硬调用会得到“not found”），而 server 在客户端连接时发送的 `instructions`
+会指明各自该改跑哪个命令——那个命令在 server 运行时就能用：
 
 | 工具 | 改跑 |
 |------|------|
@@ -144,7 +150,8 @@ server 会在下一次查询时看到结果——不需要重启。在第一次 
 
 ## 助手流程示例
 
-1. **索引** repo：助手以项目源代码调用 `index_code`，以其 spec/decision markdown 调用 `index_docs`。
+1. **索引** repo：在终端运行 `egr index ./src --docs`（以可写入模式嵌入的 server 也可改由 `index_code`、
+   `index_docs` 喂入；stdio server 不提供它们）。
 2. **问“谁调用 `execute`？”** → 以 `{ symbol: "execute", direction: "callers", depth: 2 }`
    调用 `call_chain`，返回调用者。
 3. **问“SPEC-001 背后有哪些决策？”** → 以 `{ nodeId: "SPEC-001" }` 调用

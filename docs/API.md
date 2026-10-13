@@ -171,10 +171,13 @@ Constants `STEP`, `MIN_CONFIDENCE`, `MAX_CONFIDENCE` are exported.
 
 ## mcp — Model Context Protocol
 
-- `createMcpServer(conn: GraphConnection): McpServer` — registers 8 tools
-  (`index_code`, `index_docs`, `call_chain`, `impact_analysis`,
-  `ingest_feedback`, `implementers`, `implemented_specs`, `related`). See
-  [MCP.md](./MCP.md).
+- `createMcpServer(conn: GraphConnection | GraphSource): McpServer` — registers
+  the tools of [MCP.md](./MCP.md): 12 on a writable connection (`index_code`,
+  `index_docs`, `call_chain`, `impact_analysis`, `ingest_feedback`,
+  `implementers`, `implemented_specs`, `related`, `blindspots`, `signatures`,
+  `doctor`, `refs_check`), and 8 on a read-only source such as the stdio server's
+  (without the four that write: `index_code`, `index_docs`, `ingest_feedback`,
+  `related`).
 
 ## embedded — in-process client
 

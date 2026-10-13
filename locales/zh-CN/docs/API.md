@@ -171,10 +171,12 @@ tree-sitter 将 `.ts` / `.tsx` / `.js` 解析为 `Function` / `Class` / `Module`
 
 ## mcp — Model Context Protocol
 
-- `createMcpServer(conn: GraphConnection): McpServer` — 注册 8 个工具
-  （`index_code`、`index_docs`、`call_chain`、`impact_analysis`、
-  `ingest_feedback`、`implementers`、`implemented_specs`、`related`）。
-  见 [MCP.md](./MCP.md)。
+- `createMcpServer(conn: GraphConnection | GraphSource): McpServer` — 注册
+  [MCP.md](./MCP.md) 的工具：可写入连接上 12 个（`index_code`、`index_docs`、
+  `call_chain`、`impact_analysis`、`ingest_feedback`、`implementers`、
+  `implemented_specs`、`related`、`blindspots`、`signatures`、`doctor`、
+  `refs_check`），只读来源（如 stdio server）上 8 个（不含会写入的四个：
+  `index_code`、`index_docs`、`ingest_feedback`、`related`）。
 
 ## embedded — 同进程客户端
 

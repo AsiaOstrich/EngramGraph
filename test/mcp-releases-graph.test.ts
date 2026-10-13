@@ -85,8 +85,11 @@ describe("XSPEC-457 R1: a running MCP server and terminal egr commands", () => {
   });
 });
 
-describe("XSPEC-457 R1: the refusal for a writing tool works on every platform", () => {
-  it("index_code over stdio says to run egr index in a terminal and that this works while the server runs", async () => {
+describe("XSPEC-457 R1: the writing tools over stdio send the reader to a terminal command that works", () => {
+  it("a read-only stdio server says to run egr index in a terminal and that this works while the server runs [xspec457-r1-stdio-instructions]", async () => {
+    // Until 0.13.0-beta.4 this was the refusal text of `index_code`. XSPEC-481 R3 stopped offering the tool; the
+    // same sentence now reaches the client in the server's `instructions`, and what this pins is unchanged: the
+    // command it names, and that it works while the server is running (which was false on Windows in 0.12.0).
     const dir = mkdtempSync(join(tmpdir(), "egr-r1-refuse-"));
     const dbPath = join(dir, "graph.db");
     const proj = join(dir, "p");
@@ -99,17 +102,14 @@ describe("XSPEC-457 R1: the refusal for a writing tool works on every platform",
     const client = new Client({ name: "t", version: "0" });
     await client.connect(new StdioClientTransport({ command: process.execPath, args: [built.mcp], env: env as Record<string, string>, stderr: "ignore" }));
     try {
-      const res = (await client.callTool({ name: "index_code", arguments: { files: [{ path: "x.ts", source: "export function x(){}" }] } })) as {
-        isError?: boolean;
-        content: Array<{ text: string }>;
-      };
-      const text = res.content[0]!.text;
-      expect(res.isError).toBe(true);
+      const text = client.getInstructions() ?? "";
       expect(text).toContain("egr index <dir>");
       expect(text).toMatch(/works while this server is running/);
       // The old wording promised "queries here and egr commands in a terminal can run at the same time"
       // as the reason — which was false on Windows for as long as the server stayed open.
       expect(text).not.toMatch(/holds the graph read-only so that/);
+      // And the tool itself is not there to be called.
+      expect((await client.listTools()).tools.map((t) => t.name)).not.toContain("index_code");
     } finally {
       await client.close();
       rmSync(dir, { recursive: true, force: true });

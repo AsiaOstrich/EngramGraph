@@ -62,7 +62,7 @@ claude mcp list   # egr … ✓ Connected
 
 Codex／Cursor／Windsurf、8 个工具的完整清单与示例流程：**[docs/MCP.md](./docs/MCP.md)**。
 
-> **从助手端建索引有一个值得知道的限制。** `index_code` 工具收的是文件**内容**而非目录——它不会自己遍历文件系统。因此它适合更新助手刚刚改过的那几个文件，不适合索引整个 repo。整库索引请用 `egr index ./src`。
+> **建索引是终端的工作，不是助手的工作。** stdio server 是只读的，所以不提供会写入的工具——`index_code`、`index_docs`、`ingest_feedback`、`related`（见下方“MCP”）。请用 `egr index ./src`（加 `--docs` 索引规格与决策）建索引；它在 server 运行期间也能跑，server 下一次查询就看得到结果。
 
 ### 原生依赖与平台支持
 
@@ -258,13 +258,15 @@ const app = createServer({ connection: conn });   // Hono app；路由在 /graph
 
 ## MCP — 在编程助手中使用 EngramGraph
 
-EngramGraph 内置一个 MCP server（stdio），暴露 12 个工具——代码／知识图谱查询
-（`index_code`、`index_docs`、`call_chain`、`impact_analysis`、`ingest_feedback`、
-`implementers`、`implemented_specs`、`related`）、诊断（`blindspots`、`signatures`、
-`doctor`），以及一个 Markdown 引用查核员（`refs_check`，DEC-115，见下）——让任何
-支持 MCP 的助手都能把它当成代码 + 知识图谱使用。无 LLM、确定性、**免 Docker**。
-每个工具都声明了 MCP 标注（`readOnlyHint`／`destructiveHint`／`idempotentHint`／
-`openWorldHint`），让客户端知道它即将执行的是什么。
+EngramGraph 内置一个 MCP server（stdio），让任何支持 MCP 的助手都能把它当成代码 + 知识图谱使用。
+无 LLM、确定性、**免 Docker**。共有 12 个工具，分两组，而且**stdio server（`egr-mcp`、`egr mcp`）是只读的，
+只列出会读取的 8 个**——图谱查询（`call_chain`、`impact_analysis`、`implementers`、`implemented_specs`）、
+诊断（`blindspots`、`signatures`、`doctor`），以及一个 Markdown 引用查核员（`refs_check`，DEC-115，见下）。
+另外 4 个会写入图——`index_code`、`index_docs`、`ingest_feedback`、`related`（排名会建投影图）——所以 stdio 的
+`tools/list` 不含它们，server 的 `instructions` 会写明各自对应的终端命令：`egr index <dir>`、
+`egr index <dir> --docs`、`egr feedback <type> <node-id>`、`egr related <seed-id>`。它们只存在于以可写入连接创建的 server
+（嵌入式使用 `createMcpServer(conn)`）。每个工具都声明了 MCP 标注（`readOnlyHint`／`destructiveHint`／
+`idempotentHint`／`openWorldHint`），让客户端知道它即将执行的是什么。
 
 ```bash
 # Claude Code，使用已安装的包：
@@ -275,7 +277,7 @@ server 只在查询进行的期间握着图，不是编辑器开多久就握多�
 `egr god-nodes` 与其他终端命令能和它并行（Windows 也是），下一次查询就看得到它们写的结果。
 查询中途碰到写入者时会稍等再说“图正忙”，不会拿一个没能查到的空结果回答。
 
-完整配置（Claude Code / Codex / Cursor / Windsurf）、全部 12 个工具及其标注、与示例流程：
+完整配置（Claude Code / Codex / Cursor / Windsurf）、两种模式各提供哪些工具及其标注、与示例流程：
 **[docs/MCP.md](./docs/MCP.md)**。
 
 ### 查核记忆笔记里的代码引用是否仍然正确（DEC-115）

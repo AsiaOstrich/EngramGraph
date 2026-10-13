@@ -10,6 +10,18 @@
  * implementers, implemented_specs, related, blindspots, signatures, doctor,
  * refs_check.
  *
+ * ## A read-only server offers eight tools, not twelve (XSPEC-481 R3)
+ *
+ * `index_code`, `index_docs`, `ingest_feedback` and `related` write to the graph
+ * (the last one by installing the algo extension and building a projected
+ * graph), and the stdio server never writes. 0.13.0-beta.4 listed them anyway and
+ * answered each call with a refusal; an assistant reads `tools/list` and calls
+ * what it finds, so the first thing it tried was a tool that could not work.
+ * Now a read-only source (`GraphSource.readOnly`, which is what stdio uses) does
+ * not offer them at all, and says in the server `instructions` which `egr`
+ * command does each job. A writable source — a bare connection, tests,
+ * embedding — still has all twelve.
+ *
  * ## The graph is held per query, not per session (XSPEC-457 R1)
  *
  * The server asks a {@link GraphSource} for the graph each time a tool needs
@@ -56,7 +68,6 @@ import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js"
 import { applyFeedback, feedbackForEventType, CONFIDENCE_LABELS } from "../sage/index.js";
 import { related } from "../structural-memory/index.js";
 import { checkRefs } from "../cli/refs-check.js";
-import { READ_ONLY_REFUSAL_MARKER } from "./read-only-refusal.mjs";
 
 /** Sentinel manifest root for MCP-side `index_code` (R2). See its use below. */
 const MCP_INDEX_ROOT = "mcp:index_code";
@@ -94,6 +105,18 @@ const failFrom = (e: unknown) => {
 };
 
 /**
+ * What a read-only server tells a client at `initialize` (XSPEC-481 R3), because
+ * the four tools it does not offer are exactly the ones an assistant is likely to
+ * look for, and "not in the list" does not say where the work goes instead.
+ */
+const READ_ONLY_INSTRUCTIONS =
+  "This server only reads the graph: it holds the graph for the length of one query, so an `egr` command in a terminal " +
+  "never collides with it. The operations that write are therefore not offered here — run them in a terminal, which works " +
+  "while this server is running, and this server sees the result on its next query (no restart): " +
+  "index code `egr index <dir>`, index documents `egr index <dir> --docs`, record feedback `egr feedback <type> <node-id>`, " +
+  "related nodes `egr related <seed-id>` (it installs and builds in the graph, so it is a writer too).";
+
+/**
  * Register EngramGraph's tools on an MCP server backed by a graph.
  *
  * `graph` is either a {@link GraphSource} (the stdio server passes a
@@ -108,31 +131,14 @@ const failFrom = (e: unknown) => {
  * exactly as before R2).
  */
 export function createMcpServer(graph: GraphConnection | GraphSource, opts: { manifestPath?: string } = {}): McpServer {
-  const server = new McpServer({ name: "engramgraph", version: EGR_VERSION });
-  const manifestPath = opts.manifestPath;
   const source: GraphSource = "use" in graph ? graph : fixedGraph(graph);
+  const server = new McpServer(
+    { name: "engramgraph", version: EGR_VERSION },
+    source.readOnly ? { instructions: READ_ONLY_INSTRUCTIONS } : undefined,
+  );
+  const manifestPath = opts.manifestPath;
 
-  /**
-   * Refusal for a tool that writes, on a read-only source (XSPEC-374). The
-   * engine is single-writer and two writers corrupt the graph, so this server
-   * never writes. Names the alternative, and that alternative has to work on
-   * every platform: it used to say "run `egr ...`", which on Windows failed
-   * for as long as this server was open (XSPEC-457 R1). It works now because
-   * the server only holds the graph while a query is running.
-   *
-   * The phrase that identifies this as a refusal is NOT written here: it is
-   * `READ_ONLY_REFUSAL_MARKER`, shared with the release verifier that has to
-   * recognise it (see `read-only-refusal.mjs` for why that is one definition).
-   */
-  const readOnlyRefusal = (tool: string, cliEquivalent: string) =>
-    fail(
-      `${tool} ${READ_ONLY_REFUSAL_MARKER}: it only reads the graph, so a writer in a terminal ` +
-        `can never collide with it. Run \`${cliEquivalent}\` in a terminal — that works while this server is ` +
-        `running, because the server holds the graph only for the duration of a query. ` +
-        `This server sees the result on its next query; no restart is needed.`,
-    );
-
-  server.registerTool(
+  const indexCode = server.registerTool(
     "index_code",
     {
       title: "Index code",
@@ -150,7 +156,6 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ files }) => {
-      if (source.readOnly) return readOnlyRefusal("index_code", "egr index <dir>");
       try {
         // The per-file `parseHealth` array is not returned in the tool result
         // (that stays the pre-R2 shape — health is surfaced on QUERY responses
@@ -178,7 +183,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     },
   );
 
-  server.registerTool(
+  const indexDocs = server.registerTool(
     "index_docs",
     {
       title: "Index docs",
@@ -191,7 +196,6 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ docs }) => {
-      if (source.readOnly) return readOnlyRefusal("index_docs", "egr index <dir> --docs");
       try {
         return ok(await source.use((conn) => indexKnowledgeDocs(conn, docs)));
       } catch (e) {
@@ -273,7 +277,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     },
   );
 
-  server.registerTool(
+  const ingestFeedback = server.registerTool(
     "ingest_feedback",
     {
       title: "Ingest feedback (SAGE)",
@@ -291,7 +295,6 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async ({ nodeId, type, nodeLabel, weight }) => {
-      if (source.readOnly) return readOnlyRefusal("ingest_feedback", "egr feedback <type> <node-id>");
       try {
         const mapped = feedbackForEventType(type);
         const update = await source.use((conn) =>
@@ -355,7 +358,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     },
   );
 
-  server.registerTool(
+  const relatedTool = server.registerTool(
     "related",
     {
       title: "Related nodes",
@@ -368,23 +371,15 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       },
       // readOnlyHint is FALSE, deliberately, despite this tool reading like a
       // query: ranking installs the algo extension and builds a projected
-      // graph (both writes, see the comment in this tool's handler below and
-      // `read-only-commands.ts`'s module doc, XSPEC-374). Getting this wrong
-      // is exactly the trap DEC-115 called out annotations to guard against.
+      // graph (both writes — see `read-only-commands.ts`'s module doc,
+      // XSPEC-374). Getting this wrong is exactly the trap DEC-115 called out
+      // annotations to guard against. It is also why a read-only server does
+      // not offer it (end of this function): it looks like a query, so it
+      // would be called on ids that exist and could only fail there.
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ seedId, depth, limit }) => {
       try {
-        // `related` READS in the sense that matters to a caller and WRITES in
-        // the sense that matters to the engine: ranking requires installing the
-        // algo extension and building a projected graph. Both are writes, so it
-        // cannot run here (XSPEC-374).
-        //
-        // The refusal has to come before the call, not after, because the
-        // engine's own error arrives only when the seed exists — `related`
-        // returns early on an unknown id, so without this an agent would see
-        // this tool work on ids that are absent and fail on ids that are there.
-        if (source.readOnly) return readOnlyRefusal("related", `egr related <seed-id>`);
         return ok(await source.use((conn) => related(conn, seedId, depth ?? 2, limit ?? 10)));
       } catch (e) {
         return failFrom(e);
@@ -504,6 +499,14 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       }
     },
   );
+
+  // XSPEC-481 R3: on a read-only source the four tools above can only refuse, so they are not offered. A tool that is
+  // listed and always answers "not available here" costs an assistant a call to find out; 0.13.0-beta.4 listed all
+  // twelve and refused four. `remove()` takes a tool out of `tools/list` AND out of `tools/call` (an unlisted name
+  // is "not found"); registering them first keeps their definitions in one place for the writable server.
+  if (source.readOnly) {
+    for (const tool of [indexCode, indexDocs, ingestFeedback, relatedTool]) tool.remove();
+  }
 
   return server;
 }
