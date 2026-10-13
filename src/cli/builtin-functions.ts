@@ -29,6 +29,15 @@
  * unmistakably the language's or library's own; do not add a name only because a
  * project of yours defines it.
  *
+ * Method names that projects very commonly give to their own functions — `get`,
+ * `add`, `remove`, `update`, `find`, `parse`, `Select`, `Count`, `Add`, `Where`, a
+ * list's `append`, and so on — are left out on purpose, for the reason above: each
+ * one widens the window in which a really deleted function is reported
+ * `unresolvable`. What is listed is the language's global functions (all of PHP's
+ * and Python's builtins named here, JavaScript's globals) and the method names that
+ * are distinctively the library's (`forEach`, `toLowerCase`, `ToString`,
+ * `FirstOrDefault`).
+ *
  * Matching is by exact name, case-sensitive (`Parse` is C#, `parse` is not
  * listed). The lists are what documents actually cite when they say "PHP's
  * `date()`", "Python's `len()`", "`.map()`" — not an inventory of any standard
@@ -69,25 +78,20 @@ export const BUILTIN_FUNCTIONS: Readonly<Record<BuiltinLanguage, ReadonlySet<str
       setTimeout setInterval clearTimeout clearInterval requestAnimationFrame queueMicrotask structuredClone
       encodeURIComponent decodeURIComponent encodeURI decodeURI escape unescape btoa atob
       alert confirm prompt eval require
-      map filter reduce reduceRight forEach some every find findIndex flat flatMap
-      push pop shift unshift slice splice concat indexOf lastIndexOf includes join reverse sort fill
-      split replace replaceAll match matchAll trim trimStart trimEnd padStart padEnd startsWith endsWith
-      charAt charCodeAt substring substr toLowerCase toUpperCase toString toFixed toLocaleString valueOf
-      keys values entries assign freeze create defineProperty hasOwnProperty
-      then catch finally resolve reject all allSettled race
-      stringify parse now random
+      forEach reduce reduceRight flatMap indexOf lastIndexOf includes
+      splice unshift substring substr startsWith endsWith padStart padEnd trimStart trimEnd replaceAll
+      charAt charCodeAt toLowerCase toUpperCase toString toFixed toLocaleString valueOf
     `),
   ),
   "C#": new Set(
     words(`
       ToString Equals GetHashCode GetType ReferenceEquals Dispose
       Parse TryParse
-      Add AddRange Remove RemoveAt RemoveAll Clear Insert Contains IndexOf ContainsKey TryGetValue
-      ToList ToArray ToDictionary Select SelectMany Where First FirstOrDefault Last LastOrDefault Single SingleOrDefault
-      Any All Count Sum Min Max Average OrderBy OrderByDescending ThenBy GroupBy Distinct Skip Take Concat Union
+      ToList ToArray ToDictionary SelectMany FirstOrDefault LastOrDefault SingleOrDefault
+      OrderBy OrderByDescending ThenBy GroupBy
       Substring Split Trim TrimStart TrimEnd Replace ToUpper ToLower StartsWith EndsWith PadLeft PadRight
-      Format Join IsNullOrEmpty IsNullOrWhiteSpace
-      WriteLine ReadLine Write
+      IsNullOrEmpty IsNullOrWhiteSpace
+      WriteLine ReadLine
       ConfigureAwait GetAwaiter
     `),
   ),
@@ -97,10 +101,6 @@ export const BUILTIN_FUNCTIONS: Readonly<Record<BuiltinLanguage, ReadonlySet<str
       isinstance issubclass type id hash iter next callable getattr setattr hasattr delattr super
       enumerate zip map filter sorted reversed sum min max abs round any all pow divmod
       repr format ord chr hex bin oct dir vars globals locals exec eval
-      append extend insert remove pop clear copy count index
-      items keys values get update setdefault
-      join split strip lstrip rstrip lower upper replace startswith endswith find
-      read write readline readlines close
     `),
   ),
 };

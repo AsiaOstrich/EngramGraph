@@ -105,7 +105,8 @@ describe("XSPEC-481 R1: refs check and evidence that is not evidence", () => {
     put(repo, "web/lib.min.js", "var m = { minOnlyFn: function (t) { return t; } };\n");
     put(repo, "old/legacy.js", "function oldOnly() { return 1; }\n");
     put(repo, "src/legacy.php", "<?php\nfunction trim($s) { return $s; }\n");
-    put(repo, "src/gone.ts", "export function goneFn() { return 1; }\n");
+    // `update` is the kind of name a project gives its own functions: it is NOT on the built-in list, so a real deletion is still found.
+    put(repo, "src/gone.ts", "export function goneFn() { return 1; }\nexport function update() { return 2; }\n");
     gitIn(repo, "add", "-A");
     gitIn(repo, "commit", "-q", "-m", "everything");
     // The deletions: all of these are history only.
@@ -126,7 +127,7 @@ describe("XSPEC-481 R1: refs check and evidence that is not evidence", () => {
       ].join("\n"),
     );
     realNote = join(work, "real.md");
-    writeFileSync(realNote, ["Dropped: `goneFn()`.", "Still here: `realFn()`.", "Bundle only: `validateWidget()`.", ""].join("\n"));
+    writeFileSync(realNote, ["Dropped: `goneFn()`, `update()`.", "Still here: `realFn()`.", "Bundle only: `validateWidget()`.", ""].join("\n"));
   }, 180_000);
 
   it("a name defined only in a bundle, a minified file or an excluded directory is not missing, and the exit status does not become 1 [xspec481-r1-noise-not-missing]", () => {
@@ -169,6 +170,10 @@ describe("XSPEC-481 R1: refs check and evidence that is not evidence", () => {
     expect(gitIn(repo, "show", "-s", "--format=%s", hash!).trim()).toBe("drop them");
     expect(gitIn(repo, "show", "--stat", "--format=", hash!)).toContain("src/gone.ts");
 
+    // A generic verb that is not a language built-in is an ordinary symbol: deleted means missing, with the file.
+    expect(r["update()"]!.status, r["update()"]!.reason).toBe("missing");
+    expect(r["update()"]!.reason).toContain("src/gone.ts");
+
     // In the same document the bundle-only name is still not a finding.
     expect(r["validateWidget()"]!.status).toBe("unresolvable");
     expect(r["realFn()"]!.status).toBe("present");
@@ -207,6 +212,10 @@ describe("XSPEC-481 R1: the lists", () => {
     expect(builtinLanguagesFor("ToString")).toEqual(["C#"]);
     expect(builtinLanguagesFor("isinstance")).toEqual(["Python"]);
     expect(builtinLanguagesFor("someProjectFunction")).toEqual([]);
+    // Names projects give their own functions are left off on purpose (see builtin-functions.ts).
+    for (const generic of ["update", "get", "add", "remove", "find", "parse", "Select", "Count", "append"]) {
+      expect(builtinLanguagesFor(generic), generic).toEqual([]);
+    }
   });
 
   it("history paths under the skip list, minified files and user-excluded paths are noise; source paths are not [xspec481-r1-noise-paths]", () => {
