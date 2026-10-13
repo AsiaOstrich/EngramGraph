@@ -121,6 +121,11 @@ Excluding paths: egr index <dir> --exclude <glob> [--exclude <glob> ...]
   The summary and --json (excluded.byPattern) count each pattern on its own and
   say "nothing matched" for one that did not; a path two patterns both cover
   counts for both.
+  Windows Git Bash rewrites an argument that starts with "/": --exclude "/logs/"
+  arrives as "C:/Program Files/Git/logs/" and matches nothing. Run the command
+  with MSYS_NO_PATHCONV=1 in front (MSYS_NO_PATHCONV=1 egr index . --exclude
+  "/logs/"), or write "//logs/" or "logs/"; a pattern that starts with a Git
+  install path and matched nothing is reported with this reason.
 
 Exit status: 0 on success; 1 on any error, including a lock held by another
 process and an input (symbol, spec id, node id, module path) the graph does not
@@ -531,14 +536,16 @@ async function main(): Promise<void> {
         const ex = s.excluded;
         const excludedLine = ex
           ? `\nexcluded: ${ex.files} file(s) in ${ex.paths.length} path(s) matched --exclude ${ex.patterns.map((p) => `"${p}"`).join(" ")}` +
-            (ex.paths.length ? ` (${ex.paths.slice(0, 3).join(", ")}${ex.paths.length > 3 ? ", …" : ""}) — not in any count above` : ` — nothing matched; check the pattern`) +
+            (ex.paths.length
+              ? ` (${ex.paths.slice(0, 3).join(", ")}${ex.paths.length > 3 ? ", …" : ""}) — not in any count above`
+              : ` — nothing matched; check the pattern${ex.byPattern.length === 1 ? (ex.byPattern[0]!.hint ?? "") : ""}`) +
             // With several patterns the total hides which one did nothing, so each is
             // listed on its own (XSPEC-476 R3). A pattern that overlaps another is
             // counted for both. One pattern: the line above already is its answer.
             (ex.byPattern.length > 1
               ? ex.byPattern
                   .map((b) => `
-excluded: "${b.pattern}" — ${b.nothingMatched ? "nothing matched; check the pattern" : `${b.files} file(s) in ${b.paths} path(s)`}`)
+excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pattern${b.hint ?? ""}` : `${b.files} file(s) in ${b.paths} path(s)`}`)
                   .join("")
               : "")
           : "";

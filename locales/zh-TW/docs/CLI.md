@@ -63,6 +63,13 @@ egr <command> [args] [options]
   都用 `/` 分隔：`*` 為除 `/` 外的任意字元、`**` 為含 `/` 的任意字元、`?` 一個字元、`{a,b}` 二選一、
   `[abc]` 其中之一。沒有 `/` 的樣式比對任何深度的項目**名稱**（`.uds-backup-*`）；含 `/` 的樣式從 `<dir>`
   起算（`docs/archive/**`）；結尾 `/` 表示只比對目錄。排除一個目錄就排除它底下的全部。
+  **Windows Git Bash** 會改寫以 `/` 開頭的參數：`--exclude "/logs/"` 到達 `egr` 時變成
+  `C:/Program Files/Git/logs/`，什麼都比對不到。請在指令前加 `MSYS_NO_PATHCONV=1`
+  （`MSYS_NO_PATHCONV=1 egr index . --exclude "/logs/"`），或寫成 `//logs/`（Git Bash 會當成 `/logs/` 傳入），
+  或 `logs/`（不加開頭斜線，任何深度）。以 Git 安裝路徑開頭又什麼都沒比對到的樣式，會在它的 `nothing matched`
+  那一行附上這個原因（`--json` 則是 `excluded.byPattern` 的 `hint`）。*此說明的作者未在 Windows 上實跑：*
+  egr 這一側有測試（以被改寫後的形式傳入的樣式什麼都比對不到並附上提示；`//logs/` 與 `/logs/` 排除同一個目錄）；
+  `MSYS_NO_PATHCONV=1` 與 `//` 能阻止 Git Bash 改寫，則是使用者的回報與 Git for Windows 的文件行為。
 
 ```bash
 egr index ./src

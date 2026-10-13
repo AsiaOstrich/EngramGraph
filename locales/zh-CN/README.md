@@ -211,6 +211,8 @@ package.json 里（此前修复时加的）那个 `overrides` 对你没有帮助
 egr index ./src --docs
 #    用 glob 让某些路径不进索引（可重复）：备份、生成的代码、归档
 egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
+#    Windows Git Bash 会把开头的 "/" 改成 C:/Program Files/Git/——--exclude "/logs/" 请在命令前加
+#    MSYS_NO_PATHCONV=1（或写成 "//logs/"）
 
 # 2.“改这个函数会牵动什么？”
 egr callers myFunction --depth 2

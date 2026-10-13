@@ -40,6 +40,37 @@ export function callResolutionHint(code: CallCounts, scipUsed: boolean): string 
   );
 }
 
+/**
+ * Does this `--exclude` pattern look like Git Bash rewrote it (XSPEC-481 R5)?
+ *
+ * Git Bash (MSYS) turns an argument that starts with `/` into a Windows path
+ * under the Git install: `--exclude "/logs/"` reaches `egr` as
+ * `C:/Program Files/Git/logs/`. It then matches nothing, and nothing said why.
+ * (Reported on Windows 11 with the beta.4 help's own example.) The sign is a
+ * drive-letter path with a `Git` directory in it — `C:/Program Files/Git/…`,
+ * `C:/Program Files (x86)/Git/…`, or a per-user or custom install. A relative
+ * glob never starts with a drive letter, so this has no other legitimate shape.
+ *
+ * Returns the sentence to append to the "nothing matched" line, or `""` for any
+ * other pattern. The caller asks only when nothing matched: a pattern that matched
+ * something is not the problem this explains.
+ *
+ * **Not run on Windows by the author of this function** — it was written on macOS,
+ * where MSYS does not exist. The detection is a pure string test, tested as such;
+ * that `MSYS_NO_PATHCONV=1` and `//` do what is said below is Git for Windows'
+ * documented behaviour, and the consumer's report ("`MSYS_NO_PATHCONV=1` avoids it").
+ */
+export function msysPathConversionHint(pattern: string): string {
+  const p = pattern.trim().replace(/\\/g, "/");
+  if (!/^[A-Za-z]:\/(?:[^/]+\/)*Git\//i.test(p)) return "";
+  return (
+    ` — this pattern starts with a Git install path, which is what Git Bash (MSYS) does to an argument that starts with "/" ` +
+    `(\`--exclude "/logs/"\` becomes "C:/Program Files/Git/logs/"). Run the command with MSYS_NO_PATHCONV=1 in front ` +
+    `(\`MSYS_NO_PATHCONV=1 egr index . --exclude "/logs/"\`), or write the pattern with two slashes ("//logs/"), or use "logs/" ` +
+    `(no leading slash; matches at any depth)`
+  );
+}
+
 export interface KnowledgeCounts {
   docsScanned: number;
   docsUnresolved: readonly string[];

@@ -233,6 +233,8 @@ export interface ExcludedByPattern {
   files: number;
   /** `paths === 0` — the pattern matched nothing the walk could see. */
   nothingMatched: boolean;
+  /** Set when the pattern looks like Git Bash's path conversion rewrote it (XSPEC-481 R5); only ever on a `nothingMatched` entry. */
+  hint?: string;
 }
 
 /** Files under `dir`, counted the way the walk would see them (same skip list, symlinked directories not followed). */

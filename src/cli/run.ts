@@ -48,6 +48,7 @@ import {
 } from "../code-graph/parse-manifest.js";
 import { walkFiles, summarizeUnindexed, type ExcludedByPattern, type UnindexedSummary } from "./walk.js";
 import { compileExcludes } from "./exclude.js";
+import { msysPathConversionHint } from "./index-hints.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { checkRefs, type RefCheckResult } from "./refs-check.js";
 import { ALGO_BACKED_COMMAND_LIST, describeAlgoSource, type AlgoSource } from "../structural-memory/algo-extension.js";
@@ -388,7 +389,11 @@ export async function cmdIndex(
       patterns: [...exclude.patterns],
       paths: codeWalk.excluded.paths,
       files: codeWalk.excluded.files,
-      byPattern: codeWalk.excluded.byPattern,
+      // A pattern that matched nothing and looks like Git Bash's path conversion made it gets the reason (XSPEC-481 R5).
+      byPattern: codeWalk.excluded.byPattern.map((b) => {
+        const hint = b.nothingMatched ? msysPathConversionHint(b.pattern) : "";
+        return hint ? { ...b, hint } : b;
+      }),
     };
   }
   if (opts.docs) {

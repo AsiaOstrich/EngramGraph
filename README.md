@@ -288,6 +288,8 @@ workaround available yet — it depends on the linked upstream issue landing.
 egr index ./src --docs
 #    Keep paths out of it with a glob (repeatable): backups, generated code, archives
 egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
+#    Windows Git Bash turns a leading "/" into C:/Program Files/Git/ — for --exclude "/logs/"
+#    put MSYS_NO_PATHCONV=1 in front of the command (or write "//logs/")
 
 # 2. "What breaks if I change this function?"
 egr callers myFunction --depth 2

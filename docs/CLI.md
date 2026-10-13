@@ -97,6 +97,18 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
   everything under it. The patterns of the last run are recorded per root in
   the parse-health manifest, and `refs check` leaves those paths out when it
   searches the git history.
+  **Windows Git Bash** rewrites an argument that starts with `/`:
+  `--exclude "/logs/"` reaches `egr` as `C:/Program Files/Git/logs/`, which
+  matches nothing. Put `MSYS_NO_PATHCONV=1` in front of the command
+  (`MSYS_NO_PATHCONV=1 egr index . --exclude "/logs/"`), or write `//logs/`
+  (Git Bash passes it on as `/logs/`), or `logs/` (no leading slash, any
+  depth). A pattern that starts with a Git install path and matched nothing is
+  reported with this reason on its `nothing matched` line (and as `hint` in
+  `excluded.byPattern` with `--json`). *Not run on Windows by the author of this
+  note:* egr's side is tested (a pattern given in the rewritten form matches
+  nothing and gets the hint; `//logs/` and `/logs/` exclude the same directory);
+  that `MSYS_NO_PATHCONV=1` and `//` stop Git Bash's rewriting is the consumer's
+  report and Git for Windows' documented behaviour.
 
 ```bash
 egr index ./src
