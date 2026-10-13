@@ -6,7 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-*To be released as 0.13.0-beta.5 (XSPEC-481): fixes for the new findings in the 0.13.0-beta.4 Windows consumer report. The version number is not bumped yet.*
+## [0.13.0-beta.5] - 2026-10-13
+
+*Fixes for the new findings in the 0.13.0-beta.4 Windows consumer report (XSPEC-481).*
 
 ### Fixed
 
