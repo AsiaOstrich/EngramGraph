@@ -140,6 +140,14 @@ export interface ManifestRun {
   indexedAt: string;
   /** Per-file raw measurements for the files under this root (R1b). */
   files: FileParseHealth[];
+  /**
+   * The `--exclude` patterns of the `egr index` run that wrote this section
+   * (XSPEC-481 R1). `refs check` reads them so that its search of the git history
+   * does not count a definition in a place the index was told to leave out as
+   * evidence that the graph lost a symbol. Absent when the run had no
+   * `--exclude`, and for sections written by an older egr.
+   */
+  exclude?: string[];
 }
 
 /** The persisted manifest shape. */
@@ -168,9 +176,10 @@ export function upsertRun(
   indexedAt: string,
   files: FileParseHealth[],
   egrVersion: string,
+  exclude?: readonly string[],
 ): ParseManifest {
   const runs = { ...(prev?.runs ?? {}) };
-  runs[root] = { indexedAt, files };
+  runs[root] = { indexedAt, files, ...(exclude && exclude.length > 0 ? { exclude: [...exclude] } : {}) };
   return { egrVersion, grammarVersions: grammarVersions(), runs };
 }
 

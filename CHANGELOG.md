@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+*To be released as 0.13.0-beta.5 (XSPEC-481): fixes for the new findings in the 0.13.0-beta.4 Windows consumer report. The version number is not bumped yet.*
+
+### Fixed
+
+- **`egr refs check` no longer calls a language's built-in function, or a definition found only in a bundle, `missing`** (R1; since beta.4 a `missing` fails the exit status, so this was a CI failure). The report: a document cited PHP's `date()`, and `refs check` said `missing` with a commit whose only link to `date` was `date:function(t){…}` inside a front-end bundle. Now:
+  - history under the fixed skip directories (`dist`, `build`, `vendor`, `node_modules`, …), in minified files (`*.min.*`) and under the `--exclude` patterns the root was last indexed with is not evidence that a symbol once existed. The `--exclude` patterns are now recorded per root in the parse-health manifest (`runs[root].exclude`); a graph indexed before this release has none recorded until its next `egr index`, so only the fixed rules apply to it;
+  - a name that belongs to PHP, JavaScript, C# or Python (`date`, `count`, `trim`, `parseInt`, `ToString`, `len`, …; one list, `src/cli/builtin-functions.ts`) and that the graph does not define is `unresolvable`, with the reason, and the history is not searched for it. A project that defines its own `count` is answered by the graph as before. **The price, on purpose:** a repository function that really was deleted and shares such a name is now `unresolvable`, not `missing`;
+  - a `missing` symbol's reason ends with `(defined in <path>)`: the file (relative to the index root) whose diff in that commit holds the definition, so the reader can judge it. Not available when the history output was too large to read and git was asked one name at a time.
+  Covered by `test/xspec481-r1-refs-check-noise.test.ts` (built CLI against a real git repository; the named commit is read back with `git show`).
+
 ## [0.13.0-beta.4] - 2026-10-12
 
 *Fixes for the new findings in the 0.13.0-beta.3 Windows consumer report (XSPEC-476).*

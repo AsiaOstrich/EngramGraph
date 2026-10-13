@@ -83,6 +83,19 @@
  *     every sibling directory of every indexed root for that path, not just
  *     the one named by the first segment — see {@link siblingRepoContainingPath}.
  *
+ * ## Round 4 (XSPEC-481 R1): evidence has to come from a place the index looks at
+ *
+ * Since beta.4 a `missing` reference fails the exit status, which made the
+ * remaining false `missing` expensive: a document citing PHP's `date()` was
+ * called `missing` because a front-end bundle in the history held
+ * `date:function(t){…}`. Three changes, none of them an exclusion list for one
+ * symptom: history under the walker's skip directories, in `*.min.*` files and
+ * under the `--exclude` the root was indexed with is not evidence
+ * ({@link isHistoryNoise}); names that are a language's own functions
+ * ({@link builtinLanguagesFor}) are not searched for in history when the graph
+ * has no definition of them; and a `missing` symbol says which file the
+ * definition was in. The price of the second one is written next to the list.
+ *
  * Performance: a git call per candidate is what round 2's design implied and
  * is NOT what round 3 does. Each indexed root's full set of ever-committed
  * paths is fetched ONCE (`git log --all --name-only`, each path with the
@@ -183,6 +196,8 @@ import type { GraphConnection } from "../graph-db/connection.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { manifestPathForDb, readManifest } from "../code-graph/parse-manifest.js";
 import { SKIP_DIRS } from "./walk.js";
+import { compileExcludes } from "./exclude.js";
+import { builtinLanguagesFor } from "./builtin-functions.js";
 import { GRAMMARS } from "../../language-support.js";
 
 export type RefKind = "path" | "symbol";
@@ -215,6 +230,11 @@ export interface RefCheckOptions {
   roots?: string[];
   /** Working directory used for best-effort disk/git lookups when no root claims a reference. Defaults to `process.cwd()`. */
   cwd?: string;
+  /**
+   * The `--exclude` patterns of the last `egr index` of each root (absolute root → patterns), so the history is
+   * not searched where the index never looked (XSPEC-481 R1). Defaults to what the graph's parse-health manifest recorded.
+   */
+  excludes?: Record<string, readonly string[]>;
 }
 
 // --- extraction ---------------------------------------------------------
@@ -1147,9 +1167,53 @@ function definitionRegex(name: string): RegExp {
 const MAX_PATTERN_CHARS = 12_000;
 
 /**
+ * Is a path in a repository's history somewhere the index would never have looked
+ * (XSPEC-481 R1)? A definition found there is not evidence that the graph lost
+ * a symbol: the graph could not have held it.
+ *
+ * Three things make a path "not looked at", all decided on the path alone:
+ *   - a directory in the walker's fixed skip list ({@link SKIP_DIRS}: `dist`,
+ *     `build`, `vendor`, `node_modules`, `target`, …) anywhere in it;
+ *   - a minified file, `*.min.*` (`app.min.js`) — build output wherever it sits;
+ *   - the `--exclude` patterns the root was last indexed with (`userExcludes`).
+ *
+ * The beta.4 report: a document cited PHP's `date()`, and the "evidence" for
+ * `missing` was `date:function(t){…}` inside a front-end bundle's validation
+ * library. `path` is relative to the index root, `/`-separated.
+ */
+export function isHistoryNoise(path: string, userExcludes?: ReturnType<typeof compileExcludes>): boolean {
+  const segments = path.split("/").filter(Boolean);
+  const name = segments[segments.length - 1] ?? path;
+  if (/\.min\.[^/]+$/.test(name)) return true;
+  for (let i = 0; i < segments.length - 1; i++) {
+    if (SKIP_DIRS.has(segments[i]!)) return true;
+  }
+  if (userExcludes) {
+    // The walk decides per entry and an excluded directory takes everything under it,
+    // so every ancestor is asked as a directory, then the file itself.
+    for (let i = 0; i < segments.length; i++) {
+      const isDir = i < segments.length - 1;
+      if (userExcludes.matches(segments.slice(0, i + 1).join("/"), segments[i]!, isDir)) return true;
+    }
+  }
+  return false;
+}
+
+/** The newest commit that defined a name, and the files it did so in (XSPEC-481 R1: the reader can judge for themselves). */
+export interface DefinitionHit {
+  commit: string;
+  /** Index-root-relative paths of the changed lines that define the name in that commit; empty when git could not say (see {@link scanDefinitions}). */
+  files: string[];
+}
+
+/** The most files named in one message — a name defined in thirty files of one commit does not need thirty paths. */
+const MAX_FILES_NAMED = 3;
+
+/**
  * Evidence that symbols were once DEFINED in an indexed root's history — `git
  * log -G<definition pattern>`, restricted to source-code paths
- * ({@link CODE_PATHSPECS}) so a `.md`/`.yaml` mention can never count.
+ * ({@link CODE_PATHSPECS}) so a `.md`/`.yaml` mention can never count, and
+ * to paths the index could have looked at ({@link isHistoryNoise}).
  *
  * ## Batched (XSPEC-476 R5c)
  *
@@ -1169,15 +1233,22 @@ const MAX_PATTERN_CHARS = 12_000;
  * at all, however many commits matched the others. (Taking git's first hit for
  * the joined pattern would hand every symbol the newest commit of whichever
  * name was defined last.)
+ *
+ * Because the diff is read here, the file each line belongs to is known too:
+ * that is how a hit under `dist/` or `*.min.*` is thrown away, and how the
+ * message can say where the definition was.
  */
 class SymbolHistory {
-  private readonly byRoot = new Map<string, Map<string, string | null> | "unavailable">();
+  private readonly byRoot = new Map<string, Map<string, DefinitionHit | null> | "unavailable">();
 
   /** `candidates`: every symbol name the run may ask about, so the first question about a root answers them all. */
-  constructor(private readonly candidates: readonly string[]) {}
+  constructor(
+    private readonly candidates: readonly string[],
+    private readonly excludes: Readonly<Record<string, readonly string[]>> = {},
+  ) {}
 
   /** The newest commit in which `name` was defined in one of `roots`, `null` when none, `"unavailable"` when git could not tell. */
-  everDefined(roots: string[], cwd: string, name: string): { root: string; commit: string } | null | "unavailable" {
+  everDefined(roots: string[], cwd: string, name: string): ({ root: string } & DefinitionHit) | null | "unavailable" {
     let sawUnavailable = false;
     for (const root of roots.length > 0 ? roots : [cwd]) {
       const known = this.ensure(root, name);
@@ -1185,13 +1256,13 @@ class SymbolHistory {
         sawUnavailable = true;
         continue;
       }
-      const commit = known.get(name);
-      if (commit) return { root, commit };
+      const hit = known.get(name);
+      if (hit) return { root, ...hit };
     }
     return sawUnavailable ? "unavailable" : null;
   }
 
-  private ensure(root: string, wanted: string): Map<string, string | null> | "unavailable" {
+  private ensure(root: string, wanted: string): Map<string, DefinitionHit | null> | "unavailable" {
     let known = this.byRoot.get(root);
     if (known === "unavailable") return known;
     let names: string[];
@@ -1203,7 +1274,7 @@ class SymbolHistory {
     } else {
       names = [wanted]; // a name nobody announced: ask for it alone rather than answer "never defined"
     }
-    const scanned = scanDefinitions(root, names);
+    const scanned = scanDefinitions(root, names, this.excludes[root]);
     if (scanned === "unavailable") {
       if (this.byRoot.get(root) === undefined) this.byRoot.set(root, "unavailable");
       return "unavailable";
@@ -1214,9 +1285,25 @@ class SymbolHistory {
   }
 }
 
-/** For each name, the newest commit in `root`'s history with a line defining it, or null. `"unavailable"` when git cannot be run there. */
-function scanDefinitions(root: string, names: readonly string[]): Map<string, string | null> | "unavailable" {
-  const result = new Map<string, string | null>(names.map((n) => [n, null]));
+/** A path as git prints it on a `---`/`+++` line: no `a/`/`b/` prefix, no trailing tab (added for names with spaces), quotes removed. */
+function diffHeaderPath(raw: string, prefix: "a/" | "b/"): string | null {
+  let p = raw.replace(/\t.*$/, "");
+  if (p === "/dev/null") return null;
+  if (p.startsWith('"') && p.endsWith('"') && p.length >= 2) p = p.slice(1, -1);
+  return p.startsWith(prefix) ? p.slice(prefix.length) : p;
+}
+
+/** For each name, the newest commit in `root`'s history with a line defining it (and where), or null. `"unavailable"` when git cannot be run there. */
+function scanDefinitions(root: string, names: readonly string[], excludePatterns?: readonly string[]): Map<string, DefinitionHit | null> | "unavailable" {
+  const result = new Map<string, DefinitionHit | null>(names.map((n) => [n, null]));
+  let userExcludes: ReturnType<typeof compileExcludes> | undefined;
+  if (excludePatterns && excludePatterns.length > 0) {
+    try {
+      userExcludes = compileExcludes(excludePatterns);
+    } catch {
+      userExcludes = undefined; // the patterns were valid when the index ran; a damaged manifest must not break the check
+    }
+  }
   const chunks: string[][] = [];
   let current: string[] = [];
   let size = 0;
@@ -1238,14 +1325,19 @@ function scanDefinitions(root: string, names: readonly string[]): Map<string, st
       out = execFileSync(
         "git",
         [
+          // `--relative`: paths in the diff are relative to `root` (the index root), the coordinate `--exclude` and the
+          // graph's Module ids use — not to the repository top. The prefixes are pinned because `diff.noprefix` /
+          // `diff.mnemonicPrefix` in a user's config would change what the header parser below sees.
+          "-c", "core.quotePath=false",
           "-C", root, "log", "--all", "-G", chunk.map((n) => `(${definitionPattern(n)})`).join("|"),
-          "--format=%x00%h", "-p", "-U0", "--no-color", "--no-ext-diff", "--", ...CODE_PATHSPECS,
+          "--format=%x00%h", "-p", "-U0", "--no-color", "--no-ext-diff", "--relative", "--src-prefix=a/", "--dst-prefix=b/", "--", ...CODE_PATHSPECS,
         ],
         { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 512 * 1024 * 1024 },
       );
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOBUFS") return "unavailable";
-      // The matching diffs did not fit in memory: fall back to one bounded question per name.
+      // The matching diffs did not fit in memory: fall back to one bounded question per name. This answer cannot name
+      // a file, and so cannot tell a hit under `dist/` from one in source — the one place the exclusion does not reach.
       for (const n of chunk) {
         try {
           const hash = execFileSync(
@@ -1253,7 +1345,7 @@ function scanDefinitions(root: string, names: readonly string[]): Map<string, st
             ["-C", root, "log", "--all", "-G", definitionPattern(n), "--format=%h", "-1", "--", ...CODE_PATHSPECS],
             { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
           ).trim();
-          result.set(n, hash.length > 0 ? hash : null);
+          result.set(n, hash.length > 0 ? { commit: hash, files: [] } : null);
         } catch {
           return "unavailable";
         }
@@ -1265,26 +1357,43 @@ function scanDefinitions(root: string, names: readonly string[]): Map<string, st
       if (pending.size === 0) break;
       const lines = commitChunk.split("\n");
       const commit = lines[0]!.trim();
+      // Names defined in THIS commit, with where. A name stays in `pending` until the commit has been read to its
+      // end, so a second file of the same commit that defines it is recorded too.
+      const here = new Map<string, string[]>();
       let inHeader = false;
-      for (let i = 1; i < lines.length && pending.size > 0; i++) {
+      let file: string | null = null;
+      let skipFile = false;
+      for (let i = 1; i < lines.length; i++) {
         const line = lines[i]!;
         // `diff --git` … up to the first `@@` is the file header (`--- a/x`, `+++ b/x`), not changed text.
         if (line.startsWith("diff --git")) {
           inHeader = true;
+          file = null;
+          skipFile = false;
           continue;
         }
         if (inHeader) {
-          if (line.startsWith("@@")) inHeader = false;
+          if (line.startsWith("--- ")) file = diffHeaderPath(line.slice(4), "a/") ?? file;
+          else if (line.startsWith("+++ ")) file = diffHeaderPath(line.slice(4), "b/") ?? file;
+          else if (line.startsWith("@@")) {
+            inHeader = false;
+            skipFile = file !== null && isHistoryNoise(file, userExcludes);
+          }
           continue;
         }
+        if (skipFile) continue;
         if (line[0] !== "+" && line[0] !== "-") continue;
         const text = line.slice(1);
         for (const [n, re] of pending) {
-          if (re.test(text)) {
-            result.set(n, commit);
-            pending.delete(n);
-          }
+          if (!re.test(text)) continue;
+          const files = here.get(n) ?? [];
+          if (file !== null && !files.includes(file)) files.push(file);
+          here.set(n, files);
         }
+      }
+      for (const [n, files] of here) {
+        result.set(n, { commit, files: files.slice(0, MAX_FILES_NAMED) });
+        pending.delete(n);
       }
     }
   }
@@ -1292,17 +1401,22 @@ function scanDefinitions(root: string, names: readonly string[]): Map<string, st
 }
 
 /**
- * The name a symbol reference is looked up under: the last segment of a dotted
- * name. Null for a reference that is never looked up at all (a built-in
- * namespace, a test-framework global) — those are not candidates.
+ * The name a symbol reference is searched for under in the HISTORY: the last
+ * segment of a dotted name. Null for a reference that is never searched for (a
+ * built-in namespace, a test-framework global, a language's built-in function —
+ * see {@link builtinLanguagesFor}) — those are not candidates. (The graph is
+ * still asked about a built-in's name first; only the history is not.)
  */
 function symbolLookupName(raw: string): string | null {
   const fullName = raw.replace(/\(.*\)$/s, "");
   if (fullName.includes(".")) {
     const parts = fullName.split(".");
-    return BUILTIN_NAMESPACES.has(parts[0]!) ? null : parts[parts.length - 1]!;
+    if (BUILTIN_NAMESPACES.has(parts[0]!)) return null;
+    const last = parts[parts.length - 1]!;
+    return builtinLanguagesFor(last).length > 0 ? null : last;
   }
-  return isBareTestFrameworkGlobal(fullName) ? null : fullName;
+  if (isBareTestFrameworkGlobal(fullName)) return null;
+  return builtinLanguagesFor(fullName).length > 0 ? null : fullName;
 }
 
 async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: string[], cwd: string, symbols: SymbolHistory): Promise<PartialItem> {
@@ -1336,6 +1450,21 @@ async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: strin
 
   const finish = (files: string[]): PartialItem => {
     if (files.length === 0) {
+      // XSPEC-481 R1: no function or class of this name is in the graph, and the name is one of a language's own.
+      // Looking for "evidence it once existed" would find a bundle's or a vendored library's same-named method
+      // and call a call to the language's function `missing`. The graph answered first, so a project that
+      // defines its own `count` never gets here.
+      const builtinIn = builtinLanguagesFor(lookupName);
+      if (builtinIn.length > 0) {
+        return {
+          ...base,
+          status: "unresolvable",
+          reason:
+            `"${lookupName}" is a built-in function of ${builtinIn.join("/")}, and no function or class of that name is in the graph; ` +
+            `history was not searched, because a deleted function of this repository cannot be told apart from a call to the built-in. ` +
+            `If it is yours, index the code that defines it`,
+        };
+      }
       const evidence = symbols.everDefined(roots, cwd, lookupName);
       if (evidence === "unavailable") {
         return { ...base, status: "missing", reason: "no Function/Class with this name was found in the graph; git was unavailable so its history could not be checked" };
@@ -1344,7 +1473,9 @@ async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: strin
         return {
           ...base,
           status: "missing",
-          reason: `no longer defined anywhere in the graph; last appears in "${evidence.root}"'s git history at commit ${evidence.commit}`,
+          reason:
+            `no longer defined anywhere in the graph; last appears in "${evidence.root}"'s git history at commit ${evidence.commit}` +
+            (evidence.files.length > 0 ? ` (defined in ${evidence.files.join(", ")})` : ""),
         };
       }
       return {
@@ -1426,6 +1557,20 @@ function readRootsFromManifest(dbPath: string): string[] {
   }
 }
 
+/** The `--exclude` patterns each root was last indexed with (XSPEC-481 R1), from the same manifest as the roots. Roots indexed without any are absent. */
+function readExcludesFromManifest(dbPath: string): Record<string, readonly string[]> {
+  const out: Record<string, readonly string[]> = {};
+  try {
+    const manifest = readManifest(manifestPathForDb(dbPath));
+    for (const [root, run] of Object.entries(manifest?.runs ?? {})) {
+      if (Array.isArray(run.exclude) && run.exclude.length > 0) out[root] = run.exclude;
+    }
+  } catch {
+    // no manifest, no exclusions — the fixed list still applies
+  }
+  return out;
+}
+
 /**
  * Check every file-path / symbol reference in the given Markdown file(s) or
  * directory(ies) against the graph `conn` is connected to (read-only — this
@@ -1455,7 +1600,7 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
       if (name) candidates.add(name);
     }
   }
-  const symbols = new SymbolHistory([...candidates]);
+  const symbols = new SymbolHistory([...candidates], opts.excludes ?? readExcludesFromManifest(conn.path));
 
   for (const { file, refs, skipped } of extracted) {
     skippedTokens += skipped;

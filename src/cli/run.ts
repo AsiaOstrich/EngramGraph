@@ -414,7 +414,7 @@ export async function cmdIndex(
   // failing must not undo a successful index (same spirit as R1a's per-file
   // tolerance). The summary/diff are still computed when no manifestPath is
   // given, so programmatic/test callers get the counts without a file.
-  const nextManifest = upsertRun(upsertBase, root, new Date().toISOString(), parseHealth, EGR_VERSION);
+  const nextManifest = upsertRun(upsertBase, root, new Date().toISOString(), parseHealth, EGR_VERSION, opts.exclude);
   if (opts.manifestPath) {
     try {
       writeManifest(opts.manifestPath, nextManifest);

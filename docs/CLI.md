@@ -80,7 +80,9 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
   and does **not** anchor: `logs/` excludes every directory named `logs` at any
   depth (`api/logs` too); `/logs/` excludes only `<dir>/logs`. A leading `./` is
   dropped, so `./logs/` is not anchored either. Excluding a directory excludes
-  everything under it.
+  everything under it. The patterns of the last run are recorded per root in
+  the parse-health manifest, and `refs check` leaves those paths out when it
+  searches the git history.
 
 ```bash
 egr index ./src
@@ -291,6 +293,23 @@ from some other language, not a symbol of the repository: it is reported
 `unresolvable` and nothing is searched for it. A `missing` symbol names the
 commit where its definition last changed, and that commit contains the
 definition text.
+
+A symbol is `missing` only when its definition is found in the git history of
+a place the index could have looked at. History under the fixed skip list
+(`dist`, `build`, `vendor`, `node_modules`, …), in minified files (`*.min.*`)
+and under the `--exclude` patterns the root was last indexed with (recorded in
+the parse-health manifest) does not count: a front-end bundle's
+`date:function(t){…}` is not evidence that PHP's `date()` was ever a function of
+the repository. Names that belong to a language or its standard library (PHP
+`date`, `count`, `trim`; JavaScript `parseInt`, `map`; C# `ToString`; Python
+`len`; the list is `src/cli/builtin-functions.ts`) and that the graph does not
+define are `unresolvable`, with the reason, and the history is not searched for
+them — a project that defines its own `count` is answered by the graph as usual.
+The price is stated, not hidden: a repository function that really was deleted
+and shares such a name is reported `unresolvable`, not `missing`. A `missing`
+symbol's reason ends with `(defined in <path>)` — the file, relative to the
+index root, whose diff in that commit holds the definition — so the reader can
+judge it.
 
 **Exit status**: `1` when any reference is `missing` (the full report is still
 printed), `0` otherwise — `unresolvable` never fails the run. Until 0.13.0 the

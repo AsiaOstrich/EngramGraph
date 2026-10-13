@@ -225,6 +225,16 @@ egr top Decision --json
 抽取規則刻意保守：只處理反引號包住的字串，沒有路徑形狀或 `(...)`
 呼叫形狀的裸字不會被抽取，同名函式若出現在多個檔案會列出候選而不猜測。
 
+符號只有在「索引看得到的地方」的 git 歷史裡找到定義，才會是 `missing`。固定略過清單
+（`dist`、`build`、`vendor`、`node_modules`……）底下、壓縮檔（`*.min.*`）、以及該根目錄上次索引所用的
+`--exclude`（記在 parse-health manifest 裡）底下的歷史不算數：前端 bundle 裡的
+`date:function(t){…}` 不能證明 PHP 的 `date()` 曾經是這個 repo 的函式。屬於語言或其標準函式庫
+（PHP 的 `date`、`count`、`trim`；JavaScript 的 `parseInt`、`map`；C# 的 `ToString`；Python 的 `len`；
+清單在 `src/cli/builtin-functions.ts`）而圖裡沒有定義的名稱，一律回報 `unresolvable` 並附原因，
+不去搜歷史；專案自己定義了 `count` 的話，仍由圖回答。代價明說：repo 裡真的被刪掉、又剛好同名的函式，
+會被報成 `unresolvable` 而不是 `missing`。`missing` 的符號，原因最後會附 `(defined in <路徑>)`
+——那個 commit 的 diff 中含該定義的檔案（相對於索引根目錄），讓讀者自行判斷。
+
 ```bash
 egr refs check MEMORY.md
 egr refs check ./notes --json
