@@ -20,7 +20,7 @@ import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { readIndexHealth, definitionFiles, type IndexHealth } from "../code-graph/index.js";
 import { manifestPathForDb } from "../code-graph/parse-manifest.js";
-import { unresolvedIdClusters } from "../knowledge-graph/parser.js";
+import { unresolvedIdClusters, type DocIdConflict, type ReplacedDocument } from "../knowledge-graph/parser.js";
 import { callResolutionHint, knowledgeNamingHint } from "./index-hints.js";
 import { READ_ONLY_COMMANDS } from "./read-only-commands.js";
 import { SKIP_DIRS } from "./walk.js";
@@ -379,22 +379,36 @@ async function main(): Promise<void> {
         // cannot distinguish "nothing was scanned" from "44 documents were
         // scanned and none could be named", and that ambiguity is the whole
         // defect this line used to have.
+        const dupConflicts = (s.knowledge?.conflicts ?? []).filter((c): c is DocIdConflict => c.reason === "duplicate-id");
+        const replacedConflicts = (s.knowledge?.conflicts ?? []).filter((c): c is ReplacedDocument => c.reason === "replaced-from-earlier-index");
         const k = s.knowledge
           ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relates} relates` +
             ` (${s.knowledge.docsScanned} doc(s) scanned, ${s.knowledge.docsUnresolved.length} unnamed` +
             // Documents set aside because another document owns their id (XSPEC-476 R2).
             // Named in the count so scanned = nodes' sources + unnamed + set aside adds up.
-            `${s.knowledge.conflicts.length ? `, ${s.knowledge.conflicts.reduce((n, c) => n + c.setAside.length, 0)} set aside: duplicate id` : ""})`
+            `${dupConflicts.length ? `, ${dupConflicts.reduce((n, c) => n + c.setAside.length, 0)} set aside: duplicate id` : ""}` +
+            // Nodes that an earlier index wrote from another file and this run overwrote (XSPEC-481 R4).
+            `${replacedConflicts.length ? `, ${replacedConflicts.length} replaced a copy from an earlier index` : ""})`
           : "";
         // One line per id claimed by more than one document (XSPEC-476 R2). Never
         // collapsed into a count: the reader has to be able to open both files.
         const idSourceLabel = { "front-matter": "front-matter id", filename: "filename", heading: "heading" } as const;
-        const kConflicts = (s.knowledge?.conflicts ?? [])
+        const kConflicts = dupConflicts
           .map(
             (c) =>
               `\nknowledge: WARNING — ${c.id} is claimed by ${c.setAside.length + 1} documents; kept ${c.kept.path} (${idSourceLabel[c.kept.source]}), ` +
               `set aside ${c.setAside.map((d) => `${d.path} (${idSourceLabel[d.source]})`).join(", ")} — their links are not in the graph. ` +
               `An id goes to the front-matter \`id\` first, then the filename, then a heading that starts with it.`,
+          )
+          .join("");
+        // One line per id this run took over from an earlier run (XSPEC-481 R4): both paths, because
+        // the reader has to know which file's content the graph now holds and which one it was.
+        const kReplaced = replacedConflicts
+          .map(
+            (c) =>
+              `\nknowledge: WARNING — ${c.id} was indexed from ${c.previous.path} by an earlier index and is now overwritten by ${c.current.path} ` +
+              `(${idSourceLabel[c.current.source]}); the graph holds the later document. If both are meant to exist, give one a different id; ` +
+              `to rebuild from one directory only, re-run with --clean.`,
           )
           .join("");
         // A prefix rejected over and over is a naming convention this tool does
@@ -533,7 +547,7 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? "nothing matched; check the pa
         const hints =
           callResolutionHint(s.code, Boolean(s.scip)) +
           knowledgeNamingHint(s.knowledge, s.code.implements, clusters.length > 0);
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kConflicts}${kWarning}${scip}${parse}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${excludedLine}${unindexed}${hints}`;
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kConflicts}${kReplaced}${kWarning}${scip}${parse}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${excludedLine}${unindexed}${hints}`;
       });
       break;
     }

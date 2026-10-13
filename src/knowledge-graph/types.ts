@@ -18,6 +18,15 @@ export interface KnowledgeDoc {
    * `id` front-matter field and no recognisable id in its body.
    */
   fallbackId?: string;
+  /**
+   * Where the document was read from, for telling two indexing runs apart
+   * (XSPEC-481 R4). `fallbackId` cannot do that job: the CLI makes it relative to
+   * the directory being indexed, so `dirA/adr/ADR-9.md` and `dirB/adr/ADR-9.md`
+   * both arrive as `adr/ADR-9.md`. The CLI passes the absolute path here; a
+   * caller without a path (MCP `index_docs`) leaves it out and gets no
+   * cross-run comparison.
+   */
+  source?: string;
 }
 
 /** One node in an impact chain returned by impact analysis. */

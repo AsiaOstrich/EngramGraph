@@ -53,6 +53,20 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
   filename, which wins over a heading; the smaller path decides a tie. The others
   are left out of the graph (their links too) and each conflict is printed in the
   summary and listed under `knowledge.conflicts` with `--json`.
+  That is within one run. Across runs — `egr index dirA --docs --clean`, then
+  `egr index dirB --docs`, both holding `ADR-903` — the later document still
+  overwrites the earlier one (the rule is unchanged), but the run says so: a
+  `knowledge: WARNING — ADR-903 was indexed from <dirA path> by an earlier index
+  and is now overwritten by <dirB path>` line, and an entry in
+  `knowledge.conflicts` with `reason: "replaced-from-earlier-index"`, the `kind`
+  (`Spec`/`Decision`), `previous.path` and `current.path` (absolute paths). The
+  graph remembers the path in `Spec.path` / `Decision.path`; indexing the same
+  file again is not a conflict, and a node with no recorded path (indexed by an
+  earlier egr, or only ever a `[[ref]]` stub, or written by MCP `index_docs`,
+  which is given no path) is overwritten without a warning. The first `egr` of
+  this version to open a graph made by an earlier one adds the two columns in
+  place and keeps a one-time backup beside it (`<graph>.pre-migration-backup`),
+  as with every column added before.
 - Code extensions: `.ts .tsx .js .jsx .mts .cts .mjs .cjs .cs .py .go .java
   .kt .kts .rs .cpp .cc .cxx .hpp .h .hh .rb .php .dart` (`.d.ts` excluded).
 - Skipped directories: `node_modules`, `dist`, `.engram`, `.git`, `coverage`,

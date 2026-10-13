@@ -36,6 +36,8 @@ export interface ParsedKnowledgeDoc {
   idSource: DocIdSource;
   /** The document's path (its `fallbackId`), or a placeholder when it had none. */
   path: string;
+  /** Where the document was read from, when the caller said ({@link KnowledgeDoc.source}); stored on the node. */
+  source?: string;
   title: string;
   /** Classified outbound references (self-references removed). */
   refs: Array<{ kind: KnowledgeNodeKind; id: string }>;
@@ -112,18 +114,20 @@ function resolveRef(
   return null;
 }
 
-function makeNode(kind: KnowledgeNodeKind, id: string, title: string, fields: Record<string, string>): GraphNode {
+function makeNode(kind: KnowledgeNodeKind, id: string, title: string, fields: Record<string, string>, source?: string): GraphNode {
+  // `path` only when the caller said where the document came from; a key with no value cannot be bound.
+  const path: Record<string, string> = source !== undefined ? { path: source } : {};
   if (kind === "Spec") {
     return {
       label: "Spec",
       id,
-      properties: { title, status: fields.status ?? "unknown", confidence: 1.0, origin: "declared" },
+      properties: { title, status: fields.status ?? "unknown", confidence: 1.0, origin: "declared", ...path },
     };
   }
   return {
     label: "Decision",
     id,
-    properties: { title, date: fields.date ?? "", confidence: 1.0, origin: "declared" },
+    properties: { title, date: fields.date ?? "", confidence: 1.0, origin: "declared", ...path },
   };
 }
 
@@ -188,9 +192,10 @@ export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null 
     kind,
     idSource: resolved.source,
     path: doc.fallbackId ?? "<unnamed document>",
+    ...(doc.source !== undefined ? { source: doc.source } : {}),
     title,
     refs,
-    node: makeNode(kind, id, title, fields),
+    node: makeNode(kind, id, title, fields, doc.source),
   };
 }
 
@@ -231,6 +236,9 @@ export class SpecDecisionKnowledgeSource {
    */
   readonly conflicts: DocIdConflict[] = [];
 
+  /** The documents that own an id after {@link conflicts} were resolved — set by {@link ingest}. */
+  readonly owners: ParsedKnowledgeDoc[] = [];
+
   constructor(private readonly docs: KnowledgeDoc[]) {}
 
   async ingest(): Promise<GraphFragment> {
@@ -241,6 +249,7 @@ export class SpecDecisionKnowledgeSource {
       else this.unresolved.push(doc.fallbackId ?? "<unnamed document>");
     }
     const parsed = this.chooseOwners(named);
+    this.owners.push(...parsed);
 
     const nodes: GraphNode[] = [];
     const edges: GraphEdge[] = [];
@@ -303,6 +312,7 @@ export class SpecDecisionKnowledgeSource {
         this.conflicts.push({
           id,
           kind: ranked[0]!.kind,
+          reason: "duplicate-id",
           kept: { path: ranked[0]!.path, source: ranked[0]!.idSource },
           setAside: ranked.slice(1).map((d) => ({ path: d.path, source: d.idSource })),
         });
@@ -344,20 +354,43 @@ export interface KnowledgeIndexResult {
   /** Fallback ids of the documents that yielded no artifact id — raw, unclassified. */
   docsUnresolved: string[];
   /**
-   * Ids that more than one document claimed (XSPEC-476 R2). Empty when every id
-   * has one owner. The counts above are taken after this resolution, so they
-   * equal the nodes in the graph (plus none lost to a silent overwrite).
+   * Ids with more than one claimant (XSPEC-476 R2), and ids whose node an
+   * earlier index wrote from a different file and this one has just replaced
+   * (XSPEC-481 R4); told apart by `reason`. Empty when every id has one owner
+   * and none was replaced. The counts above are taken after this resolution, so
+   * they equal the nodes in the graph (plus none lost to a silent overwrite).
    */
-  conflicts: DocIdConflict[];
+  conflicts: KnowledgeConflict[];
 }
 
-/** One id claimed by several documents: who owns it, and who was set aside. */
+/** One id claimed by several documents of the same run: who owns it, and who was set aside. */
 export interface DocIdConflict {
   id: string;
   kind: KnowledgeNodeKind;
+  reason: "duplicate-id";
   kept: { path: string; source: DocIdSource };
   setAside: Array<{ path: string; source: DocIdSource }>;
 }
+
+/**
+ * An id whose node an EARLIER index wrote from another file, now overwritten by
+ * this run's document (XSPEC-481 R4). Two runs over different directories used to
+ * merge silently, the later one winning; the winning rule is unchanged, what is
+ * new is that it is said. Paths are absolute (the CLI) — `dirA/adr/ADR-9.md` and
+ * `dirB/adr/ADR-9.md` differ, which a path relative to the indexed directory
+ * could not show.
+ */
+export interface ReplacedDocument {
+  id: string;
+  kind: KnowledgeNodeKind;
+  reason: "replaced-from-earlier-index";
+  /** Where the earlier index read the node from. */
+  previous: { path: string };
+  /** The document that owns the node now. */
+  current: { path: string; source: DocIdSource };
+}
+
+export type KnowledgeConflict = DocIdConflict | ReplacedDocument;
 
 /** A prefix that appears repeatedly among documents that could not be named. */
 export interface UnresolvedCluster {
@@ -450,6 +483,35 @@ export function unresolvedIdClusters(unresolved: readonly string[], minCount = 3
     .slice(0, MAX_CLUSTERS_REPORTED);
 }
 
+/**
+ * Which of this run's owning documents are about to overwrite a node that an
+ * earlier run wrote from a DIFFERENT file (XSPEC-481 R4). Asked before the write,
+ * because after it the old path is gone.
+ *
+ * Silent when the node has no recorded path (indexed before the column existed, or
+ * only ever a `[[ref]]` stub), when the new document has none (the caller did not
+ * say), and when the path is the same — re-indexing one file is not a conflict.
+ * The overwrite rule itself is not changed here.
+ */
+async function replacedFromEarlierIndex(conn: GraphConnection, owners: readonly ParsedKnowledgeDoc[]): Promise<ReplacedDocument[]> {
+  const out: ReplacedDocument[] = [];
+  for (const p of owners) {
+    if (p.source === undefined) continue;
+    const rows = await conn.query(`MATCH (n:${p.kind} {id: $id}) RETURN n.path AS path`, { id: p.id });
+    const previous = rows[0]?.path;
+    if (typeof previous === "string" && previous !== "" && previous !== p.source) {
+      out.push({
+        id: p.id,
+        kind: p.kind,
+        reason: "replaced-from-earlier-index",
+        previous: { path: previous },
+        current: { path: p.source, source: p.idSource },
+      });
+    }
+  }
+  return out;
+}
+
 /** Ingest spec/decision docs and write them to the graph. */
 export async function indexKnowledgeDocs(
   conn: GraphConnection,
@@ -457,6 +519,7 @@ export async function indexKnowledgeDocs(
 ): Promise<KnowledgeIndexResult> {
   const source = new SpecDecisionKnowledgeSource(docs);
   const fragment = await source.ingest();
+  const replaced = await replacedFromEarlierIndex(conn, source.owners);
   await writeFragment(conn, fragment);
   return {
     specs: fragment.nodes.filter((n) => n.label === "Spec").length,
@@ -466,6 +529,6 @@ export async function indexKnowledgeDocs(
     relates: fragment.edges.filter((e) => e.label === "RELATES").length,
     docsScanned: docs.length,
     docsUnresolved: source.unresolved,
-    conflicts: source.conflicts,
+    conflicts: [...source.conflicts, ...replaced],
   };
 }

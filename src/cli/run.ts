@@ -48,6 +48,7 @@ import {
 } from "../code-graph/parse-manifest.js";
 import { walkFiles, summarizeUnindexed, type ExcludedByPattern, type UnindexedSummary } from "./walk.js";
 import { compileExcludes } from "./exclude.js";
+import { toPosixPath } from "../code-graph/path-utils.js";
 import { checkRefs, type RefCheckResult } from "./refs-check.js";
 import { ALGO_BACKED_COMMAND_LIST, describeAlgoSource, type AlgoSource } from "../structural-memory/algo-extension.js";
 import { unavailableGrammars } from "../code-graph/grammar-registry.js";
@@ -392,7 +393,10 @@ export async function cmdIndex(
   }
   if (opts.docs) {
     const docFiles = walkFiles(opts.dir, [".md"], { exclude }).files;
-    const docs = docFiles.map((f) => ({ content: f.source, fallbackId: f.path }));
+    // `source` (XSPEC-481 R4): the absolute path, so a later run over another directory can tell
+    // that the id it is about to overwrite was written from a different file. `fallbackId` stays
+    // relative — it names the document for id resolution and for the R2 conflict lines.
+    const docs = docFiles.map((f) => ({ content: f.source, fallbackId: f.path, source: toPosixPath(join(root, f.path)) }));
     result.knowledge = await indexKnowledgeDocs(conn, docs);
     // XSPEC-457 R7: the code walk saw every `.md` as "not covered by any
     // supported language", and with `--docs` the same files went into the graph

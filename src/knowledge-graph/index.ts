@@ -3,7 +3,7 @@ export {
   parseKnowledgeDoc,
   indexKnowledgeDocs,
 } from "./parser.js";
-export type { ParsedKnowledgeDoc, KnowledgeIndexResult, DocIdConflict, DocIdSource } from "./parser.js";
+export type { ParsedKnowledgeDoc, KnowledgeIndexResult, DocIdConflict, ReplacedDocument, KnowledgeConflict, DocIdSource } from "./parser.js";
 export { classifyRef, classifyLeadingRef } from "./linker.js";
 export type { ClassifiedRef } from "./linker.js";
 export { impactAnalysis } from "./query.js";

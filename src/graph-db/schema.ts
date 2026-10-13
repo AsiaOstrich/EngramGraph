@@ -23,8 +23,11 @@ export const NODE_TABLE_DDL: readonly string[] = [
   `CREATE NODE TABLE Function(id STRING, name STRING, file STRING, start_line INT64, confidence DOUBLE, provider STRING, PRIMARY KEY(id))`,
   `CREATE NODE TABLE Class(id STRING, name STRING, file STRING, provider STRING, PRIMARY KEY(id))`,
   `CREATE NODE TABLE Module(id STRING, path STRING, PRIMARY KEY(id))`,
-  `CREATE NODE TABLE Spec(id STRING, title STRING, status STRING, confidence DOUBLE, origin STRING, PRIMARY KEY(id))`,
-  `CREATE NODE TABLE Decision(id STRING, title STRING, date STRING, confidence DOUBLE, origin STRING, PRIMARY KEY(id))`,
+  // `path` (XSPEC-481 R4): where the document that declared this node was read from — the absolute path `egr index
+  // <dir> --docs` saw. It is what lets a LATER index tell that a different file now owns an id. NULL for a node no
+  // document declared (a `[[ref]]` stub, a `// implements` annotation) and for nodes indexed before this column.
+  `CREATE NODE TABLE Spec(id STRING, title STRING, status STRING, confidence DOUBLE, origin STRING, path STRING, PRIMARY KEY(id))`,
+  `CREATE NODE TABLE Decision(id STRING, title STRING, date STRING, confidence DOUBLE, origin STRING, path STRING, PRIMARY KEY(id))`,
   `CREATE NODE TABLE Doc(id STRING, title STRING, status STRING, confidence DOUBLE, origin STRING, PRIMARY KEY(id))`,
 ];
 

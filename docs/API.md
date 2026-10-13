@@ -49,8 +49,8 @@ Persist a provider-agnostic `{ nodes, edges }` fragment.
 NODE Function(id, name, file, start_line, confidence, provider)   PK id
 NODE Class(id, name, file, provider)                              PK id
 NODE Module(id, path)                                             PK id
-NODE Spec(id, title, status, confidence, origin)                  PK id
-NODE Decision(id, title, date, confidence, origin)                PK id
+NODE Spec(id, title, status, confidence, origin, path)            PK id
+NODE Decision(id, title, date, confidence, origin, path)          PK id
 NODE Doc(id, title, status, confidence, origin)                   PK id
 
 REL CALLS(Function → Function, call_count, confidence, provider)
