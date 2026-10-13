@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+
 /**
  * Path-separator normalization shared by every producer of a code-graph id
  * (XSPEC-333 R3 follow-up).
@@ -51,4 +54,21 @@
  */
 export function toPosixPath(p: string): string {
   return p.split("\\").join("/");
+}
+
+/**
+ * A file's identity for comparing "is this the same document" (XSPEC-481 R4): its
+ * real location, `/`-separated. A path through a symlinked directory and the path
+ * of the directory it points to name the same file; `resolve` alone keeps them
+ * apart, which made `cross-project/index-all.sh` (it indexes through symlinks) and
+ * a sub-project's own post-commit re-index (real path) accuse each other of
+ * overwriting. A path that does not exist (any more) cannot be resolved and is
+ * returned as written, only made absolute.
+ */
+export function canonicalFilePath(p: string): string {
+  try {
+    return toPosixPath(realpathSync(p));
+  } catch {
+    return toPosixPath(resolve(p));
+  }
 }

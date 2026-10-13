@@ -17,6 +17,7 @@ import { extractRefs, parseFrontMatter } from "../adapters/knowledge-source.js";
 import type { GraphConnection } from "../graph-db/connection.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
 import { writeFragment } from "../graph-db/writer.js";
+import { canonicalFilePath } from "../code-graph/path-utils.js";
 import { classifyLeadingRef, classifyRef, extractRefIds, type ClassifiedRef } from "./linker.js";
 import type { KnowledgeDoc, KnowledgeNodeKind } from "./types.js";
 
@@ -499,13 +500,15 @@ async function replacedFromEarlierIndex(conn: GraphConnection, owners: readonly 
     if (p.source === undefined) continue;
     const rows = await conn.query(`MATCH (n:${p.kind} {id: $id}) RETURN n.path AS path`, { id: p.id });
     const previous = rows[0]?.path;
-    if (typeof previous === "string" && previous !== "" && previous !== p.source) {
+    // Both sides by real location: a path stored by an earlier egr (or through a symlinked directory) and
+    // the same file reached another way are one document, not a replacement.
+    if (typeof previous === "string" && previous !== "" && canonicalFilePath(previous) !== canonicalFilePath(p.source)) {
       out.push({
         id: p.id,
         kind: p.kind,
         reason: "replaced-from-earlier-index",
-        previous: { path: previous },
-        current: { path: p.source, source: p.idSource },
+        previous: { path: canonicalFilePath(previous) },
+        current: { path: canonicalFilePath(p.source), source: p.idSource },
       });
     }
   }

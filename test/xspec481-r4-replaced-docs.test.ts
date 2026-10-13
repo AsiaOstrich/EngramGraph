@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // implements XSPEC-481
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -83,8 +83,8 @@ describe("XSPEC-481 R4: an id taken over from an earlier index", () => {
 
     const second = egr(db, ["index", dirB, "--docs"]);
     expect(second.status, second.stderr).toBe(0);
-    const pathA = join(dirA, "adr", "ADR-903.md");
-    const pathB = join(dirB, "adr", "ADR-903.md");
+    const pathA = join(realpathSync(dirA), "adr", "ADR-903.md");
+    const pathB = join(realpathSync(dirB), "adr", "ADR-903.md");
     expect(second.stdout).toMatch(/knowledge: WARNING — ADR-903 was indexed from .* by an earlier index and is now overwritten by /);
     expect(second.stdout).toContain(pathA);
     expect(second.stdout).toContain(pathB);
@@ -104,13 +104,13 @@ describe("XSPEC-481 R4: an id taken over from an earlier index", () => {
     expect(c.id).toBe("ADR-903");
     expect(c.kind).toBe("Decision");
     expect(c.reason).toBe("replaced-from-earlier-index");
-    expect(c.previous!.path).toBe(join(dirA, "adr", "ADR-903.md"));
-    expect(c.current!.path).toBe(join(dirB, "adr", "ADR-903.md"));
+    expect(c.previous!.path).toBe(join(realpathSync(dirA), "adr", "ADR-903.md"));
+    expect(c.current!.path).toBe(join(realpathSync(dirB), "adr", "ADR-903.md"));
     expect(c.current!.source).toBe("front-matter");
     // And it works the other way round: the graph remembered dirB's path, so taking it back says so.
     const back = indexJson(db, dirA);
     const ids = back.conflicts.filter((x) => x.reason === "replaced-from-earlier-index").map((x) => [x.id, x.previous!.path]);
-    expect(ids).toContainEqual(["ADR-903", join(dirB, "adr", "ADR-903.md")]);
+    expect(ids).toContainEqual(["ADR-903", join(realpathSync(dirB), "adr", "ADR-903.md")]);
   });
 
   it("indexing the same file again is not a conflict, however many times [xspec481-r4-same-file-silent]", () => {
@@ -170,6 +170,37 @@ describe("XSPEC-481 R4: an id taken over from an earlier index", () => {
     // The migrated column is writable and read back: dirB's index recorded its path, so dirA's run names it.
     const second = egr(db, ["index", dirA, "--docs"]);
     expect(second.status, second.stderr).toBe(0);
-    expect(second.stdout).toContain(join(dirB, "adr", "ADR-903.md"));
+    expect(second.stdout).toContain(join(realpathSync(dirB), "adr", "ADR-903.md"));
+  });
+
+  it("the same document reached through a symlinked directory and through its real path is one document: no warning either way, a different file still warns [xspec481-r4-symlink-same-file]", () => {
+    // dev-platform's index-all.sh indexes sub-projects through symlinks; a sub-project's own post-commit re-index uses the real path.
+    const link = join(work, `link-${seq++}`);
+    symlinkSync(dirA, link, "dir");
+    const db = newDb();
+    expect(egr(db, ["index", link, "--docs", "--clean"]).status).toBe(0);
+    const viaReal = egr(db, ["index", dirA, "--docs"]);
+    expect(viaReal.status, viaReal.stderr).toBe(0);
+    expect(viaReal.stdout).not.toMatch(/WARNING/);
+    expect(indexJson(db, link).conflicts).toEqual([]); // and back through the link
+    // A genuinely different file is still reported, and the path named is the real one, not the link.
+    const other = indexJson(db, dirB);
+    expect(other.conflicts).toHaveLength(1);
+    expect(other.conflicts[0]!.previous!.path).toBe(join(realpathSync(dirA), "adr", "ADR-903.md"));
+    expect(other.conflicts[0]!.previous!.path).not.toContain(link);
+  });
+
+  it("a path stored as written through a symlink (by an earlier egr) is compared by its real location too [xspec481-r4-symlink-stored-path]", async () => {
+    const link = join(work, `link-${seq++}`);
+    symlinkSync(dirA, link, "dir");
+    const db = newDb();
+    expect(egr(db, ["index", dirA, "--docs", "--clean"]).status).toBe(0);
+    // Rewrite the stored path to the symlink spelling, as a graph made before paths were canonical would hold.
+    const conn = GraphConnection.open(db);
+    await conn.query(`MATCH (n:Decision {id: 'ADR-903'}) SET n.path = $p`, { p: join(link, "adr", "ADR-903.md") });
+    await conn.close();
+    const r = egr(db, ["index", dirA, "--docs"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).not.toMatch(/WARNING/);
   });
 });

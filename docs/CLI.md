@@ -59,7 +59,7 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
   `knowledge: WARNING — ADR-903 was indexed from <dirA path> by an earlier index
   and is now overwritten by <dirB path>` line, and an entry in
   `knowledge.conflicts` with `reason: "replaced-from-earlier-index"`, the `kind`
-  (`Spec`/`Decision`), `previous.path` and `current.path` (absolute paths). The
+  (`Spec`/`Decision`), `previous.path` and `current.path` (absolute real paths — a symlinked directory and its target are the same file, so indexing through one and then the other does not warn). The
   graph remembers the path in `Spec.path` / `Decision.path`; indexing the same
   file again is not a conflict, and a node with no recorded path (indexed by an
   earlier egr, or only ever a `[[ref]]` stub, or written by MCP `index_docs`,
