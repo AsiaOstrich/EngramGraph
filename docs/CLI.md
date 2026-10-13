@@ -245,7 +245,7 @@ egr top Function --limit 20
 egr top Decision --json
 ```
 
-### `communities [--limit N] [--json]`
+### `communities [--limit N] [--include-unclustered] [--json]`
 
 Function-call clusters (Louvain over `CALLS` edges), one row per member with
 its `communityId`. On a real project that is every function in the graph —
@@ -253,11 +253,36 @@ megabytes of `--json`. `--limit N` keeps the **N largest communities**, each
 with all of its members (largest first on ties, the smaller community id);
 it counts communities, not rows, because half a cluster is not a cluster. The
 text output says `showing the N largest of M communities` when it cut
-something. `N` must be a positive whole number. Needs the ALGO extension (see
-below).
+something. `N` must be a positive whole number.
+
+A function with no `CALLS` edge (nothing calls it, it calls nothing) belongs to
+no community; the engine labels all of them `-1`. On a real project that was
+1,813 functions, which came out as the largest "community" and filled every
+`--limit`. They are therefore **not a community**: not counted by `--limit` or
+in `M`, and **not listed** unless you pass `--include-unclustered` (then they
+are marked `unclustered`, `communityId` `-1`). Their number is always reported:
+the last line of the text output is `unclustered: N function(s) have no CALLS
+edge and belong to no community`.
+
+`--json` prints a report, not a bare array (changed in 0.13.0-beta.5):
+
+```json
+{
+  "communities": [{ "id": "…", "label": "Function", "name": "ringOne", "communityId": 0 }],
+  "communityCount": 2,
+  "shownCommunities": 1,
+  "unclustered": { "count": 3, "listed": false }
+}
+```
+
+`communities` holds the rows as before (with `--include-unclustered`, the
+`-1` rows too); `communityCount` is the real communities in the graph and
+`shownCommunities` how many of them `communities` holds. Needs the ALGO
+extension (see below).
 
 ```bash
 egr communities --limit 5 --json
+egr communities --limit 5 --include-unclustered
 ```
 
 ### `refs check <path...> [--json]`

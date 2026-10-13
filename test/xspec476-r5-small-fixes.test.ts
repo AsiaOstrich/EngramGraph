@@ -93,7 +93,8 @@ describe("XSPEC-476 R5b: egr communities --limit", () => {
   const members = (args: string[]): Member[] => {
     const r = egr(["communities", ...args, "--json"], db);
     expect(r.status, r.stderr).toBe(0);
-    return JSON.parse(r.stdout) as Member[];
+    // XSPEC-481 R2 turned the answer into a report; the rows are under `communities`.
+    return (JSON.parse(r.stdout) as { communities: Member[] }).communities;
   };
 
   it("--limit N keeps the N largest communities whole, and without it the answer is unchanged [xspec476-r5b-communities-limit]", () => {

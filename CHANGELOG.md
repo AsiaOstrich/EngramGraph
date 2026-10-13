@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 *To be released as 0.13.0-beta.5 (XSPEC-481): fixes for the new findings in the 0.13.0-beta.4 Windows consumer report. The version number is not bumped yet.*
 
+### Changed
+
+- **Breaking (`--json` only): `egr communities --json` prints a report object instead of a bare array** (R2). Functions that have no `CALLS` edge (1,813 of them on the reporting project) used to be labelled community `-1`, which was always the largest and filled every `--limit` — `--limit 3` still printed 2,486 lines (558 KB). They are not a community: `--limit` and the "N of M communities" count now leave them out, they are **not listed** unless `--include-unclustered` is given (then marked `unclustered`), and their number is always reported — the text output ends with `unclustered: N function(s) have no CALLS edge and belong to no community`, and `--json` is `{ communities, communityCount, shownCommunities, unclustered: { count, listed } }`, the rows being under `communities`. A script that read the array must read `.communities`. Covered by `test/xspec481-r2-communities-unclustered.test.ts` (built CLI; indexed fixture with two real communities and three isolated functions).
+
 ### Fixed
 
 - **`egr refs check` no longer calls a language's built-in function, or a definition found only in a bundle, `missing`** (R1; since beta.4 a `missing` fails the exit status, so this was a CI failure). The report: a document cited PHP's `date()`, and `refs check` said `missing` with a commit whose only link to `date` was `date:function(t){…}` inside a front-end bundle. Now:

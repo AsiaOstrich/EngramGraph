@@ -14,7 +14,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, limitCommunities, countCommunities, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, cmdRefsCheck, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
+import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, shapeCommunities, type CommunitiesReport, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, cmdRefsCheck, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
 import type { RefCheckResult } from "./refs-check.js";
 import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
@@ -62,9 +62,14 @@ Commands:
                                   Evolve confidence (type: test_fail|test_pass|human_fix)
   top <label> [--limit N]         Highest-confidence nodes (label: Function|Spec|Decision|Doc)
   god-nodes [--limit N]           Highest-importance nodes across code + knowledge (PageRank)
-  communities [--limit N]         Function-call clusters (Louvain over CALLS edges);
+  communities [--limit N] [--include-unclustered]
+                                  Function-call clusters (Louvain over CALLS edges);
                                   --limit keeps the N largest communities (all
-                                  their members), not N rows
+                                  their members), not N rows. Functions with no
+                                  CALLS edge belong to no community: they are
+                                  counted ("unclustered"), not listed, and not
+                                  counted by --limit, unless
+                                  --include-unclustered
   related <node-id> [--depth N] [--limit N]
                                   Nodes important *around* a seed (seeded PageRank approx.)
   refs check <path...>            Check file-path/symbol references (in
@@ -144,7 +149,7 @@ const fmtNodes = (
             r.label,
             r.confidence != null ? `confidence ${r.confidence}` : undefined,
             r.rank != null ? `rank ${r.rank.toFixed(4)}` : undefined,
-            r.communityId != null ? `community ${r.communityId}` : undefined,
+            r.communityId != null ? (r.communityId === -1 ? "unclustered" : `community ${r.communityId}`) : undefined,
           ].filter(Boolean);
           return `  ${r.name ?? r.id}${extras.length ? ` (${extras.join(", ")})` : ""}`;
         })
@@ -189,6 +194,7 @@ async function main(): Promise<void> {
       scip: { type: "string" },
       exclude: { type: "string", multiple: true },
       "dry-run": { type: "boolean" },
+      "include-unclustered": { type: "boolean" },
     },
   });
 
@@ -623,16 +629,23 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? "nothing matched; check the pa
         throw new Error(`communities --limit must be a positive whole number (got "${values.limit}")`);
       }
       const all = await cmdCommunities(conn);
-      const rows = values.limit !== undefined ? limitCommunities(all, Number(values.limit)) : all;
-      const total = countCommunities(all);
-      const shown = countCommunities(rows);
-      out(
-        rows,
-        values.json,
-        (d) =>
-          `communities:\n${fmtNodes(d as Array<{ name: string; communityId: number }>)}` +
-          (shown < total ? `\n(showing the ${shown} largest of ${total} communities; --limit counts communities, not rows)` : ""),
-      );
+      const report = shapeCommunities(all, {
+        limit: values.limit !== undefined ? Number(values.limit) : undefined,
+        includeUnclustered: values["include-unclustered"],
+      });
+      out(report, values.json, (d) => {
+        const r = d as CommunitiesReport;
+        const cut =
+          r.shownCommunities < r.communityCount
+            ? `\n(showing the ${r.shownCommunities} largest of ${r.communityCount} communities; --limit counts communities, not rows)`
+            : "";
+        // Said whether or not any were listed: "not listed" must not read as "there are none".
+        const u = r.unclustered;
+        const unclustered = `\nunclustered: ${u.count} function(s) have no CALLS edge and belong to no community${
+          u.count === 0 ? "" : u.listed ? " (listed above)" : " (not listed; --include-unclustered lists them)"
+        }`;
+        return `communities:\n${fmtNodes(r.communities)}${cut}${unclustered}`;
+      });
       break;
     }
     case "related": {

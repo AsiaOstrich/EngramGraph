@@ -549,6 +549,47 @@ export function countCommunities(rows: ReadonlyArray<{ communityId: number }>): 
   return new Set(rows.map((r) => r.communityId)).size;
 }
 
+/**
+ * `communityId` the engine gives a function that has no `CALLS` edge at all
+ * (XSPEC-481 R2). It is the absence of a community, not a community: on a real
+ * project it was 1,813 functions that "formed" the largest group, which then came
+ * first under every `--limit`.
+ */
+export const UNCLUSTERED_COMMUNITY_ID = -1;
+
+/** What `egr communities` reports (XSPEC-481 R2): the real communities, and the unclustered functions counted apart. */
+export interface CommunitiesReport {
+  /** One row per member, as before. Functions with no CALLS edge (`communityId` -1) are in it only when asked for. */
+  communities: CommunityMember[];
+  /** Real communities in the graph — the unclustered functions are not one. */
+  communityCount: number;
+  /** Real communities among `communities` (fewer than `communityCount` when `--limit` cut). */
+  shownCommunities: number;
+  /** Functions with no CALLS edge: how many there are, and whether `communities` lists them. */
+  unclustered: { count: number; listed: boolean };
+}
+
+/**
+ * Turn the engine's answer into the report `egr communities` prints
+ * (XSPEC-481 R2): the unclustered functions leave the community count and the
+ * `--limit` count, and are listed only with `includeUnclustered`. Their number is
+ * always reported, so that "not listed" is never mistaken for "none".
+ */
+export function shapeCommunities(
+  all: readonly CommunityMember[],
+  opts: { limit?: number; includeUnclustered?: boolean } = {},
+): CommunitiesReport {
+  const real = all.filter((m) => m.communityId !== UNCLUSTERED_COMMUNITY_ID);
+  const lonely = all.filter((m) => m.communityId === UNCLUSTERED_COMMUNITY_ID);
+  const kept = opts.limit !== undefined ? limitCommunities(real, opts.limit) : [...real];
+  return {
+    communities: opts.includeUnclustered ? [...lonely, ...kept] : kept,
+    communityCount: countCommunities(real),
+    shownCommunities: countCommunities(kept),
+    unclustered: { count: lonely.length, listed: opts.includeUnclustered === true },
+  };
+}
+
 /** `egr related <node-id> [--depth N] [--limit N]` — seed-anchored ranking (DEC-028 L4a). */
 export async function cmdRelated(conn: GraphConnection, seedId: string, depth = 2, limit = 10): Promise<RelatedNode[]> {
   const rows = await related(conn, seedId, depth, limit);
