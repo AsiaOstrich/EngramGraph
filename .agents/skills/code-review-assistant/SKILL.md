@@ -1,0 +1,94 @@
+---
+name: code-review
+scope: universal
+description: |
+  [UDS] Reference for systematic code review: eight review categories and BLOCKING/IMPORTANT/SUGGESTION comment prefixes.
+  Use when: reviewing a pull request or diff, deciding how to phrase and prioritise review comments, agreeing review scope with a team.
+  Not for: executing a gated review workflow — that moved to the adoption layer (XSPEC-095); pre-commit gate verification — use /checkin.
+  Keywords: code review, pull request review, review checklist, BLOCKING, comment prefix, 程式碼審查, 審查類別, 評論前綴.
+allowed-tools: Read, Grep, Glob, Bash(git diff:*), Bash(git log:*), Bash(git show:*)
+argument-hint: "[file path or branch | 檔案路徑或分支名稱]"
+status: reference
+# 2026-08-17: `disable-model-invocation: true` removed. It was applied by d415937e
+# alongside the description rewrite, and followed no stateable rule — of the six
+# skills carrying `status: reference`, four (tdd, bdd, atdd, pr-automation) were
+# never disabled despite the identical XSPEC-095 relocation. Same category,
+# opposite treatment. The rule is now stateable: a reference is model-invocable.
+# pr-automation-assistant routes "the substance of the review itself" to
+# /code-review, and that referral was unreachable while this flag was set.
+---
+<!-- DEPRECATION NOTICE (XSPEC-086 Phase 4, 2026-04-28):
+  Code review workflow orchestration (4-step sequence, outcome gating) relocated to adoption layer
+  (XSPEC-095, 2026-04-28). This Skill retains: 8 review category definitions,
+  BLOCKING/IMPORTANT/SUGGESTION/QUESTION/NOTE prefix semantics.
+  For enforced execution, use your adoption layer's toolchain.
+-->
+
+# Code Review Assistant | 程式碼審查助手
+
+> ⚠️ **Status: Reference（參考用，非可執行流程）** — 程式碼審查流程協調（4 步驟序列、outcome gating）已於 2026-04-28 移至 **adoption layer（XSPEC-095）**。此處保留 8 大審查類別定義、BLOCKING/IMPORTANT/SUGGESTION/QUESTION/NOTE 前綴語意供參考。
+> Lifecycle orchestration has moved to the adoption layer (XSPEC-095); this document is **reference-only**. For enforced execution, use your adoption layer's toolchain.
+
+Perform systematic code review using standardized checklists and comment prefixes.
+
+執行系統性的程式碼審查，使用標準化的檢查清單和評論前綴。
+
+## Workflow | 工作流程
+
+> 📖 以下為流程的**參考結構**，非可執行步驟；自動化／強制執行請用 adoption layer 工具鏈（XSPEC-095）。
+> The steps below are a **reference structure**, not an executable workflow.
+
+1. **Identify changes** - Get diff of files to review via `git diff` or `git show`
+2. **Apply checklist** - Check each review category systematically
+3. **Generate report** - Output findings with standard comment prefixes
+4. **Summarize** - Provide overall assessment and recommended actions
+
+## Review Categories | 審查類別
+
+1. **Functionality** - Does it work correctly? | 功能是否正確？
+2. **Design** - Is the architecture appropriate? | 架構是否合適？
+3. **Quality** - Is the code clean and maintainable? | 程式碼是否乾淨可維護？
+4. **Readability** - Is it easy to understand? | 是否容易理解？
+5. **Tests** - Is there adequate test coverage? | 測試覆蓋是否足夠？
+6. **Security** - Are there any vulnerabilities? | 是否有安全漏洞？
+7. **Performance** - Is it efficient? | 是否有效率？
+8. **Error Handling** - Are errors handled properly? | 錯誤處理是否妥當？
+
+## Comment Prefixes | 評論前綴
+
+| Prefix | Meaning | Action | 動作 |
+|--------|---------|--------|------|
+| **BLOCKING** | Must fix before merge | Required | 必須修復 |
+| **IMPORTANT** | Should fix | Recommended | 建議修復 |
+| **SUGGESTION** | Nice-to-have | Optional | 可選改善 |
+| **QUESTION** | Need clarification | Discuss | 需要討論 |
+| **NOTE** | Informational | FYI | 僅供參考 |
+
+## Usage | 使用方式
+
+- `/code-review` - Review all changes in current branch
+- `/code-review src/auth.js` - Review specific file
+- `/code-review feature/login` - Review specific branch
+
+## Next Steps Guidance | 下一步引導
+
+After `/code-review` completes, the AI assistant should suggest:
+
+> **程式碼審查完成。建議下一步 / Code review complete. Suggested next steps:**
+> - 有 ❗ BLOCKING 項目 → 修復後重新執行 `/code-review` — Fix issues then re-run `/code-review`
+> - 全部通過 → 執行 `/checkin` 品質關卡 ⭐ **Recommended / 推薦** — All passed → Run `/checkin` quality gates
+> - 僅有 💡 SUGGESTION → 執行 `/commit` 提交變更 — Only suggestions → Run `/commit`
+> - 審查中發現規範不實用或缺失 → 執行 `/audit --report` 回報 — Found impractical or missing standards → Run `/audit --report`
+
+## Reference | 參考
+
+- [Pre-Commit Checklist](./checkin-checklist.md) — Read it before committing, as the pre-commit pass.
+- Detailed guide: [guide.md](./guide.md)
+- Core standard: [code-review-checklist.md](../../core/code-review-checklist.md)
+
+
+## AI Agent Behavior | AI 代理行為
+
+> 完整的 AI 行為定義請參閱對應的命令文件：[`/code-review`](../commands/code-review.md#ai-agent-behavior--ai-代理行為)
+>
+> For complete AI agent behavior definition, see the corresponding command file: [`/code-review`](../commands/code-review.md#ai-agent-behavior--ai-代理行為)

@@ -1,0 +1,93 @@
+---
+name: checkin
+scope: partial
+description: |
+  [UDS] Reference for pre-commit quality gates: gate definitions, checklist items, and never-commit rules.
+  Use when: deciding what must pass before a commit, auditing which quality gates a project enforces, checking readiness to check in.
+  Not for: executing the gate sequence or aborting a commit — that moved to the adoption layer (XSPEC-095); finding and removing debug artifacts — use /sweep.
+  Keywords: check-in, pre-commit, quality gate, commit readiness, never commit, 簽入, 提交前檢查, 品質關卡.
+allowed-tools: Read, Grep, Glob, Bash(git diff:*), Bash(git status:*), Bash(npm test:*), Bash(npm run lint:*)
+status: reference
+# 2026-08-17: `disable-model-invocation: true` removed. It was applied by d415937e
+# alongside the description rewrite, and followed no stateable rule — of the six
+# skills carrying `status: reference`, four (tdd, bdd, atdd, pr-automation) were
+# never disabled despite the identical XSPEC-095 relocation. Same category,
+# opposite treatment. The rule is now stateable: a reference is model-invocable.
+# pr-automation-assistant routes "the substance of the review itself" to
+# /code-review, and that referral was unreachable while this flag was set.
+---
+<!-- DEPRECATION NOTICE (XSPEC-086 Phase 4, 2026-04-28):
+  Checkin workflow orchestration (gate execution sequence, abort logic) relocated to adoption layer
+  (XSPEC-095, 2026-04-28). This Skill retains: quality gate definitions, checklist items,
+  never-commit rules.
+  For enforced execution, use your adoption layer's toolchain.
+-->
+
+# Check-in Assistant | 簽入助手
+
+> ⚠️ **Status: Reference（參考用，非可執行流程）** — 簽入流程協調（關卡執行序列、abort 邏輯）已於 2026-04-28 移至 **adoption layer（XSPEC-095）**。此處保留品質關卡定義、檢查清單項、never-commit 規則供參考。
+> Lifecycle orchestration has moved to the adoption layer (XSPEC-095); this document is **reference-only**. For enforced execution, use your adoption layer's toolchain.
+
+Verify pre-commit quality gates before committing code to ensure codebase stability.
+
+在提交程式碼前驗證品質關卡，確保程式碼庫的穩定性。
+
+## Workflow | 工作流程
+
+> 📖 以下為流程的**參考結構**，非可執行步驟；自動化／強制執行請用 adoption layer 工具鏈（XSPEC-095）。
+> The steps below are a **reference structure**, not an executable workflow.
+
+1. **Check git status** - Run `git status` and `git diff` to understand pending changes
+2. **Run tests** - Execute `npm test` (or project test command) to verify all tests pass
+3. **Run linting** - Execute `npm run lint` to check code style compliance
+4. **Verify quality gates** - Check each gate against the checklist below
+5. **Report results** - Present pass/fail summary and recommend next steps
+
+## Quality Gates | 品質關卡
+
+| Gate | Check | 檢查項目 |
+|------|-------|---------|
+| **Build** | Code compiles with zero errors | 編譯零錯誤 |
+| **Tests** | All existing tests pass (100%) | 所有測試通過 |
+| **Coverage** | Test coverage not decreased | 覆蓋率未下降 |
+| **Code Quality** | Follows coding standards, no code smells | 符合編碼規範 |
+| **Security** | No hardcoded secrets or vulnerabilities | 無硬編碼密鑰 |
+| **Documentation** | API docs and CHANGELOG updated if needed | 文件已更新 |
+| **Workflow** | Branch naming and commit message correct | 分支和提交格式正確 |
+| **Upstream** | No `.standards/` or `.claude/skills/` modifications (advisory) | 無 UDS 上游檔案修改（建議性） |
+
+## Never Commit When | 禁止提交的情況
+
+- Build has errors | 建置有錯誤
+- Tests are failing | 測試失敗
+- Feature is incomplete and would break functionality | 功能不完整會破壞現有功能
+- Contains WIP/TODO in critical logic | 關鍵邏輯中有 WIP/TODO
+- Contains debugging code (console.log, print) | 包含除錯程式碼
+- Contains commented-out code blocks | 包含被註解的程式碼區塊
+
+## Usage | 使用方式
+
+- `/checkin` - Run full quality gate verification on current changes
+- After verification, proceed with `/commit` to create the commit message
+
+## Next Steps Guidance | 下一步引導
+
+After `/checkin` completes, the AI assistant should suggest:
+
+> **品質關卡驗證完成。建議下一步 / Quality gate verification complete. Suggested next steps:**
+> - 全部通過 ✅ → 執行 `/commit` 提交變更 ⭐ **Recommended / 推薦** — All passed → Run `/commit` to commit
+> - 有失敗項目 ❌ → 修復問題後重新執行 `/checkin` — Failures found → Fix then re-run `/checkin`
+> - 需要程式碼審查 → 執行 `/code-review` 進行自我審查 — Need review → Run `/code-review` for self-review
+> - UDS 安裝有異常 → 執行 `/audit` 診斷問題 — UDS issues detected → Run `/audit` to diagnose
+
+## Reference | 參考
+
+- Detailed guide: [guide.md](./guide.md)
+- Core standard: [checkin-standards.md](../../core/checkin-standards.md)
+
+
+## AI Agent Behavior | AI 代理行為
+
+> 完整的 AI 行為定義請參閱對應的命令文件：[`/checkin`](../commands/checkin.md#ai-agent-behavior--ai-代理行為)
+>
+> For complete AI agent behavior definition, see the corresponding command file: [`/checkin`](../commands/checkin.md#ai-agent-behavior--ai-代理行為)
