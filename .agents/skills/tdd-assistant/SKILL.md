@@ -1,0 +1,100 @@
+---
+name: tdd
+scope: partial
+description: |
+  [UDS] Reference for Test-Driven Development: the Red-Green-Refactor cycle, FIRST principles, and Arrange-Act-Assert structure.
+  Use when: writing a failing test before implementation, structuring a test with Arrange-Act-Assert, checking tests against FIRST.
+  Not for: driving the RED/GREEN cycle interactively — that moved to the adoption layer (XSPEC-095); measuring how much code the tests cover — use /coverage.
+  Keywords: TDD, test first, Red Green Refactor, FIRST, Arrange Act Assert, unit test, 測試驅動開發, 紅綠重構, 單元測試.
+allowed-tools: Read, Write, Grep, Glob, Bash(npm test:*), Bash(npx vitest:*)
+argument-hint: "[feature or file | 功能或檔案]"
+status: reference
+---
+<!-- DEPRECATION NOTICE (XSPEC-086 Phase 4, 2026-04-28):
+  TDD flow orchestration (RED→GREEN→REFACTOR cycle, test execution gates) relocated to adoption
+  layer (XSPEC-095, 2026-04-28). This Skill retains: TDD principles, FIRST rules, AAA format,
+  language examples, workflow guide.
+  For enforced interactive cycle, use your adoption layer's toolchain.
+-->
+
+# TDD Assistant | TDD 助手
+
+> ⚠️ **Status: Reference（參考用，非可執行流程）** — TDD 流程協調（RED→GREEN→REFACTOR 循環、測試執行 gates）已於 2026-04-28 移至 **adoption layer（XSPEC-095）**。此處保留 TDD 原則、FIRST 規則、AAA 格式、語言範例、流程指南供參考。
+> Lifecycle orchestration has moved to the adoption layer (XSPEC-095); this document is **reference-only**. For enforced execution, use your adoption layer's toolchain.
+
+Guide through the Test-Driven Development workflow: Red-Green-Refactor.
+
+引導測試驅動開發（TDD）流程：紅-綠-重構。
+
+## TDD Cycle | TDD 循環
+
+```
+    ┌─────┐       ┌───────┐       ┌──────────┐
+    │ RED │ ────► │ GREEN │ ────► │ REFACTOR │
+    └─────┘       └───────┘       └──────────┘
+       ▲                                │
+       └────────────────────────────────┘
+```
+
+## Workflow | 工作流程
+
+> 📖 以下為流程的**參考結構**，非可執行步驟；自動化／強制執行請用 adoption layer 工具鏈（XSPEC-095）。
+> The steps below are a **reference structure**, not an executable workflow.
+
+### Phase 1: RED - Write Failing Test | 紅燈 - 撰寫失敗測試
+
+- Write a test that describes the desired behavior | 撰寫描述預期行為的測試
+- Run tests - confirm it **fails** for the right reason | 執行測試 - 確認正確地失敗
+- Use AAA pattern (Arrange-Act-Assert) | 使用 AAA 模式
+
+### Phase 2: GREEN - Make Test Pass | 綠燈 - 讓測試通過
+
+- Write **minimum** code to pass the test | 撰寫最少的程式碼讓測試通過
+- Hardcoding is acceptable at this stage | 此階段可以硬編碼
+- Run tests - confirm it **passes** | 執行測試 - 確認通過
+
+### Phase 3: REFACTOR - Improve Code | 重構 - 改善程式碼
+
+- Remove duplication (DRY) | 移除重複
+- Improve naming and structure | 改善命名與結構
+- Run tests after **every** change | 每次變更後執行測試
+- No new functionality added | 不新增功能
+
+## FIRST Principles | FIRST 原則
+
+| Principle | Description | 說明 |
+|-----------|-------------|------|
+| **F**ast | Tests run quickly (< 100ms/unit) | 快速執行 |
+| **I**ndependent | No shared state between tests | 測試間無共享狀態 |
+| **R**epeatable | Same result every time | 每次結果相同 |
+| **S**elf-validating | Clear pass/fail result | 明確的通過/失敗 |
+| **T**imely | Written before production code | 在產品程式碼之前撰寫 |
+
+## Usage | 使用方式
+
+- `/tdd` - Start interactive TDD session
+- `/tdd calculateTotal` - TDD for specific function
+- `/tdd "user can login"` - TDD for user story
+
+## Next Steps Guidance | 下一步引導
+
+After `/tdd` completes, the AI assistant should suggest:
+
+> **TDD 循環完成。建議下一步 / TDD cycle complete. Suggested next steps:**
+> - 執行 `/checkin` 通過品質關卡 ⭐ **Recommended / 推薦** — Pass quality gates
+> - 執行 `/coverage` 確認測試覆蓋率 — Check test coverage
+> - 執行 `/code-review` 自我審查程式碼 — Self-review code quality
+
+## Reference | 參考
+
+- [TDD Language Examples](./language-examples.md) — Read it when you need a concrete example in a specific language.
+- [TDD Workflow Guide](./tdd-workflow.md) — Read it when running the red-green-refactor cycle end to end.
+- Detailed guide: [guide.md](./guide.md)
+- Core standard: [test-driven-development.md](../../core/test-driven-development.md)
+
+
+## AI Agent Behavior | AI 代理行為
+
+> 完整的 AI 行為定義請參閱對應的命令文件：[`/tdd`](../commands/tdd.md#ai-agent-behavior--ai-代理行為)
+>
+> For complete AI agent behavior definition, see the corresponding command file: [`/tdd`](../commands/tdd.md#ai-agent-behavior--ai-代理行為)

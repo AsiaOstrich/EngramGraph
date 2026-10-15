@@ -1,0 +1,209 @@
+---
+name: ac-coverage
+scope: universal
+anchor_standard: acceptance-criteria-traceability
+description: |
+  [UDS] Analyze AC-to-test traceability and generate requirement-level coverage reports.
+  Use when: auditing which acceptance criteria have tests, building a traceability matrix from a SPEC file, finding uncovered AC before release.
+  Not for: code-level line/branch/function coverage — use /coverage; writing the missing tests — use /tdd or /spec-derive.
+  Keywords: AC coverage, traceability, acceptance criteria, SPEC, traceability matrix, 驗收條件, 需求追蹤, 覆蓋率矩陣.
+allowed-tools: Read, Grep, Glob
+argument-hint: "[spec file path | 規格檔案路徑]"
+---
+
+# AC Coverage Assistant | AC 覆蓋率助手
+
+**Version**: 1.1.0
+**Last Updated**: 2026-06-19
+**Applicability**: Claude Code Skills
+
+> **Core Standard**: This skill implements [Acceptance Criteria Traceability Standards](../../core/acceptance-criteria-traceability.md). For the authoritative methodology, refer to the core standard.
+
+Analyze Acceptance Criteria (AC) to test traceability and generate coverage reports.
+
+分析驗收條件（AC）與測試之間的追蹤關係，並產生覆蓋率報告。
+
+## What This Does vs `/coverage` | 與 `/coverage` 的區別
+
+| Aspect | `/coverage` | `/ac-coverage` |
+|--------|-------------|----------------|
+| **Scope** | Code-level (line/branch/function) | Requirement-level (AC-to-test) |
+| **Input** | Source code + test runner | SPEC file + test annotations |
+| **Question** | "How much code is tested?" | "Which AC have tests?" |
+| **Output** | Coverage percentages | Traceability matrix + gap report |
+
+## Workflow | 工作流程
+
+1. **Parse SPEC** — Extract AC definitions (AC-1, AC-2, ...) from the specification file
+2. **Scan Tests** — Search test files for the **canonical annotation** `@SPEC-<id> @AC-<n>` (a single combined tag)
+3. **Build Matrix** — Map each AC to its test references (file, test name, line)
+4. **Classify Status** — Mark each AC as ✅ covered, ⚠️ partial, or ❌ uncovered
+5. **Calculate Coverage** — Apply formula: `Coverage % = (covered + partial × 0.5) / total × 100`
+6. **Generate Report** — Output standardized Markdown report
+
+## Linking Convention | 標註慣例
+
+Tests MUST reference their source AC using the **canonical annotation**:
+`@SPEC-<id> @AC-<n>` — a single combined tag, e.g. `@SPEC-001 @AC-1`. Keeping the
+attribution on **one line** is what forward-derivation and test-runner tag
+filters consume. **Do not** split it into separate `@AC` / `@SPEC` lines.
+
+使用**標準合併標註** `@SPEC-<id> @AC-<n>`（單一合併標籤），保持同一行；**勿**拆成 `@AC` / `@SPEC` 兩行。
+
+```typescript
+// TypeScript/JavaScript
+describe('AC-1: User login with valid credentials', () => {
+  // @SPEC-001 @AC-1
+  it('should redirect to dashboard on successful login', () => { ... });
+});
+```
+
+```python
+# Python
+class TestAC1_UserLogin:
+    """AC-1: User login with valid credentials
+    @SPEC-001 @AC-1
+    """
+    def test_redirect_to_dashboard(self): ...
+```
+
+```gherkin
+# BDD Feature
+@SPEC-001 @AC-1
+Scenario: User login with valid credentials
+```
+
+## Coverage Thresholds | 覆蓋率門檻
+
+| Threshold | Default Value | Enforcement |
+|-----------|---------------|-------------|
+| **Check-in** | 80% | Required for feature branch merge |
+| **Release** | 100% | Required for production release |
+| **Warning** | 60% | Triggers coverage warning |
+
+Thresholds are configurable via `--threshold` parameter or project configuration.
+
+## Four-Layer Traceability | 四層追溯（`--full` 模式）
+
+Use `--full` flag to extend from 2-layer (AC→Test) to 4-layer traceability.
+
+使用 `--full` 標記將追溯從 2 層（AC→Test）擴展為 4 層。
+
+### Traceability Layers | 追溯層次
+
+```
+Layer 0: Requirement / User Story (REQ)
+    ↓ (defines)
+Layer 1: Acceptance Criteria (AC)
+    ↓ (@SPEC-NNN @AC-N annotations)
+Layer 2: Test Cases
+    ↓ (covers)
+Layer 3: Source Code (@implements)
+```
+
+### Layer Annotations | 各層標註慣例
+
+```typescript
+// Layer 3→1: Code referencing AC
+// @implements AC-1, AC-2
+function authenticate(user: string, pass: string) { ... }
+```
+
+```markdown
+<!-- Layer 0→1: Requirement in SPEC -->
+## Requirements
+### REQ-1: User Authentication
+- AC-1: Given valid credentials, when login, then authenticated
+- AC-2: Given invalid credentials, when login, then rejected
+```
+
+### Full Traceability Report | 完整追溯報告
+
+```markdown
+## Four-Layer Traceability Matrix
+
+| Requirement | AC | Test | Code | Status |
+|-------------|-----|------|------|--------|
+| REQ-1 | AC-1 | auth.test.ts:15 | auth.ts:42 | ✅ Full |
+| REQ-1 | AC-2 | auth.test.ts:30 | auth.ts:58 | ✅ Full |
+| REQ-2 | AC-3 | — | dashboard.ts:10 | ⚠️ No test |
+| REQ-3 | AC-4 | export.test.ts:5 | — | ⚠️ No code |
+
+### Gap Summary
+- Layer 0→1: 2 requirements without AC
+- Layer 1→2: 1 AC without tests
+- Layer 2→3: 0 tests without code mapping
+- Layer 3→1: 3 code files without AC mapping
+```
+
+### Reverse Tracing | 反向追溯
+
+Use `--trace-code <path>` to trace from code back to requirements.
+
+使用 `--trace-code <path>` 從程式碼反向追溯到需求。
+
+```bash
+/ac-coverage --trace-code src/auth.ts
+# Output:
+# src/auth.ts:42 → @implements AC-1 → REQ-1 (SPEC-AUTH-001)
+# src/auth.ts:58 → @implements AC-2 → REQ-1 (SPEC-AUTH-001)
+```
+
+## Report Format | 報告格式
+
+The generated report follows the standard format from `core/acceptance-criteria-traceability.md`:
+
+```markdown
+# AC Coverage Report
+
+**Specification**: SPEC-001 — Feature Name
+**Generated**: 2026-03-18
+**Coverage**: 75% (6/8 AC)
+
+## Summary
+
+| Status | Count | Percentage |
+|--------|-------|------------|
+| ✅ Covered | 5 | 62.5% |
+| ⚠️ Partial | 2 | 25.0% |
+| ❌ Uncovered | 1 | 12.5% |
+
+## Traceability Matrix
+
+| AC-ID | Description | Status | Test Reference |
+|-------|-------------|--------|----------------|
+| AC-1 | Login with valid credentials | ✅ | auth.test.ts:15 |
+| AC-2 | Reject invalid credentials | ✅ | auth.test.ts:32 |
+| ...   | ...                        | ... | ... |
+
+## Gaps
+- **AC-8**: Social login — Blocked by OAuth sandbox
+
+## Action Items
+1. [ ] AC-8: Set up OAuth sandbox (ETA: TBD)
+```
+
+## Next Steps Guidance | 下一步引導
+
+After `/ac-coverage` completes, the AI assistant should suggest:
+
+> **AC 覆蓋率分析完成。建議下一步 / AC coverage analysis complete. Suggested next steps:**
+> - 覆蓋率達標 → 執行 `/checkin` 品質關卡 — Coverage meets threshold → Run `/checkin` quality gates
+> - 有未覆蓋 AC → 執行 `/derive-tdd` 補齊測試 ⭐ **Recommended / 推薦** — Uncovered AC found → Run `/derive-tdd` to add tests
+> - 有部分覆蓋 AC → 檢查缺少的邊界情況 — Partial AC → Review missing edge cases
+> - 需要完整追溯 → 執行 `/ac-coverage --full` — Need full traceability → Run with `--full`
+> - 反向追溯 → 執行 `/ac-coverage --trace-code <path>` — Reverse trace → Use `--trace-code`
+
+## Reference | 參考
+
+- Core standard: [acceptance-criteria-traceability.md](../../core/acceptance-criteria-traceability.md)
+- SPEC: [SPEC-AC-COVERAGE.md](../../docs/specs/skills/SPEC-AC-COVERAGE.md)
+- Related: [test-coverage-assistant](../test-coverage-assistant/SKILL.md) (code-level coverage)
+- Related: [checkin-assistant](../checkin-assistant/SKILL.md) (quality gates)
+
+
+## AI Agent Behavior | AI 代理行為
+
+> 完整的 AI 行為定義請參閱對應的命令文件：[`/ac-coverage`](../commands/ac-coverage.md#ai-agent-behavior--ai-代理行為)
+>
+> For complete AI agent behavior definition, see the corresponding command file: [`/ac-coverage`](../commands/ac-coverage.md#ai-agent-behavior--ai-代理行為)

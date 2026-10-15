@@ -1,0 +1,128 @@
+---
+name: docgen
+scope: universal
+description: |
+  [UDS] Generate usage documentation (cheatsheets, references, guides) from project sources.
+  Use when: producing a cheatsheet or feature reference from CLI and skill definitions, regenerating docs after commands change, checking generated docs are current.
+  Not for: deciding what documentation a project needs or writing prose by hand — use /documentation-guide; changelog entries — use /changelog.
+  Keywords: docgen, usage docs, cheatsheet, feature reference, generated documentation, 使用文件, 速查表, 文件產生.
+allowed-tools: Read, Write, Grep, Glob, Bash(*)
+argument-hint: "[config file | 設定檔]"
+status: stable
+# 2026-08-18: `disable-model-invocation: true` removed, and a status recorded.
+#
+# The flag was applied by d415937e alongside the description rewrite and, like
+# the two lifted on 2026-08-17, followed no stateable rule. These eight were
+# left alone that day for a reason that was correct at the time: the rule
+# settled on was "a reference is model-invocable", and none of them carried a
+# `status` at all, so lifting them would have replaced one unruled state with
+# one unruled action.
+#
+# Measured 2026-08-18, which is what closed it: all eight carry a full
+# `Use when:` trigger and a `Not for:` exclusion, all eight describe an action
+# rather than reference material, and all eight already have a slash command —
+# which is exactly the shape of `code-review-assistant`, whose paired `/code-review`
+# was ruled not to justify the flag. `journey-test-assistant` is the standing
+# precedent: same "Generate X" shape, `status: stable`, never disabled.
+#
+# `stable` rather than a new value: `skills/` uses reference, stable and
+# experimental, and inventing a fourth would be the same unruled-action mistake
+# in different clothing.
+#
+# The cost of being wrong is asymmetric and observable in only one direction.
+# Over-triggering shows up and is undone by deleting a line; a skill that is
+# structurally unable to fire produces no signal at all. (XSPEC-378 R5)
+---
+
+# Documentation Generator | 文件產生器
+
+Generate usage documentation (cheatsheets, references, guides) from project source files.
+
+從專案原始檔案產生使用文件（速查表、參考手冊、使用指南）。
+
+## Workflow | 工作流程
+
+1. **Read config** - Load `.usage-docs.yaml` (or specified config file)
+2. **Scan sources** - Read source files, commands, and skill definitions
+3. **Extract content** - Parse descriptions, options, examples from source
+4. **Generate docs** - Produce output in the configured format
+5. **Write output** - Save generated files to the configured output directory
+
+## Config File Format | 設定檔格式
+
+```yaml
+# .usage-docs.yaml
+output_dir: docs/generated/
+formats:
+  - cheatsheet
+  - reference
+sources:
+  - path: skills/commands/
+    type: commands
+  - path: cli/src/commands/
+    type: cli
+language: [en, zh-TW]
+```
+
+## Output Types | 輸出類型
+
+| Type | Description | 說明 |
+|------|-------------|------|
+| **cheatsheet** | Quick reference card with commands and shortcuts | 速查表，列出命令與快捷方式 |
+| **reference** | Comprehensive feature reference with all options | 完整功能參考手冊含所有選項 |
+| **usage-guide** | Step-by-step usage guide for new users | 新手入門的逐步使用指南 |
+
+## Usage | 使用方式
+
+- `/docgen` - Generate docs using default `.usage-docs.yaml`
+- `/docgen .usage-docs.yaml` - Generate docs from specified config file
+- `/docgen --format cheatsheet` - Generate cheatsheet only
+
+## Check Mode | 檢查模式
+
+Verify that generated documentation is up to date with source files.
+
+驗證產生的文件是否與原始檔案保持同步。
+
+**Usage | 使用方式:**
+
+```bash
+# Check if generated docs are in sync
+./scripts/check-usage-docs-sync.sh
+
+# Auto-fix out-of-sync docs
+./scripts/check-usage-docs-sync.sh --fix
+```
+
+- **Check mode** (default): Reports differences between source and generated docs. Exits with non-zero status if out of sync.
+- **Fix mode** (`--fix`): Automatically regenerates out-of-date documentation files.
+
+> **Note | 注意**: This check is integrated into `pre-release-check.sh` as Step 8 (Usage docs sync check).
+>
+> 此檢查已整合至 `pre-release-check.sh` 的步驟 8（使用文件同步檢查）。
+
+## Generated Output Example | 產生範例
+
+```markdown
+# UDS Command Cheatsheet
+
+| Command    | Description               |
+|------------|---------------------------|
+| /commit    | Generate commit message    |
+| /code-review    | Run code review            |
+| /sdd       | Create SDD specification   |
+| /discover  | Assess project health      |
+```
+
+## Next Steps Guidance | 下一步引導
+
+After `/docgen` completes, the AI assistant should suggest:
+
+> **文件已產生。建議下一步 / Documentation generated. Suggested next steps:**
+> - 審查產生的文件內容是否完整 — Review generated content for completeness
+> - 執行 `/commit` 提交文件變更 ⭐ **Recommended / 推薦** — Commit documentation changes
+> - 執行 `/code-review` 審查文件品質 — Review documentation quality
+
+## Reference | 參考
+
+- Detailed guide: [guide.md](./guide.md)
