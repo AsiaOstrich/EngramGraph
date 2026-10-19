@@ -121,10 +121,13 @@ egr index . --scip index.scip
 - `<path>` 指向不存在或非 SCIP 的文件时，会抛出明确的「file not found」或
   「could not be parsed as a SCIP protobuf index」错误。
 - 若图数据库的 `CALLS`（或 `Function`/`Class`）表是在像这次
-  `provider`/`confidence` 列这样的 schema 变动之前创建的，任何 `egr` 命令
-  一打开这个数据库，就会**自动、非破坏性地**迁移：通过 `ALTER TABLE ... ADD`
+  `provider`/`confidence` 列这样的 schema 变动之前创建的，任何**以写入模式**
+  打开这个数据库的 `egr` 命令（例如 `index`、`feedback`、`related`、`god-nodes`；
+  只读查询与 MCP 服务器不会迁移）一打开它，就会**自动、非破坏性地**迁移：通过 `ALTER TABLE ... ADD`
   就地补上缺的列（已有行的其他属性都保留），动手改之前会先 checkpoint 再把
-  数据库文件备份到 `.pre-migration-backup` 附属文件（不会覆盖已有的备份）。
+  数据库文件备份到 `.pre-migration-backup` 附属文件（不会覆盖已有的备份）；
+  旁边另有一个小文件 `.pre-migration-backup.pending-columns`，记录这份备份涵盖哪些
+  列，迁移重试时直接沿用备份、不重复复制数据库。不再需要备份时两个一起删。
   不需要 `--clean`、不需要删数据库文件就能不再撞 schema 错误——`--clean`
   依然只通过 `DETACH DELETE` 清行数据、从不动表 schema，但这已经不是补这个
   缺口的机制了。真的发生迁移时，`egr` 会在 stderr 打印一行消息，说明加了

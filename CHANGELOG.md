@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **The 0.13.0-beta.5 upgrade note said "the first command" migrates an old graph; only a command that opens it for writing does** (0.13.0-beta.5 Windows consumer retest, 2026-10-19). Read-only queries (`top`, `callers`, `blindspots`, `signatures`, …) and the MCP server open the graph read-only and never migrate — unchanged since beta.3 ("Read-only `openGraph` neither creates nor migrates"). The migration happens at the first `index`, `feedback`, `related`, `god-nodes` or other writing command. `docs/CLI.md` (and its zh-TW and zh-CN translations) now say so.
+- **The `<graph>.pre-migration-backup.pending-columns` file next to the backup is documented.** It lists the columns the backup was taken to protect, so a retried migration reuses the backup instead of copying the database again (`src/graph-db/schema-migration.ts`). Delete it together with the backup.
+
 ## [0.13.0-beta.5] - 2026-10-13
 
 *Fixes for the new findings in the 0.13.0-beta.4 Windows consumer report (XSPEC-481).*

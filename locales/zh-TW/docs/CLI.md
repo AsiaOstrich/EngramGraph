@@ -121,10 +121,13 @@ egr index . --scip index.scip
 - `<path>` 指到不存在或非 SCIP 的檔案時，會丟出明確的「file not found」或
   「could not be parsed as a SCIP protobuf index」錯誤。
 - 若圖譜資料庫的 `CALLS`（或 `Function`/`Class`）表是在像這次
-  `provider`/`confidence` 欄位這樣的 schema 變動之前建立的，任何 `egr` 指令
-  一開啟這個資料庫，就會**自動、非破壞性地**遷移：透過 `ALTER TABLE ... ADD`
+  `provider`/`confidence` 欄位這樣的 schema 變動之前建立的，任何**以寫入模式**
+  開啟這個資料庫的 `egr` 指令（例如 `index`、`feedback`、`related`、`god-nodes`；
+  唯讀查詢與 MCP 伺服器不會遷移）一開啟它，就會**自動、非破壞性地**遷移：透過 `ALTER TABLE ... ADD`
   就地補上缺的欄位（既有資料列的其他屬性都保留），動手改之前會先 checkpoint
-  再把資料庫檔案備份到 `.pre-migration-backup` 附屬檔（不會覆蓋既有的備份）。
+  再把資料庫檔案備份到 `.pre-migration-backup` 附屬檔（不會覆蓋既有的備份）；
+  旁邊另有一個小檔 `.pre-migration-backup.pending-columns`，記錄這份備份涵蓋哪些
+  欄位，遷移重試時直接沿用備份、不重複複製資料庫。不再需要備份時兩個一起刪。
   不需要 `--clean`、不需要刪資料庫檔案就能不再撞 schema 錯誤——`--clean`
   依然只透過 `DETACH DELETE` 清資料列、從不動資料表 schema，但這已經不是補
   這個缺口的機制了。真的發生遷移時，`egr` 會在 stderr 印一行訊息，說明加了

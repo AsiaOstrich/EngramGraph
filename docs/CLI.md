@@ -63,10 +63,16 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
   graph remembers the path in `Spec.path` / `Decision.path`; indexing the same
   file again is not a conflict, and a node with no recorded path (indexed by an
   earlier egr, or only ever a `[[ref]]` stub, or written by MCP `index_docs`,
-  which is given no path) is overwritten without a warning. The first `egr` of
-  this version to open a graph made by an earlier one adds the two columns in
-  place and keeps a one-time backup beside it (`<graph>.pre-migration-backup`),
-  as with every column added before.
+  which is given no path) is overwritten without a warning. The first `egr`
+  command of this version that opens a graph made by an earlier one **for
+  writing** (for example `index`, `feedback`, `related`, `god-nodes`; read-only
+  queries and the MCP server never migrate) adds the two columns in place and
+  keeps a one-time backup beside it (`<graph>.pre-migration-backup`), as with
+  every column added before. Next to the backup sits a small
+  `<graph>.pre-migration-backup.pending-columns` file listing the columns that
+  backup was taken to protect, so a retried migration reuses it instead of
+  copying the database again; delete both together once you no longer need the
+  backup.
 - Code extensions: `.ts .tsx .js .jsx .mts .cts .mjs .cjs .cs .py .go .java
   .kt .kts .rs .cpp .cc .cxx .hpp .h .hh .rb .php .dart` (`.d.ts` excluded).
 - Skipped directories: `node_modules`, `dist`, `.engram`, `.git`, `coverage`,
@@ -165,8 +171,8 @@ Requirements and failure modes:
   or "could not be parsed as a SCIP protobuf index" error.
 - A graph DB whose `CALLS` (or `Function`/`Class`) table predates a schema
   change like this one's `provider`/`confidence` columns is migrated
-  **automatically and non-destructively** the moment any `egr` command opens
-  it: missing columns are added in place via `ALTER TABLE ... ADD` (existing
+  **automatically and non-destructively** the moment an `egr` command opens it
+  for writing (read-only queries never migrate): missing columns are added in place via `ALTER TABLE ... ADD` (existing
   rows keep every other property they already have), after first checkpointing
   and backing up the DB file to a `.pre-migration-backup` sibling (never
   overwriting a prior backup). No `--clean`, no deleting the DB file required
