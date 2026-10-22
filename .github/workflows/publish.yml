@@ -136,9 +136,47 @@ jobs:
       - run: npm run build
       - run: npm run test:coverage
 
+  # IS THIS STABLE VERSION THE SAME CONTENT THAT PASSED THE WINDOWS CHECKLIST?
+  # // implements XSPEC-498 R2
+  #
+  # 0.13.0 was published on 2026-10-22 after the Windows verification had last
+  # run against 0.13.0-beta.5 (2026-10-13). 121 files outside the release
+  # bookkeeping changed in between, and nothing in this workflow asked. The
+  # script compares HEAD with the newest reachable v<X.Y.Z>-<pre>.N tag (only
+  # package.json / package-lock.json version fields and CHANGELOG.md may differ)
+  # and requires a successful windows-release-verify.yml run on that preview.
+  # Its header says how the run is identified and why. Preview versions pass
+  # straight through (the script says "not managed"), so this step has no `if:`:
+  # what counts as stable is decided in one place, the script.
+  #
+  # `fetch-depth: 0` + `fetch-tags: true`: the comparison needs the tags and the
+  # history behind them. `actions: read` is what lets GITHUB_TOKEN list the
+  # artifacts and runs of the verification workflow.
+  #
+  # `publish` needs this job, so a refusal stops the release before `npm publish`.
+  stable-gate:
+    name: Stable version needs a Windows-verified preview of the same content
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check the stable gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/stable-gate.mjs "$(node -p "require('./package.json').version")"
+
   publish:
     name: Publish to npm
-    needs: consumer-resolution
+    needs: [consumer-resolution, stable-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: read
