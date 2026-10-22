@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-22
+
+> **Stable Release**: everything in 0.13.0-beta.1 through beta.5 below, plus the changes since beta.5 listed in this section.
+
+### Fixed
+
+- **`egr index --scip` matches a `.scip` file written on Windows** ([#3](https://github.com/AsiaOstrich/EngramGraph/issues/3)). `scip-dotnet` run on Windows writes `\` into `Document.relativePath` although SCIP requires `/`, so no file under a subdirectory matched and the error told the user to change `<dir>`. Document paths are now normalized on the index itself, and the error says separators are not the cause.
+
 ### Documentation
 
 - **The 0.13.0-beta.5 upgrade note said "the first command" migrates an old graph; only a command that opens it for writing does** (0.13.0-beta.5 Windows consumer retest, 2026-10-19). Read-only queries (`top`, `callers`, `blindspots`, `signatures`, …) and the MCP server open the graph read-only and never migrate — unchanged since beta.3 ("Read-only `openGraph` neither creates nor migrates"). The migration happens at the first `index`, `feedback`, `related`, `god-nodes` or other writing command. `docs/CLI.md` (and its zh-TW and zh-CN translations) now say so.
