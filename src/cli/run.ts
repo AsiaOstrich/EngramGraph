@@ -49,7 +49,7 @@ import {
 import { walkFiles, summarizeUnindexed, type ExcludedByPattern, type UnindexedSummary } from "./walk.js";
 import { compileExcludes } from "./exclude.js";
 import { msysPathConversionHint } from "./index-hints.js";
-import { canonicalFilePath } from "../code-graph/path-utils.js";
+import { canonicalFilePath, toPosixPath } from "../code-graph/path-utils.js";
 import { checkRefs, type RefCheckResult } from "./refs-check.js";
 import { ALGO_BACKED_COMMAND_LIST, describeAlgoSource, type AlgoSource } from "../structural-memory/algo-extension.js";
 import { unavailableGrammars } from "../code-graph/grammar-registry.js";
@@ -294,6 +294,10 @@ export async function ingestScipOverlay(
     throw new Error(`--scip: "${scipPath}" parsed as a valid SCIP index but contains no documents — is it empty?`);
   }
 
+  // Issue #3: SCIP mandates "/" in Document.relativePath "including on Windows", but scip-dotnet run on
+  // Windows writes "\" anyway. walkFiles already normalizes our side (XSPEC-333 R3 follow-up); normalize
+  // theirs too, on the index itself, because ingestScipIndex matches documents by this same field.
+  for (const d of index.documents) d.relativePath = toPosixPath(d.relativePath);
   const docPaths = new Set(index.documents.map((d) => d.relativePath));
   const scipFiles: ScipSourceFile[] = codeFiles
     .filter((f) => docPaths.has(f.path))
@@ -304,7 +308,8 @@ export async function ingestScipOverlay(
     throw new Error(
       `--scip: none of the ${docPaths.size} document path(s) in "${scipPath}" (e.g. "${sample}") matched ` +
         `any source file under "${dir}". SCIP document paths are relative to the project root the external ` +
-        `indexer (scip-dotnet/scip-java/etc.) was run against — pass that same root as <dir>, then retry.`,
+        `indexer (scip-dotnet/scip-java/etc.) was run against — pass that same root as <dir>, then retry. ` +
+        `(Path separators are already normalized on both sides, so a "\\" vs "/" difference is not the cause.)`,
     );
   }
 
