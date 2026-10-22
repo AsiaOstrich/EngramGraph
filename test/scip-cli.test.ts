@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, cpSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, cpSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -74,6 +74,22 @@ describe("cmdIndex --scip (direct call, real C# fixture)", () => {
       { from: "Program.cs#Program.Main", to: "Services/OrderService.cs#OrderService.Validate" },
     );
     expect(rows[0]).toEqual({ provider: "scip", confidence: 0.9 });
+  });
+
+  it("issue #3: a .scip written on Windows with \\ in Document.relativePath still matches every file", async () => {
+    // scip-dotnet on Windows writes "Services\\OrderService.cs" although SCIP mandates "/". Reproduce that
+    // file byte-for-byte (same length, single-byte ASCII) from the real fixture, then index through cmdIndex.
+    const raw = readFileSync(FIXTURE_SCIP);
+    let patched = raw.toString("latin1");
+    for (const sub of ["Services/", "Models/"]) patched = patched.split(sub).join(sub.replace("/", "\\"));
+    expect(patched).not.toBe(raw.toString("latin1"));
+    const winScip = join(dir, "windows.scip");
+    writeFileSync(winScip, Buffer.from(patched, "latin1"));
+    await clearGraph(conn);
+    const r = await cmdIndex(conn, { dir: FIXTURE_DIR, scip: winScip });
+    // Same as the POSIX fixture above: all 7 committed sources, nested ones included.
+    expect(r.scip!.filesMatched).toBe(7);
+    expect(r.scip!.callsEmitted).toBeGreaterThan(0);
   });
 
   it("--clean + --scip together: clears then rebuilds both layers from scratch", async () => {
