@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Installing engramgraph no longer installs `tar@6.2.1` (critical) or `cmake-js@7` (high).** `ryugraph@25.9.1` declares `cmake-js ^7.3.0`, every cmake-js 7.x depends on `tar ^6`, and no newer ryugraph exists. engramgraph now depends on [`@asiaostrich/ryugraph@25.9.1-asiaostrich.1`](https://github.com/AsiaOstrich/ryugraph/tree/asiaostrich/v25.9.1), a repack of upstream's own 25.9.1 tarball with the same engine binaries and `cmake-js ^8.0.0`, declared as the npm alias `"ryugraph": "npm:@asiaostrich/ryugraph@…"` so the install path and imports are unchanged. The `cmake-js` override in `package.json`, which only ever cleaned this repo's own tree, is removed, and so is the `tar` entry in `security/accepted-advisories.json`, so `npm run audit:ship` fails if tar comes back. engramgraph returns to upstream `ryugraph` once a fixed release exists.
+
 ## [0.13.0] - 2026-10-22
 
 > **Stable Release**: everything in 0.13.0-beta.1 through beta.5 below, plus the changes since beta.5 listed in this section.

@@ -22,6 +22,22 @@ jobs:
         with:
           node-version: 24
       - run: npm install -g npm@latest
+      # ryugraph 是 npm 別名，指向安全重新打包版 @asiaostrich/ryugraph。
+      # 那個版本還沒發布時，下面的 npm install 會失敗在一句 E404 或
+      # 「lockfile 不同步」——看起來像相依寫錯，實際原因是「分叉還沒發布」。
+      # 這一步先把真正的原因講出來，而且一樣是紅燈，不是跳過。
+      - name: ryugraph 別名指向的套件必須已在 npm 上
+        run: |
+          SPEC=$(node -p "require('./package.json').dependencies.ryugraph")
+          case "${SPEC}" in
+            npm:*) TARGET="${SPEC#npm:}" ;;
+            *) echo "ryugraph 不是別名（${SPEC}），略過此檢查"; exit 0 ;;
+          esac
+          if ! OUT=$(npm view "${TARGET}" version 2>&1) || [ -z "${OUT}" ]; then
+            echo "::error::${TARGET} 尚未發布到 npm（npm view 輸出：${OUT}）。先在 AsiaOstrich/ryugraph 建 Release 發布它，再對本分支執行 npm install 更新 package-lock.json。"
+            exit 1
+          fi
+          echo "${TARGET} 已發布：${OUT}"
       # --legacy-peer-deps 與 publish.yml 一致：不一致的安裝方式會讓
       # 「CI 綠而發版紅」變成可能，而那正是這支 workflow 要消除的落差。
       - run: npm install --legacy-peer-deps

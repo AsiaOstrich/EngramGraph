@@ -164,45 +164,23 @@ Linux 上的原生二进制文件加载失败，会通过 Node 的 `dlopen` 呈�
 
 ### 依赖包安全警告（`npm audit`、已弃用软件包）
 
-不论全局安装、`npx`、还是当作项目依赖安装，目前运行 `npm install` 都会打印出这类警告：
+engramgraph 0.13.0 以前，普通的 `npm install` 会打印 `npm warn deprecated tar@6.2.1`，
+并报告一个严重、数个高风险的公告。它们全部来自同一条链：内嵌图数据库引擎
+`ryugraph@25.9.1` 声明 `cmake-js ^7.3.0`，而所有 cmake-js 7.x 都依赖 `tar ^6`。
+cmake-js 8 修好了，但 ryugraph 的版本范围够不到它，而本软件包里的 `overrides`
+也传不到你的安装（[predictable-labs/ryugraph#49](https://github.com/predictable-labs/ryugraph/issues/49)）。
 
-```
-npm warn deprecated npmlog@6.0.2: This package is no longer supported.
-npm warn deprecated are-we-there-yet@3.0.1: This package is no longer supported.
-npm warn deprecated gauge@4.0.4: This package is no longer supported.
-npm warn deprecated tar@6.2.1: ...widely publicized security vulnerabilities...
-4 high severity vulnerabilities
-```
+engramgraph 现在改为依赖 [`@asiaostrich/ryugraph`](https://github.com/AsiaOstrich/ryugraph/tree/asiaostrich/v25.9.1)：
+`ryugraph@25.9.1` 的安全重新打包版——上游自己的 tarball 与引擎二进制文件，一个字节都没改，
+只把 `cmake-js` 升到 `^8.0.0`。它以 npm 别名声明
+（`"ryugraph": "npm:@asiaostrich/ryugraph@25.9.1-asiaostrich.1"`），所以仍安装在
+`node_modules/ryugraph`。用户安装后不再带有 tar／cmake-js 的公告；发版闸门
+（`npm run audit:ship`）会把打包好的 tarball 装进空目录来检查这一点，
+`security/accepted-advisories.json` 也不再接受它们。上游发布修正版本范围的版本后，
+engramgraph 就改回上游的 `ryugraph`。
 
-这四项全部源自同一条依赖链：`ryugraph`（本软件包的嵌入式图数据库引擎）锁定了
-`cmake-js@^7.3.0`，而它依赖 `tar@^6.2.0`（多个高危路径穿越 CVE，已在 `tar@7.5.11`+
-中修复）以及现已弃用的 `npmlog`/`gauge`/`are-we-there-yet` 组合。`cmake-js@8.0.0` 已经
-去掉了 `npmlog`、把 `tar` 升级到 `^7.5.6`——修复方案在上游已经存在，只是 `ryugraph`
-还没有采用。追踪于 [predictable-labs/ryugraph#49](https://github.com/predictable-labs/ryugraph/issues/49)。
-
-**实际风险范围比警告数量看起来要窄。** `ryugraph` 自己的 `install.js` 只有在你的平台
-没有预构建原生二进制文件时，才会调用 `cmake-js`（进而牵动 `tar`）——见上方平台支持矩阵。
-在矩阵中标记为 `✅ 可用` 的每个平台上，预构建二进制文件会被直接复制使用，`cmake-js`/`tar`
-虽然会被拉取进 `node_modules`，但完全不会被执行。这个已声明的漏洞是真实存在的（无论是否
-被执行，`npm audit`／SBOM 工具照样会报告），但实际可被利用的窗口，实质上仅限于
-走 build-from-source 路径的情况（不受支持的平台，或显式设置了 `NPM_CONFIG_BUILD_FROM_SOURCE`）。
-
-**如果你是把 `engramgraph` 当作自己项目里的普通依赖包安装**（而非全局安装），你今天
-就能自行解决——把同样的 override 加进**你自己的** `package.json`：
-
-```json
-"overrides": {
-  "cmake-js": "^8.0.0"
-}
-```
-
-（以上是 npm 语法；pnpm/Yarn 有对应的 `pnpm.overrides` / `resolutions` 字段。）这之所以
-有效，是因为 npm 的 `overrides` 字段只在「运行 `npm install` 的那个项目本身」才会生效——
-不会从依赖包自己的 `package.json` 传递到你的项目，这正是为什么 `engramgraph` 自己
-package.json 里（此前修复时加的）那个 `overrides` 对你没有帮助：它只是让本仓库
-源码 checkout 里的 `npm audit` 变干净，对安装了已发布软件包的人完全没用。如果是全局安装或
-`npx engramgraph`，没有项目根目录可以挂载 override，这条路目前还没有解法——需要等上面链接的
-上游 issue 被处理。
+如果你曾为了 engramgraph 在自己的项目加上旧的绕道（`"overrides": { "cmake-js": "^8.0.0" }`），
+现在已不需要。
 
 ## 快速上手
 
