@@ -75,10 +75,19 @@ const lock = JSON.parse(
  */
 const NATIVE_DEPENDENCIES = /tree-sitter|^ryugraph$/;
 
+/**
+ * `ryugraph` is declared as an npm alias,
+ * `"ryugraph": "npm:@asiaostrich/ryugraph@<version>"`, so the installed path and
+ * every `import ... from "ryugraph"` stay the same while consumers get the
+ * security repack. For an alias the pin that matters is the version after the
+ * last `@`; the lockfile and node_modules record that version, not the spec.
+ */
 const declared: Array<[string, string]> = Object.entries({
   ...(pkg.dependencies ?? {}),
   ...(pkg.optionalDependencies ?? {}),
-}).filter(([name]) => NATIVE_DEPENDENCIES.test(name));
+})
+  .filter(([name]) => NATIVE_DEPENDENCIES.test(name))
+  .map(([name, spec]) => [name, spec.startsWith("npm:") ? spec.slice(spec.lastIndexOf("@") + 1) : spec]);
 
 describe("grammar versions are pinned to what this repo tests", () => {
   it("found the dependencies at all", () => {
@@ -97,7 +106,7 @@ describe("grammar versions are pinned to what this repo tests", () => {
           `"${name}": "${range}" — a range lets npm pick a version this repo ` +
             `has never run a test against. tree-sitter grammars have broken ` +
             `ABI inside a minor range before (see this file's header).`,
-        ).toMatch(/^\d+\.\d+\.\d+$/);
+        ).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/);
       });
 
       it("matches the version in package-lock.json", () => {
