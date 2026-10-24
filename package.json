@@ -67,7 +67,7 @@
   ],
   "dependencies": {
     "@bufbuild/protobuf": "2.12.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@tree-sitter-grammars/tree-sitter-kotlin": "1.1.0",
     "hono": "^4.13.1",
     "ryugraph": "25.9.1",
