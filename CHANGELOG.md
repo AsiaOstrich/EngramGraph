@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-24
+
+> **Stable Release**: the same content as 0.13.1-beta.1 below, which passed the Windows release verification. Security fixes only; `src/` is unchanged since 0.13.0.
+
 ## [0.13.1-beta.1] - 2026-10-24
 
 *Security-only preview. `src/` is unchanged since 0.13.0; only dependency declarations, the lockfile, the READMEs and the release tooling changed.*
