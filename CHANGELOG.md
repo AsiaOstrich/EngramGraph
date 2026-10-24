@@ -6,8 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1-beta.1] - 2026-10-24
+
+*Security-only preview. `src/` is unchanged since 0.13.0; only dependency declarations, the lockfile, the READMEs and the release tooling changed.*
+
 ### Security
 
+- **`@modelcontextprotocol/sdk` floor raised from `^1.30.0` to `^1.32.2`, and the lockfile refreshed** ([#10](https://github.com/AsiaOstrich/EngramGraph/pull/10)). `npm audit` on 0.13.0's lockfile reported 1 critical (proxy-addr) and 15 high (the SDK x3, body-parser, fast-uri x5, nanoid x2, postcss, source-map-js, vite, zod); after the change it reports 0 high or critical. Raising the floor means a project that already holds an older lockfile is pulled past the fixed SDK versions on its next update.
 - **Installing engramgraph no longer installs `tar@6.2.1` (critical) or `cmake-js@7` (high).** `ryugraph@25.9.1` declares `cmake-js ^7.3.0`, every cmake-js 7.x depends on `tar ^6`, and no newer ryugraph exists. engramgraph now depends on [`@asiaostrich/ryugraph@25.9.1-asiaostrich.1`](https://github.com/AsiaOstrich/ryugraph/tree/asiaostrich/v25.9.1), a repack of upstream's own 25.9.1 tarball with the same engine binaries and `cmake-js ^8.0.0`, declared as the npm alias `"ryugraph": "npm:@asiaostrich/ryugraph@…"` so the install path and imports are unchanged. The `cmake-js` override in `package.json`, which only ever cleaned this repo's own tree, is removed, and so is the `tar` entry in `security/accepted-advisories.json`, so `npm run audit:ship` fails if tar comes back. engramgraph returns to upstream `ryugraph` once a fixed release exists.
 
 ## [0.13.0] - 2026-10-22
