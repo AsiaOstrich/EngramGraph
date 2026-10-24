@@ -34,7 +34,7 @@ jobs:
             *) echo "ryugraph 不是別名（${SPEC}），略過此檢查"; exit 0 ;;
           esac
           if ! OUT=$(npm view "${TARGET}" version 2>&1) || [ -z "${OUT}" ]; then
-            echo "::error::${TARGET} 尚未發布到 npm（npm view 輸出：${OUT}）。先在 AsiaOstrich/ryugraph 建 Release 發布它，再對本分支執行 npm install 更新 package-lock.json。"
+            echo "::error::${TARGET} 尚未發布到 npm（npm view 輸出：${OUT}）。先發布它（首版要手動發布，步驟見 AsiaOstrich/ryugraph 的 asiaostrich/v25.9.1 分支 README「Releasing」），再對本分支執行 npm install 更新 package-lock.json。"
             exit 1
           fi
           echo "${TARGET} 已發布：${OUT}"
