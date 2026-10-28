@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`egr index --incremental` parses only the files whose content changed and ends with the graph a full rebuild gives** (XSPEC-508 R6). On the egr repository itself (210 files) a full rebuild took about 26 s; an incremental index after editing 3 files took about 0.4 s, and its graph was identical to the `--clean` rebuild of the same sources (2,321 nodes and edges compared). "Changed" is a sha256 of the source text, not mtime. Calls are still resolved across the whole project from small per-file facts kept in `<graph>.incremental-state.json`, so an UNCHANGED file's edges follow a name that became ambiguous, was newly defined or was deleted in another file. Deleted, renamed-away and newly excluded files leave the graph; a function that still exists is updated in place, so SAGE confidence survives. The first run, a changed egr or tree-sitter grammar version, a graph indexed again without `--incremental`, or a relative path shared with another root indexes in full and prints the reason. `--changed-from <git-ref>` takes the changed files from `git diff` instead of hashing every file. **Default behaviour is unchanged:** `egr index` without `--incremental` is exactly as before; `--incremental` is opt-in and refused with `--scip`. `egr index --json` gains an `incremental` object (`mode`, `reason`, `reparsed`, `reused`, `changed`, `added`, `removed`, …); the parse-health manifest section gains an optional `incrementalToken`. Library: `extractProjectDetailed` (per-file facts and a parsed/reused count) is exported beside `extractProject`, which behaves as before.
+
 ## [0.13.1] - 2026-10-24
 
 > **Stable Release**: the same content as 0.13.1-beta.1 below, which passed the Windows release verification. Security fixes only; `src/` is unchanged since 0.13.0.

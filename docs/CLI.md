@@ -37,7 +37,7 @@ The directory is created on demand and the schema is ensured on every open
 
 ## Commands
 
-### `index <dir> [--docs] [--clean] [--scip <path>]`
+### `index <dir> [--docs] [--clean] [--scip <path>] [--incremental [--changed-from <git-ref>]]`
 
 Recursively indexes source files under `<dir>` into the **code graph**
 (tree-sitter → `Function` / `Class` / `Module` nodes + cross-file `CALLS`).
@@ -82,6 +82,44 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
 - `--clean`: drop the graph's data before indexing. Indexing is otherwise an
   upsert (MERGE) that never deletes, so a node removed from the code lingers;
   `--clean` rebuilds from scratch to prune it.
+- `--incremental`: parse only the files whose **content** changed since the last
+  `--incremental` index, and write only the difference. Changed means a different
+  sha256 of the source text — not mtime, which a grammar upgrade or a
+  time-preserving checkout leaves untouched. The graph ends up the same as
+  `egr index <dir> --clean` over the same sources (nodes and edges alike), and a
+  deleted, renamed-away or newly `--exclude`d file leaves the graph. CALLS are
+  resolved across files, so an **unchanged** file's edges can move too — `b.ts`
+  calls `foo`, and `a.ts` (changed) now defines a second `foo`: the name is
+  ambiguous and `b.ts`'s edge goes; or `a.ts` now defines `newFn` which `b.ts`
+  calls: the edge appears. That is handled by keeping, per file, the few facts
+  the resolution reads (function names, call records, import targets) in
+  `<graph>.incremental-state.json` next to the graph, and running the same
+  resolution over the old and the new facts; only the difference is written.
+  Unchanged files are not parsed, and a function that still exists in a changed
+  file is updated in place, so SAGE `confidence` survives. The summary says what
+  was done: `incremental: 4 file(s) parsed (3 changed, 1 new), 5 reused
+  unchanged, 1 removed; …` (`incremental.reparsed` etc. with `--json`). On the
+  egr repository itself (210 files), a full rebuild took about 26 s and an
+  incremental index after editing 3 files about 0.4 s.
+  **It indexes in full instead — and prints the reason — when** it is the first
+  `--incremental` run; egr or a tree-sitter grammar version differs from the one
+  that wrote the state (so a grammar upgrade re-parses everything); the graph was
+  indexed again without `--incremental` since (the state is tied to the
+  manifest by a token); the graph holds fewer files than the state remembers; or
+  another root of the same graph holds a file with the same relative path (the
+  Module id is the relative path, so the node is shared). Plain `egr index`
+  without `--incremental` behaves exactly as before. Not supported with `--scip`
+  (refused); `--docs` still indexes every document. A graph built earlier by plain
+  `egr index` runs may hold leftovers a plain index never prunes and the state
+  cannot know about: start from an empty graph, or add `--clean` once
+  (`egr index <dir> --incremental --clean` rebuilds and starts the state).
+- `--changed-from <git-ref>` (with `--incremental`): take the list of changed
+  files from `git diff <ref>` (tracked files that differ in the working tree)
+  plus untracked, non-ignored files, instead of hashing every file. It states
+  that the graph describes `<ref>`; files git lists are compared by hash, files
+  it does not list are taken as unchanged. A ref that is not what was indexed
+  gives a wrong graph — leave the flag out and every file is hashed, which is
+  always correct. An unknown ref is an error (exit 1) that names it.
 - `--exclude <glob>` (repeatable): keep matching paths out of the index, for
   code and for `--docs` alike. It exists because the skip list above is fixed
   and `.gitignore` is not read — a project root that holds `.uds-backup-*`
@@ -120,6 +158,8 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
 egr index ./src
 egr index . --docs
 egr index ./src --clean   # rebuild, pruning deleted nodes
+egr index ./src --incremental   # re-parse only what changed since the last --incremental run
+egr index ./src --incremental --changed-from origin/main   # CI: git says what changed
 egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 ```
 

@@ -42,7 +42,7 @@ egr <command> [args] [options]
 
 ## 命令
 
-### `index <dir> [--docs] [--clean] [--scip <path>]`
+### `index <dir> [--docs] [--clean] [--scip <path>] [--incremental [--changed-from <git-ref>]]`
 
 递归将 `<dir>` 下的源代码索引进**代码图谱**（tree-sitter → `Function` / `Class` /
 `Module` 节点 + 跨文件 `CALLS`）。加上 `--docs` 时，也会把 `*.md` 索引进**知识图谱**
@@ -56,6 +56,27 @@ egr <command> [args] [options]
   （例如 `packages/`）会和其他目录一样被索引。
 - `--clean`：索引前先清空图谱数据。索引本是 upsert（MERGE）从不删除，代码里被移除的节点
   会残留；`--clean` 从头重建以清掉它。
+- `--incremental`：只重新解析自上次 `--incremental` 索引后**内容**有变的文件，只写入差异。
+  “有变”指源码的 sha256 不同，不看 mtime（升级 grammar 或保留时间戳的 checkout 不会动 mtime）。
+  结果与对同一份源码执行 `egr index <dir> --clean` 的图相同（节点与边都相同）；被删除、改名离开、
+  或新被 `--exclude` 的文件会从图里消失。CALLS 是跨文件解析的，所以**没改的**文件的边也可能变：
+  `b.ts` 调用 `foo`，而 `a.ts`（有改）现在又定义了一个 `foo`，名称变成歧义、`b.ts` 的边就消失；
+  或 `a.ts` 现在定义了 `b.ts` 调用的 `newFn`，边就出现。做法是在图旁边的
+  `<graph>.incremental-state.json` 为每个文件存下解析所需的少量信息（函数名称、调用记录、import 目标），
+  对旧的与新的信息各跑一次同一个解析，只写入两者的差。没改的文件不重新解析；仍存在于已改文件中的函数
+  就地更新，所以 SAGE 的 `confidence` 会保留。摘要会说明做了什么：`incremental: 4 file(s) parsed
+  (3 changed, 1 new), 5 reused unchanged, 1 removed; …`（`--json` 为 `incremental.reparsed` 等字段）。
+  在 egr 自己的 repo（210 个文件）上，全量重建约 26 秒，改 3 个文件后的增量索引约 0.4 秒。
+  **下列情况会改为全量索引，并打印原因**：第一次 `--incremental`；egr 或 tree-sitter grammar 版本与写入状态时不同
+  （所以升级 grammar 会全部重新解析）；之后有人不加 `--incremental` 又索引过这张图（状态以 token 绑在 manifest 上）；
+  图里的文件比状态记得的少；或同一张图的另一个 root 也有相同相对路径的文件（Module id 就是相对路径，节点是共用的）。
+  不加 `--incremental` 的 `egr index` 行为与以前完全相同。不能与 `--scip` 并用（会拒绝）；`--docs` 仍会索引全部文档。
+  若图是早先用普通 `egr index` 建的，可能留有普通索引从不清除、状态也不知道的残留：请从空图开始，
+  或加一次 `--clean`（`egr index <dir> --incremental --clean` 会重建并建立状态）。
+- `--changed-from <git-ref>`（与 `--incremental` 并用）：改用 `git diff <ref>` 列出的文件（工作树与 ref 不同的已跟踪文件）
+  加上未跟踪且未被忽略的文件作为“有变”清单，而不是对每个文件算哈希。它等于声明“这张图描述的是 `<ref>`”；
+  git 列出的文件会用哈希比对，没列出的视为没变。ref 与实际索引的内容不符，图就会是错的——不加此开关则每个文件都算哈希，
+  永远正确。不认识的 ref 会是错误（exit 1）并点名该 ref。
 - `--exclude <glob>`（可重复）：让匹配的路径不进索引，代码与 `--docs` 都适用。上面的跳过列表是固定的、
   而且**不读** `.gitignore`——项目根目录若放着 `.uds-backup-*` 备份目录，每一份备份文档都会被算进去，
   所以才有这个开关。摘要一定会说它挡掉了什么（`excluded: N file(s) in M path(s) matched --exclude …`），
@@ -75,6 +96,8 @@ egr <command> [args] [options]
 egr index ./src
 egr index . --docs
 egr index ./src --clean   # 重建，清掉已删除的节点
+egr index ./src --incremental   # 只重新解析自上次 --incremental 后有变的文件
+egr index ./src --incremental --changed-from origin/main   # CI：由 git 告知哪些文件有变
 egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 ```
 

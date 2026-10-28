@@ -256,6 +256,10 @@ egr index ./src --docs
 egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 #    Windows Git Bash turns a leading "/" into C:/Program Files/Git/ — for --exclude "/logs/"
 #    put MSYS_NO_PATHCONV=1 in front of the command (or write "//logs/")
+#    Big repo, re-indexing often? --incremental parses only the files whose content changed
+#    since the last --incremental run and ends with the graph a --clean rebuild would give
+#    (the first run, or a changed egr/grammar version, indexes in full and says why)
+egr index ./src --incremental
 
 # 2. "What breaks if I change this function?"
 egr callers myFunction --depth 2

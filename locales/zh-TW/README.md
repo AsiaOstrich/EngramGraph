@@ -191,6 +191,9 @@ egr index ./src --docs
 egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 #    Windows Git Bash 會把開頭的 "/" 改成 C:/Program Files/Git/——--exclude "/logs/" 請在指令前加
 #    MSYS_NO_PATHCONV=1（或寫成 "//logs/"）
+#    大型 repo、常要重新索引？--incremental 只重新解析自上次 --incremental 後內容有變的檔案，
+#    結果與 --clean 全量重建相同（第一次、或 egr/grammar 版本變了，會全量索引並說明原因）
+egr index ./src --incremental
 
 # 2.「改這個函式會牽動什麼？」
 egr callers myFunction --depth 2

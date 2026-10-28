@@ -32,6 +32,7 @@ Usage: egr <command> [args] [options]
 
 Commands:
   index <dir> [--docs] [--clean] [--scip <path>] [--exclude <glob>]...
+              [--incremental [--changed-from <git-ref>]]
                                   Index source (.ts/.js/.cs/.py/.go/.java/
                                   .kt/.rs/.cpp/.rb/.php/.dart) into the code
                                   graph;
@@ -48,6 +49,15 @@ Commands:
                                   --exclude <glob> skips matching paths
                                   (repeatable; see "Excluding paths" below);
                                   the summary says how many it kept out.
+                                  --incremental parses only the files whose
+                                  content changed since the last --incremental
+                                  index and updates just their nodes and edges
+                                  (the result equals a full rebuild; the first
+                                  run, or a changed egr/grammar version, indexes
+                                  in full and says why). Not with --scip.
+                                  --changed-from <git-ref> takes the changed
+                                  files from "git diff <ref>" instead of
+                                  hashing every file (see "Incremental index").
                                   Skips a fixed list of directories (see
                                   below); .gitignore is NOT read
   callers <symbol> [--depth N]    Functions that (transitively) call <symbol>.
@@ -127,6 +137,25 @@ Excluding paths: egr index <dir> --exclude <glob> [--exclude <glob> ...]
   "/logs/"), or write "//logs/" or "logs/"; a pattern that starts with a Git
   install path and matched nothing is reported with this reason.
 
+Incremental index: egr index <dir> --incremental [--changed-from <git-ref>]
+  Parses only the files whose content (sha256, not mtime) changed since the last
+  --incremental index, and writes only the difference: nodes and edges of changed
+  files, plus the CALLS edges of UNCHANGED files that now resolve differently
+  because a name they call was added, removed or became ambiguous elsewhere.
+  Deleted, renamed-away and newly excluded files leave the graph. The result
+  equals "egr index <dir> --clean" on the same sources. The summary line
+  "incremental: N file(s) parsed ..." says what was really parsed.
+  Indexed in full (with the reason printed): the first --incremental run, a
+  changed egr or tree-sitter grammar version, a graph that was indexed again
+  without --incremental, or a relative path another root of the graph also holds.
+  A graph built earlier by plain "egr index" runs may hold leftovers a plain
+  index never prunes; start from an empty graph or add --clean for an exact state.
+  --changed-from <ref> says "the graph describes <ref>": files "git diff <ref>"
+  lists (plus untracked, not ignored, files) are compared by hash, every other
+  file is taken as unchanged without being read for comparison. A wrong ref gives
+  a wrong graph; without it every file is hashed, which is always correct.
+  --docs still indexes every document; --scip is refused.
+
 Exit status: 0 on success; 1 on any error, including a lock held by another
 process and an input (symbol, spec id, node id, module path) the graph does not
 contain. "(none)" with exit 0 means: it is in the graph and has no results.
@@ -200,6 +229,8 @@ async function main(): Promise<void> {
       exclude: { type: "string", multiple: true },
       "dry-run": { type: "boolean" },
       "include-unclustered": { type: "boolean" },
+      incremental: { type: "boolean" },
+      "changed-from": { type: "string" },
     },
   });
 
@@ -377,7 +408,7 @@ async function main(): Promise<void> {
       // The parse-health manifest (XSPEC-334 R1b) lives beside this graph's DB
       // file; derive its path from the same resolution the connection used.
       const manifestPath = manifestPathForDb(resolveDbPath(loc));
-      const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean, scip: values.scip, manifestPath, exclude: values.exclude });
+      const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean, scip: values.scip, manifestPath, exclude: values.exclude, incremental: values.incremental, changedFrom: values["changed-from"] });
       out(r, values.json, (d) => {
         const s = d as Awaited<ReturnType<typeof cmdIndex>>;
         // The counts carry their denominator (XSPEC-373 R1): `0 specs` alone
@@ -554,7 +585,16 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
         const hints =
           callResolutionHint(s.code, Boolean(s.scip)) +
           knowledgeNamingHint(s.knowledge, s.code.implements, clusters.length > 0);
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kConflicts}${kReplaced}${kWarning}${scip}${parse}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${excludedLine}${unindexed}${hints}`;
+        // What --incremental did (XSPEC-508 R6): the line that says how many files were really parsed.
+        const inc = s.incremental;
+        const incLine = inc
+          ? inc.mode === "full"
+            ? `\nincremental: indexed in full — ${inc.reason}; ${inc.reparsed} file(s) parsed, state saved for the next run`
+            : `\nincremental: ${inc.reparsed} file(s) parsed (${inc.changed} changed, ${inc.added} new), ${inc.reused} reused unchanged, ${inc.removed} removed; ` +
+              `graph updated: ${inc.nodesRemoved} node(s) and ${inc.edgesRemoved} edge(s) removed, ${inc.edgesWritten} edge(s) written` +
+              (inc.changedFrom !== undefined ? ` (changed files from git diff ${inc.changedFrom})` : "")
+          : "";
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kConflicts}${kReplaced}${kWarning}${scip}${parse}${incLine}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${excludedLine}${unindexed}${hints}`;
       });
       break;
     }

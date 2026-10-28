@@ -16,6 +16,8 @@ import { writeFragment } from "../graph-db/writer.js";
 import { gitBranchEngramDir, listBranches, sanitizeBranch } from "../graph-db/git-branch.js";
 import {
   indexProject,
+  extractProjectDetailed,
+  type DetailedProjectExtraction,
   callers,
   callees,
   implementers,
@@ -46,6 +48,21 @@ import {
   writeManifest,
   type ParseHealthSummary,
 } from "../code-graph/parse-manifest.js";
+import {
+  applyDelta,
+  collidingPaths,
+  dropState,
+  fingerprint,
+  gitChangedPaths,
+  newToken,
+  readState,
+  statePathForManifest,
+  STATE_VERSION,
+  usableState,
+  writeState,
+  type IncrementalState,
+  type RootState,
+} from "../code-graph/incremental.js";
 import { walkFiles, summarizeUnindexed, type ExcludedByPattern, type UnindexedSummary } from "./walk.js";
 import { compileExcludes } from "./exclude.js";
 import { msysPathConversionHint } from "./index-hints.js";
@@ -126,6 +143,35 @@ export interface IndexResultSummary {
    * totals above cannot tell which of several patterns did nothing.
    */
   excluded?: { patterns: string[]; paths: string[]; files: number; byPattern: ExcludedByPattern[] };
+  /** Present exactly when `--incremental` was given (XSPEC-508 R6). */
+  incremental?: IncrementalSummary;
+}
+
+/**
+ * What an `--incremental` run did (XSPEC-508 R6). `reparsed` is counted where the
+ * parser is called, not inferred from the change list, so it is the evidence that
+ * unchanged files were not parsed again.
+ */
+export interface IncrementalSummary {
+  /** `full` when the remembered state could not be used; `reason` says why. */
+  mode: "incremental" | "full";
+  reason?: string;
+  /** Files whose source was parsed in this run. */
+  reparsed: number;
+  /** Files taken from the remembered facts without parsing. */
+  reused: number;
+  /** Files that existed before and whose content (or language reading) changed. */
+  changed: number;
+  /** Files that were not in the graph before. */
+  added: number;
+  /** Files that were in the graph and are no longer indexed (deleted, renamed away, newly excluded). */
+  removed: number;
+  /** Graph writes the difference needed. `edgesRemoved` does not count edges that went with a removed node (DETACH DELETE). */
+  nodesRemoved: number;
+  edgesRemoved: number;
+  edgesWritten: number;
+  /** The `--changed-from` ref, when given. */
+  changedFrom?: string;
 }
 
 /**
@@ -325,6 +371,115 @@ export async function ingestScipOverlay(
 }
 
 /**
+ * The code half of `egr index --incremental` (XSPEC-508 R6). See
+ * `code-graph/incremental.ts` for the design; this decides full vs incremental,
+ * runs it, and returns what `cmdIndex` needs to finish (manifest, state).
+ */
+async function indexCodeIncrementally(
+  conn: GraphConnection,
+  args: {
+    dir: string;
+    root: string;
+    codeFiles: ReturnType<typeof walkFiles>["files"];
+    manifest: ReturnType<typeof readManifest>;
+    manifestPath: string | undefined;
+    clean: boolean;
+    changedFrom: string | undefined;
+  },
+): Promise<{ extraction: DetailedProjectExtraction; summary: IncrementalSummary; token: string }> {
+  const { dir, root, codeFiles, manifest, manifestPath, clean, changedFrom } = args;
+  const token = newToken();
+  const statePath = manifestPath ? statePathForManifest(manifestPath) : null;
+
+  // 1. Can the remembered facts be used?
+  let prev: RootState | undefined;
+  let reason: string | undefined;
+  if (!statePath) {
+    reason = "no manifest path was given, so there is nowhere to keep the incremental state";
+  } else if (clean) {
+    reason = "--clean empties the graph, so everything is parsed again";
+  } else {
+    const usable = usableState({ root, manifest, state: readState(statePath), egrVersion: EGR_VERSION });
+    if (usable.ok) {
+      prev = usable.prev;
+      const colliding = collidingPaths(manifest, root, [...codeFiles.map((f) => toPosixPath(f.path)), ...Object.keys(prev.files)]);
+      if (colliding.length > 0) {
+        reason = `${colliding.length} relative path(s) (e.g. ${colliding[0]}) are also indexed from another root of this graph; their nodes are shared, so they cannot be updated per root`;
+        prev = undefined;
+      } else {
+        const rows = await conn.query("MATCH (m:Module) RETURN count(m) AS c");
+        if (Number(rows[0]?.c ?? 0) < Object.keys(prev.files).length) {
+          reason = "the graph holds fewer files than the incremental state remembers (it was emptied or replaced)";
+          prev = undefined;
+        }
+      }
+    } else {
+      reason = usable.reason;
+    }
+  }
+
+  // 2. Full: index everything and start the state from it.
+  if (!prev) {
+    const extraction = extractProjectDetailed(codeFiles, { hash: true });
+    await writeFragment(conn, extraction.fragment);
+    return {
+      extraction,
+      token,
+      summary: {
+        mode: "full",
+        reason: reason!,
+        reparsed: extraction.parsed,
+        reused: 0,
+        changed: 0,
+        added: extraction.parsed,
+        removed: 0,
+        nodesRemoved: 0,
+        edgesRemoved: 0,
+        edgesWritten: 0,
+        ...(changedFrom !== undefined ? { changedFrom } : {}),
+      },
+    };
+  }
+
+  // 3. Incremental: parse what changed, reuse the rest.
+  const remembered = prev.files;
+  const trusted = changedFrom !== undefined ? gitChangedPaths(dir, changedFrom) : null;
+  const extraction = extractProjectDetailed(codeFiles, {
+    reuse: (file, language, hash) => {
+      const path = toPosixPath(file.path);
+      const old = remembered[path];
+      if (!old || old.language !== language) return undefined;
+      // `--changed-from`: git is the authority on what changed; a file it does not list is not even hashed.
+      if (trusted && !trusted.has(path)) return old;
+      return old.hash === hash() ? old : undefined;
+    },
+  });
+  const nowPaths = new Set(extraction.facts.map((f) => f.path));
+  const removedPaths = Object.keys(remembered).filter((p) => !nowPaths.has(p));
+  const addedPaths = [...extraction.freshPaths].filter((p) => !(p in remembered));
+
+  // The state describes the graph as of the last run; from here on the graph is being edited, so it
+  // must not survive a crash (see the module doc of code-graph/incremental.ts).
+  if (statePath) dropState(statePath);
+  const delta = await applyDelta(conn, Object.values(remembered), extraction.facts, extraction.fragment.nodes);
+
+  return {
+    extraction,
+    token,
+    summary: {
+      mode: "incremental",
+      reparsed: extraction.parsed,
+      reused: extraction.reused,
+      changed: extraction.parsed - addedPaths.length,
+      added: addedPaths.length,
+      removed: removedPaths.length,
+      ...delta,
+      ...(changedFrom !== undefined ? { changedFrom } : {}),
+    },
+  };
+}
+
+/**
  * `egr index <dir> [--docs] [--clean] [--scip <path>]` — index code (always)
  * + knowledge docs (--docs) + an external SCIP index overlay (--scip).
  *
@@ -346,8 +501,27 @@ export async function ingestScipOverlay(
  */
 export async function cmdIndex(
   conn: GraphConnection,
-  opts: { dir: string; docs?: boolean; clean?: boolean; scip?: string; manifestPath?: string; exclude?: string[] },
+  opts: {
+    dir: string;
+    docs?: boolean;
+    clean?: boolean;
+    scip?: string;
+    manifestPath?: string;
+    exclude?: string[];
+    /** Parse only the files that changed since the last `--incremental` index (XSPEC-508 R6). */
+    incremental?: boolean;
+    /** With `incremental`: take the list of changed files from `git diff <ref>` instead of hashing every file. */
+    changedFrom?: string;
+  },
 ): Promise<IndexResultSummary> {
+  if (opts.changedFrom !== undefined && !opts.incremental) {
+    throw new Error("--changed-from only makes sense with --incremental");
+  }
+  if (opts.incremental && opts.scip) {
+    throw new Error(
+      "--incremental cannot be combined with --scip: the SCIP overlay is written for the whole index, and an incremental run would not know which of its edges to keep. Run the SCIP overlay with a plain `egr index`.",
+    );
+  }
   if (opts.clean) await clearGraph(conn); // drop existing data so deleted nodes are pruned
   if (opts.scip) await assertCallsSchemaHasProvenanceColumns(conn);
   // `detectShebangScripts: true` (XSPEC-414 R4 OQ2) only on the CODE walk —
@@ -377,11 +551,29 @@ export async function cmdIndex(
   // `parseHealth` (the bulky per-file array) is split off here: it feeds the
   // on-disk manifest, while `code` (the 7 numeric counts) is what the compact
   // summary surfaces — keeping the per-file array out of `--json` output.
-  const { parseHealth, ...code } = await indexProject(conn, codeFiles);
+  let parseHealth: Awaited<ReturnType<typeof indexProject>>["parseHealth"];
+  let code: Omit<ProjectIndexResult, "parseHealth">;
+  let incremental: { summary: IncrementalSummary; facts: DetailedProjectExtraction["facts"]; token: string } | undefined;
+  if (opts.incremental) {
+    const r = await indexCodeIncrementally(conn, {
+      dir: opts.dir,
+      root,
+      codeFiles,
+      manifest: prevManifest,
+      manifestPath: opts.manifestPath,
+      clean: opts.clean === true,
+      changedFrom: opts.changedFrom,
+    });
+    ({ parseHealth, ...code } = r.extraction);
+    incremental = { summary: r.summary, facts: r.extraction.facts, token: r.token };
+  } else {
+    ({ parseHealth, ...code } = await indexProject(conn, codeFiles));
+  }
   // Seen-but-not-indexed accounting (XSPEC-414 R1). Derived from the SAME
   // walk `codeFiles` came from, so "code.files" and "unindexedCode.count"
   // describe the same tree, not two walks that could disagree.
   const result: IndexResultSummary = { code, unindexedCode: summarizeUnindexed(codeWalk.unindexed) };
+  if (incremental) result.incremental = incremental.summary;
   // Directory symlinks are neither descended into nor, previously, recorded
   // (XSPEC-373 B3). Surfaced from the code walk, which covers the whole tree;
   // the docs walk below re-walks the same directories and would only repeat it.
@@ -428,10 +620,24 @@ export async function cmdIndex(
   // failing must not undo a successful index (same spirit as R1a's per-file
   // tolerance). The summary/diff are still computed when no manifestPath is
   // given, so programmatic/test callers get the counts without a file.
-  const nextManifest = upsertRun(upsertBase, root, new Date().toISOString(), parseHealth, EGR_VERSION, opts.exclude);
+  const nextManifest = upsertRun(upsertBase, root, new Date().toISOString(), parseHealth, EGR_VERSION, opts.exclude, incremental?.token);
   if (opts.manifestPath) {
     try {
       writeManifest(opts.manifestPath, nextManifest);
+      // The state is written LAST and only once the manifest carrying its token is on disk: a state
+      // without a matching manifest section is never used (see usableState).
+      if (incremental) {
+        const statePath = statePathForManifest(opts.manifestPath);
+        const state: IncrementalState = readState(statePath) ?? { version: STATE_VERSION, roots: {} };
+        const section: RootState = {
+          token: incremental.token,
+          ...fingerprint(EGR_VERSION),
+          files: Object.fromEntries(incremental.facts.map((f) => [f.path, f])),
+        };
+        // `--clean` empties the whole graph, so no other root's remembered facts describe it any more.
+        state.roots = opts.clean ? { [root]: section } : { ...state.roots, [root]: section };
+        writeState(statePath, state);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[egr] warning: parse-health manifest not written (${msg}); the index itself succeeded\n`);

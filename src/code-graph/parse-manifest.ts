@@ -148,6 +148,13 @@ export interface ManifestRun {
    * `--exclude`, and for sections written by an older egr.
    */
   exclude?: string[];
+  /**
+   * Set only by an `egr index --incremental` run (XSPEC-508 R6): the token it also wrote into the
+   * incremental state file beside the graph. The state file may be trusted for this root only while
+   * its token equals this one. Any other write of this section — a plain `egr index`, `--clean` —
+   * leaves it out, which is how the state learns it no longer describes the graph.
+   */
+  incrementalToken?: string;
 }
 
 /** The persisted manifest shape. */
@@ -177,9 +184,15 @@ export function upsertRun(
   files: FileParseHealth[],
   egrVersion: string,
   exclude?: readonly string[],
+  incrementalToken?: string,
 ): ParseManifest {
   const runs = { ...(prev?.runs ?? {}) };
-  runs[root] = { indexedAt, files, ...(exclude && exclude.length > 0 ? { exclude: [...exclude] } : {}) };
+  runs[root] = {
+    indexedAt,
+    files,
+    ...(exclude && exclude.length > 0 ? { exclude: [...exclude] } : {}),
+    ...(incrementalToken ? { incrementalToken } : {}),
+  };
   return { egrVersion, grammarVersions: grammarVersions(), runs };
 }
 
