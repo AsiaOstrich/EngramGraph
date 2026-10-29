@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1-beta.1] - 2026-10-30
+
+*Preview of two index-correctness fixes (linked worktrees, nested function names) and the release-gate fixes below. Published to the `next` dist-tag for the Windows release verification. Upgrading resets the incremental-index state (STATE_VERSION 1 to 2), so the first `--incremental` run after it indexes in full.*
+
 ### Changed
 
 - **`egr index` no longer walks into git linked worktrees under the index root.** A linked worktree (`git worktree add`, which Claude Code's agents leave behind as `.claude/worktrees/agent-*`) is a second full checkout of a repository that is already being indexed. Walked, every function in it exists twice, so a call to a name that now has two definitions is "ambiguous" and its edge is dropped. Measured on dev-platform's graph: 2,052 of 5,384 indexed code files (38%) were copies in three such worktrees; excluding them removed 11,722 duplicate nodes and wrote 2,884 call edges that had been lost. A directory is a linked worktree when its `.git` is a **file** whose `gitdir:` line points at `.git/worktrees/<name>`. The summary now says what it skipped (`skipped: 3 git worktrees not walked (…; N file(s)) — … absent from every count above`) and `--json` carries `skippedWorktrees: { paths, files }`; `--docs` skips the same directories. **Not affected:** an index root that is itself a linked worktree is indexed as before (the check is made only on subdirectories); a **submodule** (`.git` file pointing at `.git/modules/<name>`) is a different repository's code and is still walked, as before; a directory with a `.git` directory (a nested clone) is still walked. **If you indexed a worktree copy on purpose** from inside its parent, index that directory as its own root. `--incremental` treats the files of a directory that has become a worktree as removed. A user `--exclude` pattern that already names the directory keeps counting it under `excluded:` rather than `skipped:`.
