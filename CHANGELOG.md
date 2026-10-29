@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`.husky/pre-commit` starts with a shebang** (`#!/usr/bin/env sh`). Husky 9 runs the hook with `sh -e` whatever its first line says, so commits behave as before; editors and shell linters no longer treat the file as having no interpreter. A test now requires every hook under `.husky/` to start with one.
 - **`egr refs check` no longer answers confidently from a parse-health manifest it could not read.** The list of indexed roots comes from `<graph>.parse-manifest.json`. When that file existed but was cut off, was not JSON or had the wrong shape, the check took it as "no roots" and carried on: in a graph with several roots, a reference into another root could come out `missing`, and nothing in the output or the exit status said the list had never been read. A damaged manifest now puts an `INCOMPLETE` line first in the report, writes the reason to stderr (also under `--json`, whose stdout stays the JSON alone), adds `incompleteReasons` to the JSON result and to the MCP `refs_check` result, and makes the command exit 1. A graph with **no** manifest file is the ordinary single-repo case and is unchanged: no warning, exit 0.
 
+## [0.14.0] - 2026-10-29
+
+> **Stable Release**: the same content as 0.14.0-beta.3 below, which passed the Windows release verification including the new incremental-indexing steps (run 40886344099). Adds `egr index --incremental` and separate ids for index roots that share a relative path; see 0.14.0-beta.1 for the features.
+
 ## [0.14.0-beta.3] - 2026-10-29
 
 *Same package content as 0.14.0-beta.2. The Windows release verification now exercises incremental indexing and roots that share a relative path ([#14](https://github.com/AsiaOstrich/EngramGraph/pull/14)); a stable 0.14.0 must match a preview verified with it, so this preview exists to be that one. Published to the `next` dist-tag.*
