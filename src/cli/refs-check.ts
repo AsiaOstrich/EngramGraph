@@ -223,6 +223,14 @@ export interface RefCheckResult {
   filesScanned: string[];
   /** Backtick tokens that matched neither the path nor the symbol rule — informational only. */
   skippedTokens: number;
+  /**
+   * Present only when the check could not use everything it was meant to: the graph's parse-health manifest
+   * EXISTS but could not be read or is malformed, so the list of indexed roots (and the `--exclude` patterns)
+   * is unknown. The check then ran as if the graph had one root, and in a multi-root graph a reference into
+   * another root can come out `missing` — a wrong answer, not a partial one. Absent (not `[]`) when nothing
+   * was left out; a graph with NO manifest at all is the ordinary single-repo case and is not reported here.
+   */
+  incompleteReasons?: string[];
 }
 
 export interface RefCheckOptions {
@@ -1548,27 +1556,46 @@ async function resolveSymbolRef(conn: GraphConnection, ref: RawRef, roots: strin
 
 // --- entry point ------------------------------------------------------
 
-function readRootsFromManifest(dbPath: string): string[] {
-  try {
-    const manifest = readManifest(manifestPathForDb(dbPath));
-    return manifest ? Object.keys(manifest.runs) : [];
-  } catch {
-    return [];
-  }
+/** What the graph's parse-health manifest says, and whether it could be read at all. */
+interface ManifestState {
+  roots: string[];
+  excludes: Record<string, readonly string[]>;
+  /** Set when the manifest file EXISTS but `readManifest` returned nothing for it: unreadable, not JSON, or the wrong shape. */
+  problem?: string;
 }
 
-/** The `--exclude` patterns each root was last indexed with (XSPEC-481 R1), from the same manifest as the roots. Roots indexed without any are absent. */
-function readExcludesFromManifest(dbPath: string): Record<string, readonly string[]> {
-  const out: Record<string, readonly string[]> = {};
+/**
+ * Read the manifest once for both the roots and the exclusions.
+ *
+ * `readManifest` answers `null` for "no such file" AND for "file there, content unusable" — right for the
+ * callers that only want to know whether there is a manifest to merge into, wrong here: this is the one place
+ * where the difference changes the answer. A graph that never had a manifest is a single-repo graph and
+ * `roots = []` is the truth; a graph whose manifest is damaged has roots we cannot see, and returning `[]`
+ * for it printed a confident result built on a list that was never read. So the file is looked at first, and
+ * only a missing file counts as "there is no list".
+ */
+function readManifestState(dbPath: string): ManifestState {
+  const path = manifestPathForDb(dbPath);
   try {
-    const manifest = readManifest(manifestPathForDb(dbPath));
-    for (const [root, run] of Object.entries(manifest?.runs ?? {})) {
-      if (Array.isArray(run.exclude) && run.exclude.length > 0) out[root] = run.exclude;
-    }
-  } catch {
-    // no manifest, no exclusions — the fixed list still applies
+    statSync(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { roots: [], excludes: {} };
+    return { roots: [], excludes: {}, problem: `the parse-health manifest ${path} could not be accessed (${(err as NodeJS.ErrnoException).code ?? String(err)})` };
   }
-  return out;
+  const manifest = readManifest(path);
+  if (!manifest) {
+    return {
+      roots: [],
+      excludes: {},
+      problem: `the parse-health manifest ${path} exists but cannot be read or is malformed, so the graph's indexed roots and the exclusions it was indexed with are unknown`,
+    };
+  }
+  const excludes: Record<string, readonly string[]> = {};
+  for (const [root, run] of Object.entries(manifest.runs)) {
+    // The `--exclude` patterns each root was last indexed with (XSPEC-481 R1). Roots indexed without any are absent.
+    if (Array.isArray(run.exclude) && run.exclude.length > 0) excludes[root] = run.exclude;
+  }
+  return { roots: Object.keys(manifest.runs), excludes };
 }
 
 /**
@@ -1578,7 +1605,9 @@ function readExcludesFromManifest(dbPath: string): Record<string, readonly strin
  */
 export async function checkRefs(conn: GraphConnection, inputPaths: string[], opts: RefCheckOptions = {}): Promise<RefCheckResult> {
   const files = collectMarkdownFiles(inputPaths);
-  const roots = opts.roots ?? readRootsFromManifest(conn.path);
+  // Only consulted for what the caller did not pass in; a damaged manifest matters only if its content was needed.
+  const manifest = opts.roots === undefined || opts.excludes === undefined ? readManifestState(conn.path) : undefined;
+  const roots = opts.roots ?? manifest?.roots ?? [];
   const cwd = opts.cwd ?? process.cwd();
   // Fresh per call (DEC-115 H1 R3/R5/R6) — see HistoryCache's/ToplevelCache's/
   // RenameCache's doc comments for why none of them is ever module-level.
@@ -1600,7 +1629,7 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
       if (name) candidates.add(name);
     }
   }
-  const symbols = new SymbolHistory([...candidates], opts.excludes ?? readExcludesFromManifest(conn.path));
+  const symbols = new SymbolHistory([...candidates], opts.excludes ?? manifest?.excludes ?? {});
 
   for (const { file, refs, skipped } of extracted) {
     skippedTokens += skipped;
@@ -1613,5 +1642,5 @@ export async function checkRefs(conn: GraphConnection, inputPaths: string[], opt
     }
   }
 
-  return { items, filesScanned: files, skippedTokens };
+  return { items, filesScanned: files, skippedTokens, ...(manifest?.problem ? { incompleteReasons: [manifest.problem] } : {}) };
 }

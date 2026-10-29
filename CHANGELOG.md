@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`egr refs check` no longer answers confidently from a parse-health manifest it could not read.** The list of indexed roots comes from `<graph>.parse-manifest.json`. When that file existed but was cut off, was not JSON or had the wrong shape, the check took it as "no roots" and carried on: in a graph with several roots, a reference into another root could come out `missing`, and nothing in the output or the exit status said the list had never been read. A damaged manifest now puts an `INCOMPLETE` line first in the report, writes the reason to stderr (also under `--json`, whose stdout stays the JSON alone), adds `incompleteReasons` to the JSON result and to the MCP `refs_check` result, and makes the command exit 1. A graph with **no** manifest file is the ordinary single-repo case and is unchanged: no warning, exit 0.
+
 ## [0.14.0-beta.3] - 2026-10-29
 
 *Same package content as 0.14.0-beta.2. The Windows release verification now exercises incremental indexing and roots that share a relative path ([#14](https://github.com/AsiaOstrich/EngramGraph/pull/14)); a stable 0.14.0 must match a preview verified with it, so this preview exists to be that one. Published to the `next` dist-tag.*

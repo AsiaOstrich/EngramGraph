@@ -483,7 +483,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     {
       title: "Check code references in Markdown",
       description:
-        "Check file-path and symbol/function references (backtick-quoted) inside Markdown files/directories against the current graph and git. Reports each reference as present | moved (+ new location) | missing | unresolvable (e.g. a reference into a repo this graph does not index — never conflated with missing). Read-only: does not modify the graph or the files checked.",
+        "Check file-path and symbol/function references (backtick-quoted) inside Markdown files/directories against the current graph and git. Reports each reference as present | moved (+ new location) | missing | unresolvable (e.g. a reference into a repo this graph does not index — never conflated with missing). If the result carries `incompleteReasons`, the graph's parse-health manifest exists but could not be read, so the indexed roots were unknown and a `missing` may be wrong — do not treat the list as a complete verdict. Read-only: does not modify the graph or the files checked.",
       inputSchema: {
         paths: z.array(z.string()),
       },
