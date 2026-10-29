@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -222,4 +223,65 @@ describe("XSPEC-457: the release verifier's other matches on product output", ()
     expect(step("8 ").ok).toBe(true);
     expect(report.results.length).toBeGreaterThanOrEqual(12);
   });
+  it("the incremental-index steps 9a-9c, 10a-10b and 11 ran against the current build and each passed, none skipped [verify-incremental-steps]", () => {
+    // XSPEC-508 R6 (0.14.0): `egr index --incremental` and per-root ids. The stable-release gate asks for a Windows
+    // run of the same content; before these steps that run never touched the feature. Here the same steps run on
+    // this machine's build, so a change to the product's output (the summary line, the state file, the id rule)
+    // fails here instead of on the Windows runner after a preview is already on npm.
+    const wanted = ["9a ", "9b ", "9c ", "10a ", "10b ", "11 "];
+    for (const prefix of wanted) {
+      const r = step(prefix);
+      expect((r as { skipped?: boolean }).skipped, `${r.step} was skipped: ${r.detail}`).toBeUndefined();
+      expect(r.ok, `${r.step}: ${r.detail}\n${r.raw}`).toBe(true);
+    }
+    expect(step("9b ").detail).toMatch(/parsed=2 changed=1 new=1 reused=1 removed=1/);
+    expect(step("10a ").detail).toMatch(/root-qualified ids line=true/);
+    expect(step("11 ").detail).toMatch(/Function ids unchanged \(7 vs 7\)/);
+  });
+});
+
+describe("XSPEC-508 R6: the incremental steps are not run, or are failed, according to the version under test", () => {
+  /** Run the whole script against the real build with `--version` / `--help` answered as a given release would. */
+  function runAs(label: string, version: string, helpText: string) {
+    const stubPkg = join(work, `inc-stub-${label}`);
+    mkdirSync(join(stubPkg, "dist", "mcp"), { recursive: true });
+    mkdirSync(join(stubPkg, "dist", "cli"), { recursive: true });
+    writeFileSync(
+      join(stubPkg, "dist", "cli", "index.js"),
+      [
+        `import { spawnSync } from "node:child_process";`,
+        `const a = process.argv.slice(2);`,
+        `if (a[0] === "--version") { console.log(${JSON.stringify(version)}); process.exit(0); }`,
+        `if (a[0] === "--help") { console.log(${JSON.stringify(helpText)}); process.exit(0); }`,
+        `const r = spawnSync(process.execPath, [${JSON.stringify(built.cli)}, ...a], { stdio: "inherit" });`,
+        `process.exit(r.status ?? 1);`,
+      ].join("\n"),
+    );
+    writeFileSync(join(stubPkg, "dist", "mcp", "stdio.js"), `await import(${JSON.stringify(pathToFileURL(built.mcp).href)});\n`);
+    const out = join(work, `inc-stub-${label}.json`);
+    const run = spawnSync(process.execPath, [join(REPO_ROOT, "scripts", "windows-release-verify.mjs"), "--target", target, "--package-dir", stubPkg, "--json", out], {
+      cwd: work,
+      encoding: "utf8",
+      env: cleanEnv(join(work, "home")),
+      timeout: 240_000,
+    });
+    const rep = JSON.parse(readFileSync(out, "utf8")) as { results: Array<{ step: string; ok: boolean | null; skipped?: boolean; detail: string }> };
+    return { status: run.status, stdout: run.stdout, steps: rep.results.filter((r) => /^(9|10|11)/.test(r.step)) };
+  }
+
+  it("a release that predates --incremental is reported NOT RUN, not as a pass and not as a failure [verify-incremental-predates]", () => {
+    const { steps, stdout } = runAs("old", "0.13.2", "egr help from before the feature");
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ step: "9-11 incremental index", ok: null, skipped: true });
+    expect(steps[0]!.detail).toMatch(/predates/);
+    expect(stdout).toMatch(/NOT RUN/);
+    expect(stdout).toMatch(/1 step\(s\) NOT RUN/);
+  }, 240_000);
+
+  it("a release that should have --incremental and does not mention it fails the step [verify-incremental-missing-fails]", () => {
+    const { steps, status } = runAs("missing", "0.14.0", "egr help that forgot the feature");
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ step: "9 incremental index", ok: false });
+    expect(status).toBe(1);
+  }, 240_000);
 });
