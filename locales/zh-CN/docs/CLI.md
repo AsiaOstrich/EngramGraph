@@ -69,10 +69,20 @@ egr <command> [args] [options]
   在 egr 自己的 repo（210 个文件）上，全量重建约 26 秒，改 3 个文件后的增量索引约 0.4 秒。
   **下列情况会改为全量索引，并打印原因**：第一次 `--incremental`；egr 或 tree-sitter grammar 版本与写入状态时不同
   （所以升级 grammar 会全部重新解析）；之后有人不加 `--incremental` 又索引过这张图（状态以 token 绑在 manifest 上）；
-  图里的文件比状态记得的少；或同一张图的另一个 root 也有相同相对路径的文件（Module id 就是相对路径，节点是共用的）。
+  图里的文件比状态记得的少；或这张图是旧版 egr 用“相对路径相同的多个 root”建的（见下方“同一张图的多个 root”）。
   不加 `--incremental` 的 `egr index` 行为与以前完全相同。不能与 `--scip` 并用（会拒绝）；`--docs` 仍会索引全部文档。
   若图是早先用普通 `egr index` 建的，可能留有普通索引从不清除、状态也不知道的残留：请从空图开始，
   或加一次 `--clean`（`egr index <dir> --incremental --clean` 会重建并建立状态）。
+- **同一张图的多个 root**（`egr index a/src` 再 `egr index b/src`，写进同一个数据库；dev-platform 索引七个）：
+  文件的 id 是它相对于 root 的路径（`src/index.ts`）。若**同一张图的另一个 root 已经有这个 id**，
+  这个文件改以 `<root 最后两段>/<路径>` 为 id（`b/src/index.ts`；摘要会打印 `ids: …`，`--json` 有 `rootQualifiedIds`），
+  所以两个 root 各有 `index.ts` 时是两个 Module 节点，各自有自己的函数与调用边，不再是一个。
+  只有一个 root、或各 root 的相对路径从不相同的图，所有 id 与以前完全相同——不需要重建。
+  文件留在索引里时 id 就不变（记录在 parse-health manifest），所以**先**索引的 root 保有普通路径，
+  换个顺序重建同一张图可能得到不同的 id。`egr callers` 等查询把 id 当路径打印，所以加了前缀的文件会显示它的 root。
+  有加前缀文件的 root 不能用 `--scip`（会拒绝；覆盖层生成的是普通路径的 id）。
+  旧版 egr 用相对路径相同的 root 建出的图，那个路径只有**一个混在一起的节点**：egr 会打印 `WARNING`，
+  `--incremental` 会改为全量索引——请用 `--clean`（或 `index-all.sh --clean`）重建一次，它们就会分开。
 - `--changed-from <git-ref>`（与 `--incremental` 并用）：改用 `git diff <ref>` 列出的文件（工作树与 ref 不同的已跟踪文件）
   加上未跟踪且未被忽略的文件作为“有变”清单，而不是对每个文件算哈希。它等于声明“这张图描述的是 `<ref>`”；
   git 列出的文件会用哈希比对，没列出的视为没变。ref 与实际索引的内容不符，图就会是错的——不加此开关则每个文件都算哈希，

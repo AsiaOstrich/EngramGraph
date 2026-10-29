@@ -125,11 +125,13 @@ export function computeIndexHealth(manifest: ParseManifest | null, resultFiles: 
 
   if (resultFiles.length > 0) {
     const resultDirs = [...new Set(resultFiles.map(dirOf))];
-    const touched = unhealthy.filter((u) => resultDirs.some((rd) => sameSubtree(dirOf(u.path), rd)));
+    // In graph-id space, like the result files: a root-qualified file (`id`) is found under the
+    // directory its Module id names, not under the bare relative path another root also has.
+    const touched = unhealthy.filter((u) => resultDirs.some((rd) => sameSubtree(dirOf(u.id ?? u.path), rd)));
     if (touched.length > 0) {
       health.possiblyIncomplete = true;
       health.blindspotsTotal = touched.length; // full count — blindspots[] may be truncated
-      health.blindspots = touched.slice(0, MAX_BLINDSPOTS_LISTED).map((u) => u.path);
+      health.blindspots = touched.slice(0, MAX_BLINDSPOTS_LISTED).map((u) => u.id ?? u.path);
     }
   }
   return health;

@@ -382,6 +382,10 @@ export interface Extraction {
  */
 export function collectExtraction(source: string, opts: ExtractOptions): Extraction {
   const filePath = toPosixPath(opts.filePath);
+  // Where the graph ids come from. Equal to `filePath` unless the caller (an index root whose
+  // relative path another root already holds) gave a root-qualified one; language detection
+  // above and below always reads the real `filePath`.
+  const idPath = opts.idPath !== undefined ? toPosixPath(opts.idPath) : filePath;
   const language = opts.language ?? detectLanguage(filePath);
   // XSPEC-414 R1: `detectLanguage` no longer defaults an unrecognized
   // extension to javascript, so this single-file API — which has no batch to
@@ -408,10 +412,10 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   // Parse-failure signatures (R3a) — bucket keys for `egr signatures`.
   const signatures = hasError ? errorSignatures(tree.rootNode, language) : [];
 
-  const moduleId = filePath;
+  const moduleId = idPath;
 
   const nodes: GraphNode[] = [
-    { label: "Module", id: moduleId, properties: { path: filePath } },
+    { label: "Module", id: moduleId, properties: { path: idPath } },
   ];
   const defines: GraphEdge[] = [];
   const names = new Map<string, string>();
@@ -423,7 +427,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     tagsQuerySourceFor(language),
     tree.rootNode,
   );
-  const rawImports: RawImport[] = imports.map((imp) => ({ file: filePath, target: imp.target }));
+  const rawImports: RawImport[] = imports.map((imp) => ({ file: idPath, target: imp.target }));
   // Scope-qualification (not line numbers) keeps function ids unique — two
   // same-named functions in *different* scopes of one file no longer
   // collide — while staying stable across edits that shift line numbers
@@ -463,13 +467,13 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   // non-tree-sitter provider (e.g. SCIP) will have its own native id scheme
   // that won't line up with this one; merging the two into one node per
   // real-world symbol will need an id-normalization layer at that point.
-  const { functions, classes } = qualifyFunctions(filePath, definitions);
+  const { functions, classes } = qualifyFunctions(idPath, definitions);
 
   for (const cls of classes) {
     nodes.push({
       label: "Class",
-      id: `${filePath}#class:${cls.name}`,
-      properties: { name: cls.name, file: filePath, provider: PROVIDER },
+      id: `${idPath}#class:${cls.name}`,
+      properties: { name: cls.name, file: idPath, provider: PROVIDER },
     });
   }
 
@@ -479,7 +483,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
       id: fn.id,
       properties: {
         name: fn.name,
-        file: filePath,
+        file: idPath,
         start_line: fn.startLine,
         confidence: 1,
         provider: PROVIDER,
@@ -505,7 +509,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     // inside a class body but outside any method, was silently dropped.
     // Finding no enclosing function reproduces that gate exactly.
     const enclosing = findEnclosingFunction(functions, call.node);
-    if (enclosing) rawCalls.push({ from: enclosing.id, callee: call.name, file: filePath });
+    if (enclosing) rawCalls.push({ from: enclosing.id, callee: call.name, file: idPath });
   }
 
   // `// implements XSPEC-NNN` / `/* implements SPEC-NNN */` — a file-level
@@ -656,8 +660,17 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
  * resolution is redone for everyone, only the parsing is skipped.
  */
 export interface FileFacts {
-  /** POSIX path — the Module id and the id prefix of every node below. */
+  /**
+   * POSIX path relative to the index root. Relative `#include`/`source` targets resolve against
+   * it, and the incremental state is keyed by it.
+   */
   path: string;
+  /**
+   * The Module id (and the id prefix of every node below) when it is not `path` — a file whose
+   * relative path another root of the same graph holds carries a root-qualified id (XSPEC-508 R6,
+   * `root-ids.ts`). Absent means `path`; read it through {@link moduleIdOf}.
+   */
+  moduleId?: string;
   language: SupportedLanguage;
   /** sha256 of the source text, when the caller asked for hashes. */
   hash?: string;
@@ -676,8 +689,13 @@ export interface FileFacts {
   health: FileParseHealth;
 }
 
+/** The Module id a file's facts describe: its `moduleId`, else its relative `path`. */
+export function moduleIdOf(f: Pick<FileFacts, "path" | "moduleId">): string {
+  return f.moduleId ?? f.path;
+}
+
 /** Reduce a per-file {@link Extraction} to the {@link FileFacts} resolution needs. */
-export function factsOf(ex: Extraction, language: SupportedLanguage, health: FileParseHealth, path: string, hash?: string): FileFacts {
+export function factsOf(ex: Extraction, language: SupportedLanguage, health: FileParseHealth, path: string, hash?: string, moduleId?: string): FileFacts {
   const callCounts = new Map<string, [string, string, number]>();
   for (const c of ex.rawCalls) {
     const key = `${c.from}\u0000${c.callee}`;
@@ -687,6 +705,7 @@ export function factsOf(ex: Extraction, language: SupportedLanguage, health: Fil
   }
   return {
     path,
+    ...(moduleId !== undefined && moduleId !== path ? { moduleId } : {}),
     language,
     ...(hash !== undefined ? { hash } : {}),
     fnIds: ex.nodes.filter((n) => n.label === "Function").map((n) => n.id),
@@ -767,6 +786,9 @@ export function resolveFacts(facts: readonly FileFacts[]): ResolvedEdges {
 
   // -- module relationships: #include / source / . (XSPEC-414 R2/R4) --------
   // Same-directory-relative match first, else a globally-unique basename match, else dropped.
+  // Resolution reads RELATIVE paths (an `#include "x.h"` is relative to the including file's
+  // directory); the edges it writes name Module IDS, which differ for a root-qualified file.
+  const idOfPath = new Map(facts.map((f) => [f.path, moduleIdOf(f)] as const));
   const pathSet = new Set(facts.map((f) => f.path));
   const basenameIndex = new Map<string, Set<string>>();
   for (const path of pathSet) {
@@ -794,7 +816,7 @@ export function resolveFacts(facts: readonly FileFacts[]): ResolvedEdges {
       const key = `${file} ${resolvedPath}`;
       if (importEdgeKeys.has(key)) continue;
       importEdgeKeys.add(key);
-      imports.push({ label: "IMPORTS", fromLabel: "Module", from: file, toLabel: "Module", to: resolvedPath });
+      imports.push({ label: "IMPORTS", fromLabel: "Module", from: idOfPath.get(file)!, toLabel: "Module", to: idOfPath.get(resolvedPath)! });
     }
   }
   return { calls, imports, ambiguous, unresolved };
@@ -831,6 +853,9 @@ export interface DetailedExtractOptions {
 export function hashSource(source: string): string {
   return createHash("sha256").update(source).digest("hex");
 }
+
+/** The id path a file's nodes get: its root-qualified `id` when it has one, else its relative path. */
+const idOf = (f: ProjectFile): string => toPosixPath(f.id ?? f.path);
 
 /** {@link extractProject} plus what an incremental index needs: the per-file facts and which files were really parsed. */
 export function extractProjectDetailed(files: ProjectFile[], opts: DetailedExtractOptions = {}): DetailedProjectExtraction {
@@ -947,11 +972,12 @@ export function extractProjectDetailed(files: ProjectFile[], opts: DetailedExtra
       // otherwise re-derive it via a bare `detectLanguage(f.path)` call with
       // no batch context, silently discarding the `.h` → C override computed
       // above for exactly the files that override was meant to change.
-      const ex = collectExtraction(f.source, { filePath: f.path, language });
+      const ex = collectExtraction(f.source, { filePath: f.path, language, ...(f.id !== undefined ? { idPath: f.id } : {}) });
       extractions.push(ex);
       okFiles.push(f);
       const health: FileParseHealth = {
         path: toPosixPath(f.path),
+        ...(idOf(f) !== toPosixPath(f.path) ? { id: idOf(f) } : {}),
         language,
         errorNodes: ex.errorNodes,
         errorExtent: ex.errorExtent,
@@ -963,7 +989,7 @@ export function extractProjectDetailed(files: ProjectFile[], opts: DetailedExtra
         ...(ex.signatures.length > 0 ? { signatures: ex.signatures } : {}),
       };
       parseHealth.push(health);
-      facts.push(factsOf(ex, language, health, toPosixPath(f.path), wantHash ? getHash() : undefined));
+      facts.push(factsOf(ex, language, health, toPosixPath(f.path), wantHash ? getHash() : undefined, idOf(f)));
       freshPaths.add(toPosixPath(f.path));
     } catch (err) {
       // `failed` is best-effort truncated (not source text by design, but
@@ -975,6 +1001,7 @@ export function extractProjectDetailed(files: ProjectFile[], opts: DetailedExtra
       const message = err instanceof Error ? err.message : String(err);
       parseHealth.push({
         path: toPosixPath(f.path),
+        ...(idOf(f) !== toPosixPath(f.path) ? { id: idOf(f) } : {}),
         language,
         errorNodes: 0,
         errorExtent: 0,

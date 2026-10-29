@@ -155,7 +155,21 @@ export interface ManifestRun {
    * leaves it out, which is how the state learns it no longer describes the graph.
    */
   incrementalToken?: string;
+  /**
+   * The qualifier this root's files carry in their graph ids when a relative path collides with
+   * another root's (XSPEC-508 R6; see `root-ids.ts`). Written once the root has been given one and
+   * kept for as long as the section lives, so an id never changes under an existing graph.
+   */
+  rootLabel?: string;
 }
+
+/**
+ * The manifest key under which the MCP server's `index_code` tool records its health (it has no
+ * index root: callers hand it paths and sources). It is a record, not a root of the graph: its
+ * paths are whatever the caller chose, and re-indexing a file through it is meant to update the very
+ * node an `egr index` run wrote (`root-ids.ts` therefore leaves it out when it looks for id clashes).
+ */
+export const MCP_INDEX_ROOT = "mcp:index_code";
 
 /** The persisted manifest shape. */
 export interface ParseManifest {
@@ -185,6 +199,7 @@ export function upsertRun(
   egrVersion: string,
   exclude?: readonly string[],
   incrementalToken?: string,
+  rootLabel?: string,
 ): ParseManifest {
   const runs = { ...(prev?.runs ?? {}) };
   runs[root] = {
@@ -192,6 +207,7 @@ export function upsertRun(
     files,
     ...(exclude && exclude.length > 0 ? { exclude: [...exclude] } : {}),
     ...(incrementalToken ? { incrementalToken } : {}),
+    ...(rootLabel ? { rootLabel } : {}),
   };
   return { egrVersion, grammarVersions: grammarVersions(), runs };
 }

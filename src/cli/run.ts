@@ -10,13 +10,14 @@ import { join, resolve } from "node:path";
 
 import pkg from "../../package.json" with { type: "json" };
 import type { GraphConnection } from "../graph-db/connection.js";
-import type { ProjectIndexResult } from "../code-graph/types.js";
+import type { ProjectFile, ProjectIndexResult } from "../code-graph/types.js";
 import { clearGraph } from "../graph-db/schema.js";
 import { writeFragment } from "../graph-db/writer.js";
 import { gitBranchEngramDir, listBranches, sanitizeBranch } from "../graph-db/git-branch.js";
 import {
   indexProject,
   extractProjectDetailed,
+  moduleIdOf,
   type DetailedProjectExtraction,
   callers,
   callees,
@@ -50,8 +51,7 @@ import {
 } from "../code-graph/parse-manifest.js";
 import {
   applyDelta,
-  collidingPaths,
-  dropState,
+  dropRootState,
   fingerprint,
   gitChangedPaths,
   newToken,
@@ -63,6 +63,7 @@ import {
   type IncrementalState,
   type RootState,
 } from "../code-graph/incremental.js";
+import { assignIds, type IdAssignment } from "../code-graph/root-ids.js";
 import { walkFiles, summarizeUnindexed, type ExcludedByPattern, type UnindexedSummary } from "./walk.js";
 import { compileExcludes } from "./exclude.js";
 import { msysPathConversionHint } from "./index-hints.js";
@@ -145,6 +146,18 @@ export interface IndexResultSummary {
   excluded?: { patterns: string[]; paths: string[]; files: number; byPattern: ExcludedByPattern[] };
   /** Present exactly when `--incremental` was given (XSPEC-508 R6). */
   incremental?: IncrementalSummary;
+  /**
+   * Present when files of this root got a root-qualified id because another root of the graph
+   * already holds their relative path (XSPEC-508 R6). Without it those files would have been
+   * written onto the other root's nodes.
+   */
+  rootQualifiedIds?: { label: string; files: number; examples: Array<{ path: string; id: string }> };
+  /**
+   * Present when this root's section and another root's section hold the SAME graph id: a graph
+   * an older egr built from roots that share a relative path, whose nodes are mixed. Nothing here
+   * can separate them; the fix is a rebuild (XSPEC-508 R6, `code-graph/root-ids.ts`).
+   */
+  sharedNodes?: { count: number; examples: Array<{ id: string; otherRoot: string }> };
 }
 
 /**
@@ -370,6 +383,16 @@ export async function ingestScipOverlay(
   return { ...stats, documentsInIndex: docPaths.size, filesMatched: scipFiles.length };
 }
 
+/** Why a graph with nodes shared between roots cannot be updated in place, and what to do about it. */
+function sharedNodesReason(a: IdAssignment): string {
+  const e = a.shared[0]!;
+  return (
+    `${a.shared.length} node(s) of this root (e.g. ${e.id}) are also held by another root (${e.otherRoot}) of this graph: ` +
+    `an older egr wrote one node for the same relative path of both roots, so what belongs to which cannot be told apart. ` +
+    `Rebuild the graph once (egr index <dir> --clean, or index-all.sh --clean) and the roots get separate ids`
+  );
+}
+
 /**
  * The code half of `egr index --incremental` (XSPEC-508 R6). See
  * `code-graph/incremental.ts` for the design; this decides full vs incremental,
@@ -380,14 +403,16 @@ async function indexCodeIncrementally(
   args: {
     dir: string;
     root: string;
-    codeFiles: ReturnType<typeof walkFiles>["files"];
+    codeFiles: ProjectFile[];
     manifest: ReturnType<typeof readManifest>;
     manifestPath: string | undefined;
     clean: boolean;
     changedFrom: string | undefined;
+    /** The graph ids assigned to `codeFiles` (`code-graph/root-ids.ts`). */
+    assignment: IdAssignment;
   },
 ): Promise<{ extraction: DetailedProjectExtraction; summary: IncrementalSummary; token: string }> {
-  const { dir, root, codeFiles, manifest, manifestPath, clean, changedFrom } = args;
+  const { dir, root, codeFiles, manifest, manifestPath, clean, changedFrom, assignment } = args;
   const token = newToken();
   const statePath = manifestPath ? statePathForManifest(manifestPath) : null;
 
@@ -398,20 +423,18 @@ async function indexCodeIncrementally(
     reason = "no manifest path was given, so there is nowhere to keep the incremental state";
   } else if (clean) {
     reason = "--clean empties the graph, so everything is parsed again";
+  } else if (assignment.shared.length > 0) {
+    // Only a graph an older egr built can get here: new ids never meet another root's. Said first,
+    // because it outlasts every other reason (a full index does not separate the nodes).
+    reason = sharedNodesReason(assignment);
   } else {
     const usable = usableState({ root, manifest, state: readState(statePath), egrVersion: EGR_VERSION });
     if (usable.ok) {
       prev = usable.prev;
-      const colliding = collidingPaths(manifest, root, [...codeFiles.map((f) => toPosixPath(f.path)), ...Object.keys(prev.files)]);
-      if (colliding.length > 0) {
-        reason = `${colliding.length} relative path(s) (e.g. ${colliding[0]}) are also indexed from another root of this graph; their nodes are shared, so they cannot be updated per root`;
+      const rows = await conn.query("MATCH (m:Module) RETURN count(m) AS c");
+      if (Number(rows[0]?.c ?? 0) < Object.keys(prev.files).length) {
+        reason = "the graph holds fewer files than the incremental state remembers (it was emptied or replaced)";
         prev = undefined;
-      } else {
-        const rows = await conn.query("MATCH (m:Module) RETURN count(m) AS c");
-        if (Number(rows[0]?.c ?? 0) < Object.keys(prev.files).length) {
-          reason = "the graph holds fewer files than the incremental state remembers (it was emptied or replaced)";
-          prev = undefined;
-        }
       }
     } else {
       reason = usable.reason;
@@ -449,6 +472,8 @@ async function indexCodeIncrementally(
       const path = toPosixPath(file.path);
       const old = remembered[path];
       if (!old || old.language !== language) return undefined;
+      // The id is part of every remembered node; a file whose id is now another one is parsed again.
+      if (moduleIdOf(old) !== toPosixPath(file.id ?? file.path)) return undefined;
       // `--changed-from`: git is the authority on what changed; a file it does not list is not even hashed.
       if (trusted && !trusted.has(path)) return old;
       return old.hash === hash() ? old : undefined;
@@ -460,7 +485,7 @@ async function indexCodeIncrementally(
 
   // The state describes the graph as of the last run; from here on the graph is being edited, so it
   // must not survive a crash (see the module doc of code-graph/incremental.ts).
-  if (statePath) dropState(statePath);
+  if (statePath) dropRootState(statePath, root);
   const delta = await applyDelta(conn, Object.values(remembered), extraction.facts, extraction.fragment.nodes);
 
   return {
@@ -541,6 +566,27 @@ export async function cmdIndex(
   const prevManifest = opts.manifestPath ? readManifest(opts.manifestPath) : null;
   const root = resolve(opts.dir);
   const prevRun = prevManifest?.runs[root] ?? null;
+  // Which graph id each file gets (XSPEC-508 R6, code-graph/root-ids.ts): its relative path, as ever,
+  // unless another root of this graph holds that path - then a root-qualified one. Decided against the
+  // manifest as the graph stands, i.e. none on --clean, which empties the graph first.
+  const assignment = assignIds({
+    root,
+    manifest: opts.clean ? null : prevManifest,
+    relPaths: codeFiles.map((f) => toPosixPath(f.path)),
+  });
+  const idFiles: ProjectFile[] = codeFiles.map((f) => {
+    const rel = toPosixPath(f.path);
+    const id = assignment.ids.get(rel)!;
+    return id === rel ? f : { ...f, id };
+  });
+  if (opts.scip && assignment.qualified > 0) {
+    // The SCIP overlay builds its node ids from the plain relative path; for these files that is
+    // ANOTHER root's node. Refuse before anything is written rather than attach edges to it.
+    throw new Error(
+      `--scip cannot be combined with this root: ${assignment.qualified} of its files share a relative path with another root of the graph ` +
+        `and carry root-qualified ids, which the SCIP overlay does not produce. Index this root into a graph of its own to use --scip.`,
+    );
+  }
   // `--clean` drops the WHOLE graph (clearGraph above), then rebuilds only this
   // dir — so the manifest must likewise drop every OTHER root's section, else
   // indexHealth (R2) would keep counting/warning about files from roots that
@@ -558,22 +604,33 @@ export async function cmdIndex(
     const r = await indexCodeIncrementally(conn, {
       dir: opts.dir,
       root,
-      codeFiles,
+      codeFiles: idFiles,
       manifest: prevManifest,
       manifestPath: opts.manifestPath,
       clean: opts.clean === true,
       changedFrom: opts.changedFrom,
+      assignment,
     });
     ({ parseHealth, ...code } = r.extraction);
     incremental = { summary: r.summary, facts: r.extraction.facts, token: r.token };
   } else {
-    ({ parseHealth, ...code } = await indexProject(conn, codeFiles));
+    ({ parseHealth, ...code } = await indexProject(conn, idFiles));
   }
   // Seen-but-not-indexed accounting (XSPEC-414 R1). Derived from the SAME
   // walk `codeFiles` came from, so "code.files" and "unindexedCode.count"
   // describe the same tree, not two walks that could disagree.
   const result: IndexResultSummary = { code, unindexedCode: summarizeUnindexed(codeWalk.unindexed) };
   if (incremental) result.incremental = incremental.summary;
+  if (assignment.qualified > 0 && assignment.rootLabel) {
+    result.rootQualifiedIds = {
+      label: assignment.rootLabel,
+      files: assignment.qualified,
+      examples: [...assignment.ids].filter(([rel, id]) => rel !== id).slice(0, 3).map(([path, id]) => ({ path, id })),
+    };
+  }
+  if (assignment.shared.length > 0) {
+    result.sharedNodes = { count: assignment.shared.length, examples: assignment.shared.slice(0, 3) };
+  }
   // Directory symlinks are neither descended into nor, previously, recorded
   // (XSPEC-373 B3). Surfaced from the code walk, which covers the whole tree;
   // the docs walk below re-walks the same directories and would only repeat it.
@@ -620,7 +677,7 @@ export async function cmdIndex(
   // failing must not undo a successful index (same spirit as R1a's per-file
   // tolerance). The summary/diff are still computed when no manifestPath is
   // given, so programmatic/test callers get the counts without a file.
-  const nextManifest = upsertRun(upsertBase, root, new Date().toISOString(), parseHealth, EGR_VERSION, opts.exclude, incremental?.token);
+  const nextManifest = upsertRun(upsertBase, root, new Date().toISOString(), parseHealth, EGR_VERSION, opts.exclude, incremental?.token, assignment.rootLabel);
   if (opts.manifestPath) {
     try {
       writeManifest(opts.manifestPath, nextManifest);
@@ -988,7 +1045,7 @@ export function cmdBlindspots(manifestPath: string): BlindspotsResult {
   let failed = 0;
   for (const f of unhealthy) (f.failed !== undefined ? failed++ : partial++);
   const blindspots: Blindspot[] = unhealthy
-    .map((f) => ({ path: f.path, language: f.language, errorNodes: f.errorNodes, failed: f.failed !== undefined }))
+    .map((f) => ({ path: f.id ?? f.path, language: f.language, errorNodes: f.errorNodes, failed: f.failed !== undefined }))
     .sort((a, b) => Number(b.failed) - Number(a.failed) || b.errorNodes - a.errorNodes || a.path.localeCompare(b.path));
   return { filesIndexed: files.length, partial, failed, blindspots };
 }

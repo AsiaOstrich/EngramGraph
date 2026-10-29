@@ -32,9 +32,11 @@
  *    parser fingerprint (egr version + grammar versions) is the same, and the
  *    graph still holds a Module per remembered file. Anything else is a full
  *    index, and the summary says which reason.
- *  - The state file is removed before the graph is touched and rewritten after
- *    the manifest, so a run that dies in the middle leaves no state — the next
- *    run then indexes in full instead of diffing against a graph it half-edited.
+ *  - The root's section of the state file is removed before the graph is touched
+ *    and rewritten after the manifest, so a run that dies in the middle leaves no
+ *    state for that root — the next run then indexes it in full instead of diffing
+ *    against a graph it half-edited. Other roots' sections stay: they describe
+ *    nodes this run does not edit.
  *
  * ## Known limits (documented, not hidden)
  *
@@ -42,9 +44,12 @@
  *    `egr index` runs does not know what those left behind (a plain index never
  *    prunes). It is a full index and starts the state from there; start from an
  *    empty graph or add `--clean` for a state that is exact.
- *  - Two roots sharing one graph whose relative file paths collide cannot be
- *    told apart in the graph (the Module id is the relative path). The
- *    incremental path refuses that case and indexes in full.
+ *  - Two roots of one graph that hold the same relative path used to be one
+ *    Module node. They are not any more: the second root's file gets a
+ *    root-qualified id (`root-ids.ts`), recorded in the state as `moduleId`, so
+ *    every node belongs to one file of one root and a delete cannot reach another
+ *    root's. Only a graph an OLDER egr built can still hold such shared nodes;
+ *    `--incremental` then indexes in full and says to rebuild.
  *  - SCIP overlay edges are not part of the tree-sitter facts; `--incremental`
  *    refuses `--scip`.
  */
@@ -56,7 +61,7 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { GraphConnection } from "../graph-db/connection.js";
 import type { GraphEdge, GraphFragment } from "../graph-db/types.js";
 import { writeFragment } from "../graph-db/writer.js";
-import { resolveFacts, type FileFacts } from "./extractor.js";
+import { moduleIdOf, resolveFacts, type FileFacts } from "./extractor.js";
 import { grammarVersions, type ParseManifest } from "./parse-manifest.js";
 
 /** Bump when the shape of {@link FileFacts} or the resolution it feeds changes: an old state is then ignored, not misread. */
@@ -107,9 +112,26 @@ export function writeState(path: string, state: IncrementalState): void {
   }
 }
 
-/** Forget the state (best effort — a missing file is the goal). */
+/** Forget the whole state (best effort — a missing file is the goal). */
 export function dropState(path: string): void {
   rmSync(path, { force: true });
+}
+
+/**
+ * Forget ONE root's remembered facts, and keep every other root's: they describe nodes this run is
+ * not about to edit. (Dropping the whole file made every other root of a shared graph index in full
+ * the next time, which is most of what `--incremental` is for once there are two roots.) The file
+ * goes when no root is left.
+ */
+export function dropRootState(path: string, root: string): void {
+  const state = readState(path);
+  if (!state || !(root in state.roots)) return;
+  const { [root]: _gone, ...rest } = state.roots;
+  if (Object.keys(rest).length === 0) {
+    dropState(path);
+    return;
+  }
+  writeState(path, { ...state, roots: rest });
 }
 
 /** A fresh token for a state/manifest pair. */
@@ -160,22 +182,6 @@ export function usableState(args: {
     return { ok: false, reason: "egr or a tree-sitter grammar changed since the last index (parser fingerprint differs), so every file is parsed again" };
   }
   return { ok: true, prev };
-}
-
-/**
- * Relative paths that another root of the same graph also holds. The Module id
- * is the relative path, so such a file is one node for two roots and deleting
- * "this root's copy" would delete the other root's.
- */
-export function collidingPaths(manifest: ParseManifest | null, root: string, paths: Iterable<string>): string[] {
-  if (!manifest) return [];
-  const mine = new Set(paths);
-  const hits = new Set<string>();
-  for (const [other, section] of Object.entries(manifest.runs)) {
-    if (other === root) continue;
-    for (const f of section.files ?? []) if (mine.has(f.path)) hits.add(f.path);
-  }
-  return [...hits].sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -262,15 +268,16 @@ export function deriveGraph(facts: readonly FileFacts[]): DerivedGraph {
   const g: DerivedGraph = { functions: new Set(), classes: new Set(), modules: new Set(), specs: new Set(), edges: new Map() };
   const add = (e: GraphEdge): void => void g.edges.set(edgeKey(e), e);
   for (const f of facts) {
-    g.modules.add(f.path);
+    const moduleId = moduleIdOf(f);
+    g.modules.add(moduleId);
     for (const id of f.fnIds) {
       g.functions.add(id);
-      add({ label: "DEFINES", fromLabel: "Module", from: f.path, toLabel: "Function", to: id });
+      add({ label: "DEFINES", fromLabel: "Module", from: moduleId, toLabel: "Function", to: id });
     }
     for (const id of f.classIds) g.classes.add(id);
     for (const id of f.specIds) {
       g.specs.add(id);
-      add({ label: "IMPLEMENTS", fromLabel: "Module", from: f.path, toLabel: "Spec", to: id });
+      add({ label: "IMPLEMENTS", fromLabel: "Module", from: moduleId, toLabel: "Spec", to: id });
     }
   }
   const { calls, imports } = resolveFacts(facts);

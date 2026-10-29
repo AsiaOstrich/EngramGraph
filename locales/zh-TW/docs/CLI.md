@@ -69,10 +69,20 @@ egr <command> [args] [options]
   在 egr 自己的 repo（210 個檔）上，全量重建約 26 秒，改 3 個檔後的增量索引約 0.4 秒。
   **下列情況會改為全量索引，並印出原因**：第一次 `--incremental`；egr 或 tree-sitter grammar 版本與寫入狀態時不同
   （所以升級 grammar 會全部重新解析）；之後有人不加 `--incremental` 又索引過這張圖（狀態以 token 綁在 manifest 上）；
-  圖裡的檔案比狀態記得的少；或同一張圖的另一個 root 也有相同相對路徑的檔案（Module id 就是相對路徑，節點是共用的）。
+  圖裡的檔案比狀態記得的少；或這張圖是舊版 egr 用「相對路徑相同的多個 root」建的（見下方「同一張圖的多個 root」）。
   不加 `--incremental` 的 `egr index` 行為與以前完全相同。不能與 `--scip` 併用（會拒絕）；`--docs` 仍會索引全部文件。
   若圖是早先用一般 `egr index` 建的，可能留有一般索引從不清除、狀態也不知道的殘留：請從空圖開始，
   或加一次 `--clean`（`egr index <dir> --incremental --clean` 會重建並建立狀態）。
+- **同一張圖的多個 root**（`egr index a/src` 再 `egr index b/src`，寫進同一個資料庫；dev-platform 索引七個）：
+  檔案的 id 是它相對於 root 的路徑（`src/index.ts`）。若**同一張圖的另一個 root 已經有這個 id**，
+  這個檔案改以 `<root 最後兩段>/<路徑>` 為 id（`b/src/index.ts`；摘要會印 `ids: …`，`--json` 有 `rootQualifiedIds`），
+  所以兩個 root 各有 `index.ts` 時是兩個 Module 節點，各自有自己的函式與呼叫邊，不再是一個。
+  只有一個 root、或各 root 的相對路徑從不相同的圖，所有 id 與以前完全相同——不需要重建。
+  檔案留在索引裡時 id 就不變（記錄在 parse-health manifest），所以**先**索引的 root 保有一般路徑，
+  換個順序重建同一張圖可能得到不同的 id。`egr callers` 等查詢把 id 當路徑印出，所以加了前綴的檔案會顯示它的 root。
+  有加前綴檔案的 root 不能用 `--scip`（會拒絕；覆蓋層產生的是一般路徑的 id）。
+  舊版 egr 用相對路徑相同的 root 建出的圖，那個路徑只有**一個混在一起的節點**：egr 會印 `WARNING`，
+  `--incremental` 會改為全量索引——請用 `--clean`（或 `index-all.sh --clean`）重建一次，它們就會分開。
 - `--changed-from <git-ref>`（與 `--incremental` 併用）：改用 `git diff <ref>` 列出的檔案（工作樹與 ref 不同的追蹤檔）
   加上未追蹤且未被忽略的檔案作為「有變」清單，而不是對每個檔案算雜湊。它等於宣告「這張圖描述的是 `<ref>`」；
   git 列出的檔案會用雜湊比對，沒列出的視為沒變。ref 與實際索引的內容不符，圖就會是錯的——不加此旗標則每個檔案都算雜湊，

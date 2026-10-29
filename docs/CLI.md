@@ -106,13 +106,30 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
   that wrote the state (so a grammar upgrade re-parses everything); the graph was
   indexed again without `--incremental` since (the state is tied to the
   manifest by a token); the graph holds fewer files than the state remembers; or
-  another root of the same graph holds a file with the same relative path (the
-  Module id is the relative path, so the node is shared). Plain `egr index`
+  the graph was built by an older egr from roots that share a relative path (see
+  "Several roots in one graph" below). Plain `egr index`
   without `--incremental` behaves exactly as before. Not supported with `--scip`
   (refused); `--docs` still indexes every document. A graph built earlier by plain
   `egr index` runs may hold leftovers a plain index never prunes and the state
   cannot know about: start from an empty graph, or add `--clean` once
   (`egr index <dir> --incremental --clean` rebuilds and starts the state).
+- **Several roots in one graph** (`egr index a/src`, then `egr index b/src`, into
+  one database — dev-platform indexes seven). A file's id is its path relative to
+  its root (`src/index.ts`). If **another root of the same graph already holds
+  that id**, the file is indexed as `<last two segments of its root>/<path>`
+  instead (`b/src/index.ts`; the summary prints `ids: …` and `--json` has
+  `rootQualifiedIds`), so two roots that both have `index.ts` are two Module
+  nodes, each with its own functions and call edges, not one. A graph with one
+  root, or roots that never share a path, keeps every id exactly as before —
+  nothing to rebuild. An id is kept for as long as its file stays in the index
+  (it is recorded in the parse-health manifest), so the root indexed **first**
+  keeps the plain path, and rebuilding a graph in another order can give other
+  ids. `egr callers` and the other queries print the id as the path, so a
+  qualified file shows its root. `--scip` is refused for a root that has
+  qualified files (the overlay builds plain-path ids). A graph that an older egr
+  built from roots sharing a path holds ONE mixed node for it; egr prints a
+  `WARNING` and `--incremental` indexes in full — rebuild once with `--clean`
+  (or `index-all.sh --clean`) to separate them.
 - `--changed-from <git-ref>` (with `--incremental`): take the list of changed
   files from `git diff <ref>` (tracked files that differ in the working tree)
   plus untracked, non-ignored files, instead of hashing every file. It states

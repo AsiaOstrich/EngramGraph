@@ -35,6 +35,15 @@ export interface ExtractOptions {
    */
   filePath: string;
   /**
+   * The path the graph ids are built from, when it must differ from `filePath`
+   * (XSPEC-508 R6, root-qualified ids): two index roots of one graph that both
+   * hold `src/index.ts` would otherwise be one Module node. Language detection
+   * still reads `filePath`; the Module id, every Function/Class id and the
+   * Module's `path` property use this. Omitted -> `filePath` (the unchanged
+   * behaviour of every single-root graph).
+   */
+  idPath?: string;
+  /**
    * Override language detection. When omitted it is inferred from the
    * `filePath` extension (.ts/.mts/.cts → typescript, .tsx → tsx,
    * .js/.jsx/.mjs/.cjs → javascript, .cs → csharp, .py → python, .go → go,
@@ -58,8 +67,15 @@ export interface IndexResult {
 
 /** One source file in a repository-level index. */
 export interface ProjectFile {
-  /** Repo-relative path; used as Module id + Function/Class id prefix. */
+  /** Repo-relative path; used as Module id + Function/Class id prefix (unless `id` is given). */
   path: string;
+  /**
+   * The id path of this file in the graph, when it is not `path` (XSPEC-508 R6): a file whose
+   * relative path another root of the same graph already holds is given a root-qualified one by
+   * `code-graph/root-ids.ts`. Module id, Function/Class id prefix and the Module `path` property
+   * use it; `path` stays what the file system and relative `#include` resolution see.
+   */
+  id?: string;
   source: string;
   /** Override language detection (inferred from `path` extension when omitted). */
   language?: SupportedLanguage;
