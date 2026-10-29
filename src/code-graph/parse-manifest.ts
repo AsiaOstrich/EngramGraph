@@ -148,7 +148,28 @@ export interface ManifestRun {
    * `--exclude`, and for sections written by an older egr.
    */
   exclude?: string[];
+  /**
+   * Set only by an `egr index --incremental` run (XSPEC-508 R6): the token it also wrote into the
+   * incremental state file beside the graph. The state file may be trusted for this root only while
+   * its token equals this one. Any other write of this section — a plain `egr index`, `--clean` —
+   * leaves it out, which is how the state learns it no longer describes the graph.
+   */
+  incrementalToken?: string;
+  /**
+   * The qualifier this root's files carry in their graph ids when a relative path collides with
+   * another root's (XSPEC-508 R6; see `root-ids.ts`). Written once the root has been given one and
+   * kept for as long as the section lives, so an id never changes under an existing graph.
+   */
+  rootLabel?: string;
 }
+
+/**
+ * The manifest key under which the MCP server's `index_code` tool records its health (it has no
+ * index root: callers hand it paths and sources). It is a record, not a root of the graph: its
+ * paths are whatever the caller chose, and re-indexing a file through it is meant to update the very
+ * node an `egr index` run wrote (`root-ids.ts` therefore leaves it out when it looks for id clashes).
+ */
+export const MCP_INDEX_ROOT = "mcp:index_code";
 
 /** The persisted manifest shape. */
 export interface ParseManifest {
@@ -177,9 +198,17 @@ export function upsertRun(
   files: FileParseHealth[],
   egrVersion: string,
   exclude?: readonly string[],
+  incrementalToken?: string,
+  rootLabel?: string,
 ): ParseManifest {
   const runs = { ...(prev?.runs ?? {}) };
-  runs[root] = { indexedAt, files, ...(exclude && exclude.length > 0 ? { exclude: [...exclude] } : {}) };
+  runs[root] = {
+    indexedAt,
+    files,
+    ...(exclude && exclude.length > 0 ? { exclude: [...exclude] } : {}),
+    ...(incrementalToken ? { incrementalToken } : {}),
+    ...(rootLabel ? { rootLabel } : {}),
+  };
   return { egrVersion, grammarVersions: grammarVersions(), runs };
 }
 

@@ -63,14 +63,12 @@ import {
 } from "../code-graph/index.js";
 import { cmdBlindspots, cmdSignatures, cmdDoctor } from "../cli/run.js";
 import { existsSync } from "node:fs";
-import { readManifest, upsertRun, writeManifest } from "../code-graph/parse-manifest.js";
+import { MCP_INDEX_ROOT, readManifest, upsertRun, writeManifest } from "../code-graph/parse-manifest.js";
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType, CONFIDENCE_LABELS } from "../sage/index.js";
 import { related } from "../structural-memory/index.js";
 import { checkRefs } from "../cli/refs-check.js";
 
-/** Sentinel manifest root for MCP-side `index_code` (R2). See its use below. */
-const MCP_INDEX_ROOT = "mcp:index_code";
 const EGR_VERSION = (pkg as { version: string }).version;
 
 const ok = (data: unknown) => ({

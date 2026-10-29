@@ -40,8 +40,14 @@ import type { SupportedLanguage } from "./types.js";
  * codes — see this module's doc comment for why.
  */
 export interface FileParseHealth {
-  /** Repo-relative, `/`-normalized path (same id basis as the Module node). */
+  /** Repo-relative, `/`-normalized path of the file under its index root. */
   path: string;
+  /**
+   * The Module id of this file in the graph, written only when it is NOT `path` (XSPEC-508 R6:
+   * another root of the graph already held that relative path, so this file got a root-qualified
+   * id). Absent means id == path — which is also every section an older egr wrote.
+   */
+  id?: string;
   language: SupportedLanguage;
   /**
    * Count of top-most `ERROR` + `MISSING` nodes. Nested errors are counted

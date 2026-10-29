@@ -34,6 +34,7 @@
 // so "Dart's grammar isn't built for this platform" surfaced as "`egr` cannot
 // index anything". `grammar-registry.ts` loads each grammar on first use and
 // records the failure instead of propagating it; see its header.
+import { createHash } from "node:crypto";
 import { extname, posix } from "node:path";
 
 import { extractImplementsSpecs } from "../knowledge-graph/linker.js";
@@ -381,6 +382,10 @@ export interface Extraction {
  */
 export function collectExtraction(source: string, opts: ExtractOptions): Extraction {
   const filePath = toPosixPath(opts.filePath);
+  // Where the graph ids come from. Equal to `filePath` unless the caller (an index root whose
+  // relative path another root already holds) gave a root-qualified one; language detection
+  // above and below always reads the real `filePath`.
+  const idPath = opts.idPath !== undefined ? toPosixPath(opts.idPath) : filePath;
   const language = opts.language ?? detectLanguage(filePath);
   // XSPEC-414 R1: `detectLanguage` no longer defaults an unrecognized
   // extension to javascript, so this single-file API — which has no batch to
@@ -407,10 +412,10 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   // Parse-failure signatures (R3a) — bucket keys for `egr signatures`.
   const signatures = hasError ? errorSignatures(tree.rootNode, language) : [];
 
-  const moduleId = filePath;
+  const moduleId = idPath;
 
   const nodes: GraphNode[] = [
-    { label: "Module", id: moduleId, properties: { path: filePath } },
+    { label: "Module", id: moduleId, properties: { path: idPath } },
   ];
   const defines: GraphEdge[] = [];
   const names = new Map<string, string>();
@@ -422,7 +427,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     tagsQuerySourceFor(language),
     tree.rootNode,
   );
-  const rawImports: RawImport[] = imports.map((imp) => ({ file: filePath, target: imp.target }));
+  const rawImports: RawImport[] = imports.map((imp) => ({ file: idPath, target: imp.target }));
   // Scope-qualification (not line numbers) keeps function ids unique — two
   // same-named functions in *different* scopes of one file no longer
   // collide — while staying stable across edits that shift line numbers
@@ -462,13 +467,13 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   // non-tree-sitter provider (e.g. SCIP) will have its own native id scheme
   // that won't line up with this one; merging the two into one node per
   // real-world symbol will need an id-normalization layer at that point.
-  const { functions, classes } = qualifyFunctions(filePath, definitions);
+  const { functions, classes } = qualifyFunctions(idPath, definitions);
 
   for (const cls of classes) {
     nodes.push({
       label: "Class",
-      id: `${filePath}#class:${cls.name}`,
-      properties: { name: cls.name, file: filePath, provider: PROVIDER },
+      id: `${idPath}#class:${cls.name}`,
+      properties: { name: cls.name, file: idPath, provider: PROVIDER },
     });
   }
 
@@ -478,7 +483,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
       id: fn.id,
       properties: {
         name: fn.name,
-        file: filePath,
+        file: idPath,
         start_line: fn.startLine,
         confidence: 1,
         provider: PROVIDER,
@@ -504,7 +509,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     // inside a class body but outside any method, was silently dropped.
     // Finding no enclosing function reproduces that gate exactly.
     const enclosing = findEnclosingFunction(functions, call.node);
-    if (enclosing) rawCalls.push({ from: enclosing.id, callee: call.name, file: filePath });
+    if (enclosing) rawCalls.push({ from: enclosing.id, callee: call.name, file: idPath });
   }
 
   // `// implements XSPEC-NNN` / `/* implements SPEC-NNN */` — a file-level
@@ -544,17 +549,17 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
  * the LOWER-confidence tier wins, so an aggregated edge never overstates its
  * own reliability based on only its best call site.
  */
-function buildCallEdges(resolved: Array<{ from: string; to: string; tier: CallResolutionTier }>): GraphEdge[] {
+function buildCallEdges(resolved: Array<{ from: string; to: string; tier: CallResolutionTier; count?: number }>): GraphEdge[] {
   const counts = new Map<string, { from: string; to: string; count: number; tier: CallResolutionTier }>();
-  for (const { from, to, tier } of resolved) {
+  for (const { from, to, tier, count: weight = 1 } of resolved) {
     if (!to || to === from) continue;
     const key = `${from} ${to}`;
     const existing = counts.get(key);
     if (existing) {
-      existing.count += 1;
+      existing.count += weight;
       if (CALLS_CONFIDENCE[tier] < CALLS_CONFIDENCE[existing.tier]) existing.tier = tier;
     } else {
-      counts.set(key, { from, to, count: 1, tier });
+      counts.set(key, { from, to, count: weight, tier });
     }
   }
   return [...counts.values()].map(({ from, to, count, tier }) => ({
@@ -638,7 +643,227 @@ export interface ProjectExtraction {
  * `files.map(collectExtraction)` let one throw propagate out of the batch).
  */
 export function extractProject(files: ProjectFile[]): ProjectExtraction {
+  const { facts: _facts, freshPaths: _fresh, parsed: _parsed, reused: _reused, ...extraction } = extractProjectDetailed(files);
+  return extraction;
+}
+
+/**
+ * What the cross-file resolution needs to know about one parsed file — and
+ * nothing else (XSPEC-508 R6).
+ *
+ * Resolving CALLS/IMPORTS across files only reads each file's own function
+ * names, its unresolved call records and its unresolved import targets. Those
+ * are small and serializable, so an incremental `egr index` can keep them for
+ * the files it does not re-parse and still run the SAME resolution over the
+ * whole project. That is what makes "a file nobody touched, whose call now
+ * resolves differently because another file changed" come out right: the
+ * resolution is redone for everyone, only the parsing is skipped.
+ */
+export interface FileFacts {
+  /**
+   * POSIX path relative to the index root. Relative `#include`/`source` targets resolve against
+   * it, and the incremental state is keyed by it.
+   */
+  path: string;
+  /**
+   * The Module id (and the id prefix of every node below) when it is not `path` — a file whose
+   * relative path another root of the same graph holds carries a root-qualified id (XSPEC-508 R6,
+   * `root-ids.ts`). Absent means `path`; read it through {@link moduleIdOf}.
+   */
+  moduleId?: string;
+  language: SupportedLanguage;
+  /** sha256 of the source text, when the caller asked for hashes. */
+  hash?: string;
+  /** Function node ids. Duplicates are kept: they are counted (C# overloads share an id). */
+  fnIds: string[];
+  classIds: string[];
+  /** Spec ids this file declares with `// implements`. */
+  specIds: string[];
+  /** Bare function name → id (last definition wins), as {@link Extraction.names}. */
+  names: Array<[string, string]>;
+  /** Unresolved calls aggregated per (caller id, callee name): `[from, callee, how many call sites]`. */
+  calls: Array<[string, string, number]>;
+  /** Cleaned `#include`/`source` targets, unresolved. */
+  imports: string[];
+  /** The parse-health record this file contributes to the manifest. */
+  health: FileParseHealth;
+}
+
+/** The Module id a file's facts describe: its `moduleId`, else its relative `path`. */
+export function moduleIdOf(f: Pick<FileFacts, "path" | "moduleId">): string {
+  return f.moduleId ?? f.path;
+}
+
+/** Reduce a per-file {@link Extraction} to the {@link FileFacts} resolution needs. */
+export function factsOf(ex: Extraction, language: SupportedLanguage, health: FileParseHealth, path: string, hash?: string, moduleId?: string): FileFacts {
+  const callCounts = new Map<string, [string, string, number]>();
+  for (const c of ex.rawCalls) {
+    const key = `${c.from}\u0000${c.callee}`;
+    const hit = callCounts.get(key);
+    if (hit) hit[2] += 1;
+    else callCounts.set(key, [c.from, c.callee, 1]);
+  }
+  return {
+    path,
+    ...(moduleId !== undefined && moduleId !== path ? { moduleId } : {}),
+    language,
+    ...(hash !== undefined ? { hash } : {}),
+    fnIds: ex.nodes.filter((n) => n.label === "Function").map((n) => n.id),
+    classIds: ex.nodes.filter((n) => n.label === "Class").map((n) => n.id),
+    specIds: ex.implementsEdges.map((e) => e.to),
+    names: [...ex.names.entries()],
+    calls: [...callCounts.values()],
+    imports: ex.rawImports.map((i) => i.target),
+    health,
+  };
+}
+
+/** The cross-file edges {@link resolveFacts} derives. */
+export interface ResolvedEdges {
+  calls: GraphEdge[];
+  imports: GraphEdge[];
+  /** Call sites (not edges) skipped because the callee name matched >1 function. */
+  ambiguous: number;
+  /** Call sites skipped because the callee name matched no function. */
+  unresolved: number;
+}
+
+/**
+ * Resolve CALLS and IMPORTS across files from {@link FileFacts} alone — the
+ * second half of {@link extractProject}, unchanged in policy:
+ *
+ *  - a call resolves to a same-file definition first (lexical shadowing),
+ *  - else to the one definition of that name in the whole batch,
+ *  - else it is dropped (ambiguous / unresolved: precision over recall).
+ *
+ * Pure: the same facts always give the same edges, in the same order. The
+ * incremental index relies on that — it resolves the facts of the PREVIOUS run
+ * and of THIS run and writes only the difference.
+ */
+export function resolveFacts(facts: readonly FileFacts[]): ResolvedEdges {
+  const localByFile = new Map<string, Map<string, string>>();
+  const globalIndex = new Map<string, Set<string>>();
+  for (const f of facts) {
+    // Key by the POSIX-normalized path: the call records below carry the same
+    // normalized path (XSPEC-333), so a raw Windows `src\a.ts` key would never
+    // match and every same-file resolution would be demoted or dropped.
+    const names = new Map(f.names);
+    localByFile.set(f.path, names);
+    for (const [name, id] of names) {
+      let ids = globalIndex.get(name);
+      if (!ids) {
+        ids = new Set();
+        globalIndex.set(name, ids);
+      }
+      ids.add(id);
+    }
+  }
+
+  const resolved: Array<{ from: string; to: string; tier: CallResolutionTier; count: number }> = [];
+  let ambiguous = 0;
+  let unresolved = 0;
+  for (const f of facts) {
+    for (const [from, callee, count] of f.calls) {
+      const local = localByFile.get(f.path)?.get(callee);
+      if (local) {
+        // Lexical shadowing: this caller's own file defines the name (XSPEC-333 R3 OQ-4: same-file tier).
+        resolved.push({ from, to: local, tier: "same-file", count });
+        continue;
+      }
+      const ids = globalIndex.get(callee);
+      if (!ids || ids.size === 0) {
+        unresolved += count;
+      } else if (ids.size === 1) {
+        // No local match, so this unique project-wide name is defined in some OTHER file: the weaker
+        // cross-file tier (see CALLS_CONFIDENCE's module doc).
+        resolved.push({ from, to: [...ids][0]!, tier: "cross-file-unique", count });
+      } else {
+        ambiguous += count;
+      }
+    }
+  }
+  const calls = buildCallEdges(resolved);
+
+  // -- module relationships: #include / source / . (XSPEC-414 R2/R4) --------
+  // Same-directory-relative match first, else a globally-unique basename match, else dropped.
+  // Resolution reads RELATIVE paths (an `#include "x.h"` is relative to the including file's
+  // directory); the edges it writes name Module IDS, which differ for a root-qualified file.
+  const idOfPath = new Map(facts.map((f) => [f.path, moduleIdOf(f)] as const));
+  const pathSet = new Set(facts.map((f) => f.path));
+  const basenameIndex = new Map<string, Set<string>>();
+  for (const path of pathSet) {
+    const base = posix.basename(path);
+    let ids = basenameIndex.get(base);
+    if (!ids) {
+      ids = new Set();
+      basenameIndex.set(base, ids);
+    }
+    ids.add(path);
+  }
+  const importEdgeKeys = new Set<string>();
+  const imports: GraphEdge[] = [];
+  for (const f of facts) {
+    for (const target of f.imports) {
+      if (!target) continue;
+      const file = f.path;
+      const candidate = posix.normalize(posix.join(posix.dirname(file), target));
+      let resolvedPath: string | null = pathSet.has(candidate) ? candidate : null;
+      if (!resolvedPath) {
+        const matches = basenameIndex.get(posix.basename(target));
+        if (matches && matches.size === 1) resolvedPath = [...matches][0]!;
+      }
+      if (!resolvedPath || resolvedPath === file) continue;
+      const key = `${file} ${resolvedPath}`;
+      if (importEdgeKeys.has(key)) continue;
+      importEdgeKeys.add(key);
+      imports.push({ label: "IMPORTS", fromLabel: "Module", from: idOfPath.get(file)!, toLabel: "Module", to: idOfPath.get(resolvedPath)! });
+    }
+  }
+  return { calls, imports, ambiguous, unresolved };
+}
+
+/** What {@link extractProjectDetailed} returns beyond a {@link ProjectExtraction}. */
+export interface DetailedProjectExtraction extends ProjectExtraction {
+  /** One entry per successfully parsed (or reused) file, in input order. */
+  facts: FileFacts[];
+  /** Paths whose source was parsed in THIS call (not taken from `reuse`). */
+  freshPaths: Set<string>;
+  /** How many files this call parsed. */
+  parsed: number;
+  /** How many files this call took from `reuse` instead of parsing. */
+  reused: number;
+}
+
+/** Options for {@link extractProjectDetailed}. */
+export interface DetailedExtractOptions {
+  /** Hash every file's source into `FileFacts.hash`. Implied by `reuse`, which hashes the files it asks about. */
+  hash?: boolean;
+  /**
+   * Return the facts of a file that does not need parsing again, or `undefined`
+   * to parse it. Called after the file's language is decided (so an `.h` file
+   * whose C/C++ reading flipped is a miss), and only for files with a usable
+   * grammar. With `reuse` given, `fragment.nodes`/`DEFINES`/`IMPLEMENTS` hold
+   * only the files parsed in this call; `CALLS`/`IMPORTS` are always resolved
+   * over every file.
+   */
+  reuse?: (file: ProjectFile, language: SupportedLanguage, hash: () => string) => FileFacts | undefined;
+}
+
+/** sha256 of a source text (hex). */
+export function hashSource(source: string): string {
+  return createHash("sha256").update(source).digest("hex");
+}
+
+/** The id path a file's nodes get: its root-qualified `id` when it has one, else its relative path. */
+const idOf = (f: ProjectFile): string => toPosixPath(f.id ?? f.path);
+
+/** {@link extractProject} plus what an incremental index needs: the per-file facts and which files were really parsed. */
+export function extractProjectDetailed(files: ProjectFile[], opts: DetailedExtractOptions = {}): DetailedProjectExtraction {
   const parseHealth: FileParseHealth[] = [];
+  const wantHash = opts.hash === true || opts.reuse !== undefined;
+  const facts: FileFacts[] = [];
+  const freshPaths = new Set<string>();
+  let reused = 0;
   // `extractions` and `okFiles` are kept parallel (same length/order): files
   // that threw are recorded in parseHealth and excluded from BOTH, so the
   // cross-file resolution below only ever sees successfully-parsed files.
@@ -726,17 +951,33 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
       }
       continue;
     }
+    // Hashed lazily: a caller that trusts something other than the content (a git
+    // diff) never pays for a file it does not look at, and a file that is both
+    // looked at and then parsed is still hashed once.
+    let hashed: string | undefined;
+    const getHash = (): string => (hashed ??= hashSource(f.source));
+    if (opts.reuse) {
+      const hit = opts.reuse(f, language, getHash);
+      if (hit) {
+        facts.push(hit);
+        okFiles.push(f);
+        parseHealth.push(hit.health);
+        reused += 1;
+        continue;
+      }
+    }
     try {
       // Pass the already-resolved `language` explicitly (not `f.language`,
       // which is `undefined` for most files) — `collectExtraction` would
       // otherwise re-derive it via a bare `detectLanguage(f.path)` call with
       // no batch context, silently discarding the `.h` → C override computed
       // above for exactly the files that override was meant to change.
-      const ex = collectExtraction(f.source, { filePath: f.path, language });
+      const ex = collectExtraction(f.source, { filePath: f.path, language, ...(f.id !== undefined ? { idPath: f.id } : {}) });
       extractions.push(ex);
       okFiles.push(f);
-      parseHealth.push({
+      const health: FileParseHealth = {
         path: toPosixPath(f.path),
+        ...(idOf(f) !== toPosixPath(f.path) ? { id: idOf(f) } : {}),
         language,
         errorNodes: ex.errorNodes,
         errorExtent: ex.errorExtent,
@@ -746,7 +987,10 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
         // Signatures only on a partial parse (R3a) — omitted on clean files to
         // keep the manifest lean.
         ...(ex.signatures.length > 0 ? { signatures: ex.signatures } : {}),
-      });
+      };
+      parseHealth.push(health);
+      facts.push(factsOf(ex, language, health, toPosixPath(f.path), wantHash ? getHash() : undefined, idOf(f)));
+      freshPaths.add(toPosixPath(f.path));
     } catch (err) {
       // `failed` is best-effort truncated (not source text by design, but
       // `err.message` comes from arbitrary downstream code — truncating caps a
@@ -757,6 +1001,7 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
       const message = err instanceof Error ? err.message : String(err);
       parseHealth.push({
         path: toPosixPath(f.path),
+        ...(idOf(f) !== toPosixPath(f.path) ? { id: idOf(f) } : {}),
         language,
         errorNodes: 0,
         errorExtent: 0,
@@ -771,109 +1016,19 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
   const nodes: GraphNode[] = [];
   const defines: GraphEdge[] = [];
   const implementsEdges: GraphEdge[] = [];
-  const localByFile = new Map<string, Map<string, string>>();
-  const globalIndex = new Map<string, Set<string>>();
-
-  for (let i = 0; i < extractions.length; i++) {
-    const ex = extractions[i]!;
-    const file = okFiles[i]!.path;
+  for (const ex of extractions) {
     nodes.push(...ex.nodes);
     defines.push(...ex.defines);
     implementsEdges.push(...ex.implementsEdges);
-    // Key by the POSIX-normalized path: `RawCall.file` below is built from
-    // `collectExtraction`'s already-normalized `filePath` (XSPEC-333 path
-    // normalization), so a raw `okFiles[i].path` key (`src\a.ts` on Windows)
-    // would never match the `src/a.ts` lookup — silently demoting every
-    // same-file resolution to cross-file (wrong tier) or dropping it as
-    // ambiguous. Pre-existing gap, fixed here while this loop is being touched.
-    localByFile.set(toPosixPath(file), ex.names);
-    for (const [name, id] of ex.names) {
-      let ids = globalIndex.get(name);
-      if (!ids) {
-        ids = new Set();
-        globalIndex.set(name, ids);
-      }
-      ids.add(id);
-    }
   }
 
-  const resolved: Array<{ from: string; to: string; tier: CallResolutionTier }> = [];
-  let ambiguous = 0;
-  let unresolved = 0;
+  // Cross-file CALLS / IMPORTS: one resolution over every file's facts, the
+  // freshly parsed and (with `reuse`) the reused alike.
+  const { calls, imports: importEdges, ambiguous, unresolved } = resolveFacts(facts);
 
-  for (const ex of extractions) {
-    for (const call of ex.rawCalls) {
-      const local = localByFile.get(call.file)?.get(call.callee);
-      if (local) {
-        // Lexical shadowing: this caller's own file defines the name — if
-        // the global branch below were reached instead, this file would
-        // have had to be missing from its own local map, which it isn't.
-        // So this branch is genuinely same-file (XSPEC-333 R3 OQ-4).
-        resolved.push({ from: call.from, to: local, tier: "same-file" });
-        continue;
-      }
-      const ids = globalIndex.get(call.callee);
-      if (!ids || ids.size === 0) {
-        unresolved += 1;
-      } else if (ids.size === 1) {
-        // No local match (checked above), so this unique project-wide name
-        // is necessarily defined in some OTHER file — genuinely cross-file,
-        // and the weaker of the two tiers (XSPEC-333 R3 OQ-4): see
-        // CALLS_CONFIDENCE's module doc for why this carries materially
-        // less evidence of a real calling relationship than a same-file
-        // match.
-        resolved.push({ from: call.from, to: [...ids][0]!, tier: "cross-file-unique" });
-      } else {
-        ambiguous += 1;
-      }
-    }
-  }
-
-  const calls = buildCallEdges(resolved);
-
-  // -- module relationships: #include / source / . (XSPEC-414 R2/R4) --------
-  //
-  // Resolved the same way CALLS is: same-directory-relative match first
-  // (the overwhelmingly common real-world case — `#include "foo.h"` sitting
-  // next to `foo.h`, `source lib.sh` sitting next to `lib.sh`), else a
-  // globally-unique basename match across the whole batch, else dropped
-  // (precision over recall — same policy as CALLS' ambiguous/unresolved
-  // handling, just without a separate pair of counters for it; see
-  // `imports`' doc comment on {@link ProjectExtraction}).
-  const pathSet = new Set(okFiles.map((f) => toPosixPath(f.path)));
-  const basenameIndex = new Map<string, Set<string>>();
-  for (const path of pathSet) {
-    const base = posix.basename(path);
-    let ids = basenameIndex.get(base);
-    if (!ids) {
-      ids = new Set();
-      basenameIndex.set(base, ids);
-    }
-    ids.add(path);
-  }
-  const importEdgeKeys = new Set<string>();
-  const importEdges: GraphEdge[] = [];
-  for (const ex of extractions) {
-    for (const imp of ex.rawImports) {
-      if (!imp.target) continue;
-      const file = toPosixPath(imp.file);
-      // posix.normalize collapses a "../" segment and leaves an
-      // already-clean relative path untouched; posix.join anchors it at the
-      // importing file's own directory, matching how a compiler/shell
-      // resolves a relative #include/source path in practice.
-      const candidate = posix.normalize(posix.join(posix.dirname(file), imp.target));
-      let resolvedPath: string | null = pathSet.has(candidate) ? candidate : null;
-      if (!resolvedPath) {
-        const matches = basenameIndex.get(posix.basename(imp.target));
-        if (matches && matches.size === 1) resolvedPath = [...matches][0]!;
-      }
-      if (!resolvedPath || resolvedPath === file) continue;
-      const key = `${file} ${resolvedPath}`;
-      if (importEdgeKeys.has(key)) continue;
-      importEdgeKeys.add(key);
-      importEdges.push({ label: "IMPORTS", fromLabel: "Module", from: file, toLabel: "Module", to: resolvedPath });
-    }
-  }
+  const fnCount = facts.reduce((n, f) => n + f.fnIds.length, 0);
+  const classCount = facts.reduce((n, f) => n + f.classIds.length, 0);
+  const implementsCount = facts.reduce((n, f) => n + f.specIds.length, 0);
 
   return {
     fragment: { nodes, edges: [...defines, ...calls, ...implementsEdges, ...importEdges] },
@@ -884,15 +1039,19 @@ export function extractProject(files: ProjectFile[]): ProjectExtraction {
     // for indexing files that were never opened. `skippedLanguages` carries
     // the difference.
     files: parseHealth.length,
-    functions: nodes.filter((n) => n.label === "Function").length,
-    classes: nodes.filter((n) => n.label === "Class").length,
+    functions: fnCount,
+    classes: classCount,
     calls: calls.length,
-    implements: implementsEdges.length,
+    implements: implementsCount,
     imports: importEdges.length,
     ambiguous,
     unresolved,
     parseHealth,
     skippedLanguages: [...skipped.values()],
     skippedUnrecognized: [...unrecognized.entries()].map(([ext, files]) => ({ ext, files })),
+    facts,
+    freshPaths,
+    parsed: freshPaths.size,
+    reused,
   };
 }
