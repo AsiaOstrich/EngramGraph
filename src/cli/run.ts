@@ -123,6 +123,12 @@ export interface IndexResultSummary {
    * are reported rather than followed.
    */
   skippedSymlinkDirs?: string[];
+  /**
+   * Linked git worktrees under `<dir>` that were not walked, and how many files lay in them.
+   * Absent when there were none. A worktree is a second copy of a repository already being
+   * indexed; walking it doubled every function name (see `walk.ts`'s `isLinkedWorktree`).
+   */
+  skippedWorktrees?: { paths: string[]; files: number };
   /** Files matched by extension but unreadable (XSPEC-373 B7). Absent when none. */
   unreadableFiles?: Array<{ path: string; reason: string }>;
   /**
@@ -635,6 +641,9 @@ export async function cmdIndex(
   // (XSPEC-373 B3). Surfaced from the code walk, which covers the whole tree;
   // the docs walk below re-walks the same directories and would only repeat it.
   if (codeWalk.skippedSymlinkDirs.length > 0) result.skippedSymlinkDirs = codeWalk.skippedSymlinkDirs;
+  // Linked git worktrees are not walked either; the docs walk skips the same directories, so the
+  // code walk's account is the whole one.
+  if (codeWalk.skippedWorktrees.paths.length > 0) result.skippedWorktrees = codeWalk.skippedWorktrees;
   if (codeWalk.unreadable.length > 0) result.unreadableFiles = codeWalk.unreadable;
   // The code walk sees every non-skipped file in an excluded subtree, so its
   // count is the whole one; the docs walk's would only repeat it.

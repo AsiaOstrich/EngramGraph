@@ -538,6 +538,17 @@ async function main(): Promise<void> {
             `(${s.skippedSymlinkDirs.slice(0, 3).join(", ")}${s.skippedSymlinkDirs.length > 3 ? ", …" : ""}) — ` +
             `contents are absent from every count above. Index such a directory as its own root to include it.`
           : "";
+        // Linked git worktrees (copies of a repository already in the index, e.g. a Claude Code
+        // agent's `.claude/worktrees/agent-*`) are not walked. Named, with the same "absent from
+        // every count" clause as the symlinks above: silence here would put a whole checkout
+        // outside the denominator.
+        const sw = s.skippedWorktrees;
+        const worktrees = sw
+          ? `\nskipped: ${sw.paths.length} git worktree${sw.paths.length === 1 ? "" : "s"} not walked ` +
+            `(${sw.paths.slice(0, 3).join(", ")}${sw.paths.length > 3 ? ", …" : ""}; ${sw.files} file(s)) — ` +
+            `a worktree is a second copy of a repository already in the index, and its contents are absent from every count above. ` +
+            `Index a worktree's directory as its own root to include it.`
+          : "";
         // Unreadable files used to abort the whole index with a bare EACCES;
         // they are skipped now, so they must be named or the file count is
         // quietly short (XSPEC-373 B7).
@@ -615,7 +626,7 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
             `an older egr wrote ONE node for the same relative path of both roots, so their functions and call edges are mixed. ` +
             `Rebuild the graph once (egr index <dir> --clean, or index-all.sh --clean) to separate them.`
           : "";
-        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kConflicts}${kReplaced}${kWarning}${scip}${parse}${incLine}${rootIdsLine}${sharedLine}${skipped}${skippedUnrecognized}${symlinked}${unreadable}${excludedLine}${unindexed}${hints}`;
+        return `code: ${s.code.files} files, ${s.code.functions} functions, ${s.code.classes} classes, ${s.code.calls} calls, ${s.code.implements} implements (ambiguous ${s.code.ambiguous}, unresolved ${s.code.unresolved})${k}${kConflicts}${kReplaced}${kWarning}${scip}${parse}${incLine}${rootIdsLine}${sharedLine}${skipped}${skippedUnrecognized}${symlinked}${worktrees}${unreadable}${excludedLine}${unindexed}${hints}`;
       });
       break;
     }
