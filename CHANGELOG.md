@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-29
+
+> **Stable Release**: the same content as 0.14.0-beta.3 below, which passed the Windows release verification including the new incremental-indexing steps (run 40886344099). Adds `egr index --incremental` and separate ids for index roots that share a relative path; see 0.14.0-beta.1 for the features.
+
 ## [0.14.0-beta.3] - 2026-10-29
 
 *Same package content as 0.14.0-beta.2. The Windows release verification now exercises incremental indexing and roots that share a relative path ([#14](https://github.com/AsiaOstrich/EngramGraph/pull/14)); a stable 0.14.0 must match a preview verified with it, so this preview exists to be that one. Published to the `next` dist-tag.*
