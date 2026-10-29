@@ -12,9 +12,50 @@ name: Cross-Platform Compatibility Check
 # publish.yml CI, which only runs on GitHub's ubuntu-latest (x64, glibc
 # 2.39+, i.e. squarely in the "safe zone" for both bugs).
 
+# WHEN THIS RUNS: AFTER publish.yml HAS FINISHED AND SUCCEEDED (not beside it).
+#
+# This used to trigger on `release: published`, the same event as publish.yml,
+# so both started in the same second and this one polled the npm registry for a
+# version that publish.yml had not published yet. The poll window was raised
+# once (XSPEC-365 R6: 2.5 -> 10 minutes, sized against a 3m36s publish) and
+# lost again: publish.yml now runs `test:coverage` (consumer-resolution, then
+# the full suite) BEFORE `npm publish`. Measured on v0.14.0-beta.2's publish
+# run (40847846379): 11m50s from start to finish, with `npm publish` itself in
+# the last job, past the 10-minute window. v0.13.1 (run 40101644358) and
+# v0.14.0-beta.2 (run 40847846380) both ended in "Package never reached npm —
+# NO platform was tested" with every matrix job skipped, while the package was
+# fine and published minutes later. Those releases were never platform-tested.
+#
+# A longer wait would only move the race, and publish.yml will get slower
+# again. The class of bug is "two workflows started by one event and ordered
+# by a timeout", so the ordering is now structural: `workflow_run` fires only
+# when the workflow named below completes, and the job-level `if:` lets the
+# check run only when that completion was a success. The timeout poll stays as
+# a safety margin for registry propagation, but its starting line is now "the
+# publish has finished", not "the release was created".
+#
+# Chosen over `needs:` / `workflow_call` inside publish.yml because this gate
+# is deliberately a separate workflow: it is re-runnable alone through
+# `workflow_dispatch`, a platform job that goes red must not mark the publish
+# run itself as failed (the package is already on npm by then), and the
+# Windows/macOS runners must not delay the publish job's own conclusion.
+#
+# Two properties of `workflow_run` to know about:
+#   - it only fires from the copy of this file on the DEFAULT branch, so a
+#     change to this file cannot be exercised from a feature branch (use
+#     `workflow_dispatch` on the default branch after merging);
+#   - for a run that publish.yml started from a release,
+#     `github.event.workflow_run.head_branch` is the release's TAG NAME
+#     (`v0.14.0`), which is how the version under test is the one that publish
+#     run actually shipped, never `latest`. Confirmed against the real runs of
+#     v0.13.1 / v0.14.0-beta.2 / v0.14.0-beta.3 (`gh run view --json headBranch`).
+#
+# The `workflows:` entry below is the `name:` of publish.yml, matched by name.
+# test/release-compat-trigger.test.ts fails if the two ever diverge.
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Publish to npm"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -28,8 +69,31 @@ on:
         default: false
 
 jobs:
+  # The publish did not succeed, so there is no package to test. Say so in this
+  # run, in words, instead of leaving every job skipped with no explanation and
+  # instead of falling through to the registry poll below, which would report
+  # "never reached npm" and mix a publish failure into a compatibility report.
+  publish-not-succeeded:
+    name: Skipped — the publish did not succeed
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain why no platform was tested
+        env:
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          PUBLISH_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          PUBLISHED_REF: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          echo "::warning title=No platform was tested — publish.yml ended '${CONCLUSION}'::" \
+            "The publish run for ${PUBLISHED_REF} did not succeed (${PUBLISH_RUN_URL}), so there is no" \
+            "published package to install. This says nothing about platform support:" \
+            "this release is UNVERIFIED for compatibility. Fix the publish first."
+
   resolve-version:
     name: Resolve version under test
+    # `workflow_run` fires for every conclusion of publish.yml; only a success
+    # has anything to test (the job above reports the rest).
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       package-spec: ${{ steps.resolve.outputs.package-spec }}
@@ -37,38 +101,43 @@ jobs:
       - name: Determine target version and wait for npm registry propagation
         id: resolve
         shell: bash
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+          # Tag name of the release that publish.yml just published (see the
+          # header: head_branch of a release-triggered run is the tag).
+          PUBLISHED_REF: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -e
-          INPUT_VERSION="${{ github.event.inputs.version }}"
           if [ -n "$INPUT_VERSION" ]; then
             SPEC="engramgraph@${INPUT_VERSION}"
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            # Strip a leading "v" from the git tag (v0.4.0 -> 0.4.0)
-            TAG="${{ github.event.release.tag_name }}"
-            SPEC="engramgraph@${TAG#v}"
+          elif [ "$EVENT_NAME" = "workflow_run" ]; then
+            # Strip a leading "v" from the git tag (v0.4.0 -> 0.4.0). Never fall
+            # back to `latest` here: that would silently test a DIFFERENT
+            # version than the one this publish run shipped (a beta publishes
+            # to the `next` tag and leaves `latest` untouched).
+            VERSION="${PUBLISHED_REF#v}"
+            if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$'; then
+              echo "::error title=Cannot tell which version publish.yml shipped::" \
+                "the publish run's head_branch is '${PUBLISHED_REF}', which is not a version tag." \
+                "Refusing to guess (and refusing to fall back to latest)."
+              exit 1
+            fi
+            SPEC="engramgraph@${VERSION}"
           else
             SPEC="engramgraph@latest"
           fi
 
-          # HOW LONG TO WAIT, AND WHY THIS NUMBER (XSPEC-365 R6).
+          # REGISTRY PROPAGATION ONLY — NOT A RACE AGAINST THE PUBLISH.
           #
-          # This job used to poll 10 times at 15s = ~2.5 minutes, and it lost
-          # that race every single time. Both this workflow and publish.yml
-          # trigger on `release: published` and start in the same second, but
-          # the package only reaches the registry when publish.yml finishes —
-          # measured at 3m36s / 3m31s / 3m51s / 3m36s for v0.5.0 through
-          # v0.8.0. Every release was ~60-80s short. The consequence was not a
-          # flaky gate, it was NO gate: `resolve-version` failed, and with it
-          # every matrix job was skipped (0s), across four consecutive
-          # releases, while the README cited this workflow as proof that
-          # Windows and macOS were verified.
-          #
-          # 40 attempts x 15s = 10 minutes, roughly 2.5x the slowest observed
-          # publish. Sized against measurement rather than intuition, and
-          # deliberately generous: the cost of waiting too long is a few
-          # runner-minutes, while the cost of waiting too little is a gate that
-          # reports failure in a way indistinguishable from a real breakage.
-          ATTEMPTS=40
+          # This job now starts after publish.yml succeeded, so `npm publish`
+          # has returned. The registry can still take seconds to a few minutes
+          # to serve the new version everywhere, hence a short poll as a safety
+          # margin: 20 attempts x 15s = 5 minutes. (It was 40 x 15s while this
+          # job had to out-wait the whole publish run, which it could not do —
+          # see the header. Do not raise this number to "fix" a missing
+          # package; look at the publish run.)
+          ATTEMPTS=20
           echo "Waiting for $SPEC to be resolvable on the npm registry..."
           for i in $(seq 1 "$ATTEMPTS"); do
             if npm view "$SPEC" version >/dev/null 2>&1; then
@@ -80,19 +149,20 @@ jobs:
             sleep 15
           done
 
-          # TELL THE TWO FAILURES APART (XSPEC-365 R6).
+          # TELL THE FAILURES APART (XSPEC-365 R6).
           #
-          # "the package never got published" and "a platform cannot install
-          # it" both used to surface as this one workflow going red, which is
-          # how a gate that had never run at all went unnoticed for four
-          # releases. This branch is the former, and says so explicitly: no
-          # platform was tested, so nothing about platform support can be
-          # concluded from this run either way.
-          echo "::error title=Package never reached npm — NO platform was tested::" \
-            "$SPEC did not appear on the npm registry within $(( ATTEMPTS * 15 / 60 )) minutes." \
-            "This is a publish/registry problem, NOT a platform-compatibility failure:" \
-            "the matrix below did not run, so this release is UNVERIFIED rather than broken." \
-            "Check whether publish.yml succeeded for this tag."
+          # "the package is not on the registry" and "a platform cannot install
+          # it" must not surface as the same red. A publish that FAILED never
+          # gets here (publish-not-succeeded above reports it). Reaching this
+          # point means either publish.yml succeeded but the registry has not
+          # served the version after $(( ATTEMPTS * 15 / 60 )) minutes, or a
+          # manual run asked for a version that does not exist. No platform was
+          # tested either way, so nothing about platform support follows.
+          echo "::error title=Version not visible on npm — NO platform was tested::" \
+            "$SPEC did not appear on the npm registry within $(( ATTEMPTS * 15 / 60 )) minutes" \
+            "(event: $EVENT_NAME). The matrix below did not run, so this release is UNVERIFIED" \
+            "rather than broken. If this was a workflow_run, publish.yml reported success:" \
+            "check npm's registry status; if it was a manual run, check the version you typed."
           exit 1
 
   # NOTE: intentionally does NOT include macos-13 (Intel Mac). GitHub's
@@ -374,7 +444,7 @@ jobs:
           exit 1
 
   # Best-effort only — never blocks a release. Only runs when explicitly
-  # requested via workflow_dispatch (not on `release: published`), so a
+  # requested via workflow_dispatch (not after a publish run), so a
   # release is never left waiting on an Intel Mac runner that may never
   # become available. Run manually if you specifically want to check
   # Intel Mac compatibility.
