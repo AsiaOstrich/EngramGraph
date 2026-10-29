@@ -6,7 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.14.0-beta.1] - 2026-10-29
+## [0.14.0-beta.2] - 2026-10-29
+
+*Same features as 0.14.0-beta.1, which was never published to npm: its release run stopped at the coverage threshold, because the new tests ran the CLI as a child process that v8 coverage does not count. This version adds in-process unit tests for incremental indexing (`incremental.ts` 4.67% → 100% lines) and makes PR CI run `test:coverage` too ([#13](https://github.com/AsiaOstrich/EngramGraph/pull/13)). Published to the `next` dist-tag for the Windows release verification.*
+
+## [0.14.0-beta.1] - 2026-10-29 [not published to npm]
 
 *Preview of incremental indexing. Published to the `next` dist-tag for the Windows release verification; a stable 0.14.0 follows only after that verification passes.*
 
