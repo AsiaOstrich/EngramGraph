@@ -65,7 +65,7 @@ import { moduleIdOf, resolveFacts, type FileFacts } from "./extractor.js";
 import { grammarVersions, type ParseManifest } from "./parse-manifest.js";
 
 /** Bump when the shape of {@link FileFacts} or the resolution it feeds changes: an old state is then ignored, not misread. */
-export const STATE_VERSION = 1;
+export const STATE_VERSION = 2;
 
 /** One index root's remembered facts. */
 export interface RootState {

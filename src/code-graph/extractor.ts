@@ -121,10 +121,11 @@ const PROVIDER = "tree-sitter";
  *     THIS file's own map) — the call site and its resolved target are
  *     textually in the same file, the strongest evidence this heuristic
  *     ever has for an actual calling relationship (comparable to how a real
- *     compiler resolves an unqualified in-scope name). Its one known
- *     failure mode is two same-named definitions in *different* scopes of
- *     one file colliding onto "last definition wins" (see this file's
- *     `names` map comment) — real, but narrow.
+ *     compiler resolves an unqualified in-scope name). A function declared
+ *     inside another function is local to it (see {@link resolveInFile}).
+ *     Its remaining known failure mode is two same-named definitions in
+ *     the SAME scope (e.g. methods of different classes of one file)
+ *     colliding onto "last definition wins" — real, but narrow.
  *   - **cross-file-unique** (no same-file match; exactly one function
  *     project-wide has this bare name) — a fundamentally weaker signal:
  *     "there happens to be only one function named this string in the
@@ -340,8 +341,17 @@ export interface Extraction {
   rawCalls: RawCall[];
   /** Unresolved module-relationship references (XSPEC-414 R2/R4). Empty for every language that doesn't capture `@reference.import`. */
   rawImports: RawImport[];
-  /** This file's bare function name → id. */
+  /**
+   * This file's bare function name → id, for the functions the rest of the file (and other
+   * files) can reach by that name. A function declared INSIDE another function is not in it: it
+   * is local, see {@link nested}. Same-name definitions in one scope: the last one wins.
+   */
   names: Map<string, string>;
+  /**
+   * Functions declared inside another function, as `[bare name, id]`. Only a call made from
+   * within the enclosing function resolves to one (see {@link resolveInFile}).
+   */
+  nested: Array<[string, string]>;
   /**
    * Parse-health measurement for this file (XSPEC-334 R1b) — top-most
    * `ERROR`/`MISSING` node count, the extent they cover, and the total source
@@ -419,6 +429,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   ];
   const defines: GraphEdge[] = [];
   const names = new Map<string, string>();
+  const nested: Array<[string, string]> = [];
   const rawCalls: RawCall[] = [];
 
   const { definitions, callSites, imports } = runTagQuery(
@@ -496,11 +507,14 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
       toLabel: "Function",
       to: fn.id,
     });
-    // bare-name map for CALLS resolution (same-name in different scopes →
-    // last definition wins; a documented intra-file resolution limitation).
-    // `functions` is document-ordered (see runTagQuery), so this loop
-    // reproduces the old walker's pre-order-DFS "last write wins" exactly.
-    names.set(fn.name, fn.id);
+    // bare-name map for CALLS resolution. A function declared inside another function is local
+    // to it: it goes to `nested` and never into `names`, so it cannot take over the name of a
+    // top-level function of the file (declared before or after it) or answer other files' calls.
+    // Same-name definitions in the SAME scope: last definition wins (documented limitation);
+    // `functions` is document-ordered (see runTagQuery), so this reproduces the old walker's
+    // pre-order-DFS "last write wins".
+    if (fn.nested) nested.push([fn.name, fn.id]);
+    else names.set(fn.name, fn.id);
   }
 
   for (const call of callSites) {
@@ -535,7 +549,34 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     });
   }
 
-  return { nodes, defines, implementsEdges, rawCalls, rawImports, names, errorNodes, errorExtent, sourceExtent: source.length, signatures };
+  return { nodes, defines, implementsEdges, rawCalls, rawImports, names, nested, errorNodes, errorExtent, sourceExtent: source.length, signatures };
+}
+
+/**
+ * Resolve a bare callee name inside ONE file: a function declared in the caller itself, or in a
+ * function enclosing it, comes first (the innermost scope wins - lexical shadowing); then the
+ * file's other functions by bare name. `""` when the file has none.
+ *
+ * Scope is read from the ids, which are `<file>#<outer>.<inner>.<name>`: a nested function is
+ * visible from a caller whose id is its enclosing scope or lies below it.
+ */
+export function resolveInFile(
+  from: string,
+  callee: string,
+  names: ReadonlyMap<string, string>,
+  nested: ReadonlyArray<readonly [string, string]>,
+): string {
+  let best = "";
+  let bestDepth = -1;
+  for (const [name, id] of nested) {
+    if (name !== callee) continue;
+    const scope = id.slice(0, id.length - name.length - 1); // `<file>#<outer>...` the enclosing scope
+    if ((from === scope || from.startsWith(`${scope}.`)) && scope.length > bestDepth) {
+      best = id;
+      bestDepth = scope.length;
+    }
+  }
+  return best || names.get(callee) || "";
 }
 
 /**
@@ -579,12 +620,12 @@ function buildCallEdges(resolved: Array<{ from: string; to: string; tier: CallRe
  * @throws if the source cannot be parsed into a syntax tree.
  */
 export function extractCodeGraph(source: string, opts: ExtractOptions): GraphFragment {
-  const { nodes, defines, implementsEdges, rawCalls, names } = collectExtraction(source, opts);
+  const { nodes, defines, implementsEdges, rawCalls, names, nested } = collectExtraction(source, opts);
   // Single-file extraction only ever resolves against this file's own name
   // map — every resolution here is by construction "same-file" (XSPEC-333
   // R3 OQ-4's higher-confidence tier; see CALLS_CONFIDENCE's module doc).
   const resolved = rawCalls
-    .map((c) => ({ from: c.from, to: names.get(c.callee) ?? "", tier: "same-file" as const }))
+    .map((c) => ({ from: c.from, to: resolveInFile(c.from, c.callee, names, nested), tier: "same-file" as const }))
     .filter((c) => c.to);
   return { nodes, edges: [...defines, ...buildCallEdges(resolved), ...implementsEdges] };
 }
@@ -681,6 +722,8 @@ export interface FileFacts {
   specIds: string[];
   /** Bare function name → id (last definition wins), as {@link Extraction.names}. */
   names: Array<[string, string]>;
+  /** Functions declared inside another function, as {@link Extraction.nested}. Absent in state an older egr wrote. */
+  nested?: Array<[string, string]>;
   /** Unresolved calls aggregated per (caller id, callee name): `[from, callee, how many call sites]`. */
   calls: Array<[string, string, number]>;
   /** Cleaned `#include`/`source` targets, unresolved. */
@@ -712,6 +755,7 @@ export function factsOf(ex: Extraction, language: SupportedLanguage, health: Fil
     classIds: ex.nodes.filter((n) => n.label === "Class").map((n) => n.id),
     specIds: ex.implementsEdges.map((e) => e.to),
     names: [...ex.names.entries()],
+    ...(ex.nested.length > 0 ? { nested: ex.nested } : {}),
     calls: [...callCounts.values()],
     imports: ex.rawImports.map((i) => i.target),
     health,
@@ -742,6 +786,7 @@ export interface ResolvedEdges {
  */
 export function resolveFacts(facts: readonly FileFacts[]): ResolvedEdges {
   const localByFile = new Map<string, Map<string, string>>();
+  const nestedByFile = new Map<string, Array<[string, string]>>();
   const globalIndex = new Map<string, Set<string>>();
   for (const f of facts) {
     // Key by the POSIX-normalized path: the call records below carry the same
@@ -749,6 +794,7 @@ export function resolveFacts(facts: readonly FileFacts[]): ResolvedEdges {
     // match and every same-file resolution would be demoted or dropped.
     const names = new Map(f.names);
     localByFile.set(f.path, names);
+    if (f.nested?.length) nestedByFile.set(f.path, f.nested);
     for (const [name, id] of names) {
       let ids = globalIndex.get(name);
       if (!ids) {
@@ -764,7 +810,8 @@ export function resolveFacts(facts: readonly FileFacts[]): ResolvedEdges {
   let unresolved = 0;
   for (const f of facts) {
     for (const [from, callee, count] of f.calls) {
-      const local = localByFile.get(f.path)?.get(callee);
+      // Same file first: a function declared in the caller (or a function around it), then the file's own names.
+      const local = resolveInFile(from, callee, localByFile.get(f.path) ?? new Map(), nestedByFile.get(f.path) ?? []);
       if (local) {
         // Lexical shadowing: this caller's own file defines the name (XSPEC-333 R3 OQ-4: same-file tier).
         resolved.push({ from, to: local, tier: "same-file", count });

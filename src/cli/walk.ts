@@ -162,6 +162,56 @@ export const SKIP_DIRS: ReadonlySet<string> = new Set([
   "__pycache__", ".venv", "venv", "vendor", "target", "build",
 ]);
 
+/**
+ * Is `dir` a git LINKED WORKTREE — a second checkout of a repository that is
+ * already being indexed (`git worktree add`, which Claude Code's agents do
+ * under `.claude/worktrees/agent-*`)?
+ *
+ * A linked worktree has a `.git` that is a FILE, not a directory, holding one
+ * line `gitdir: <main repo>/.git/worktrees/<name>`. A submodule's `.git` is
+ * also a file, but points at `.git/modules/<name>`; telling them apart by that
+ * target is the point. A worktree is a copy of code already in the index, and
+ * measured on dev-platform it was 2,052 of 5,384 indexed code files (38%): the
+ * same-named functions twice over turned real calls into "ambiguous" and
+ * dropped their edges. A submodule is DIFFERENT code that a user may well want,
+ * so it is walked as before.
+ *
+ * Only a positively identified worktree answers `true`. A `.git` file whose
+ * target is not that shape (an unreadable file, a `gitdir:` elsewhere, a
+ * submodule) answers `false` and the directory is walked as it always was.
+ *
+ * The walk asks this only of SUBDIRECTORIES, never of the root it was given: an
+ * index root that is itself a linked worktree (egr is run from worktrees all
+ * the time) is indexed normally.
+ */
+export function isLinkedWorktree(dir: string): boolean {
+  const dotGit = join(dir, ".git");
+  let fd: number;
+  try {
+    // A `.git` DIRECTORY is an ordinary nested repository: not a worktree, and `openSync` on a
+    // directory would throw EISDIR on some platforms anyway, so ask first.
+    if (!statSync(dotGit, { throwIfNoEntry: false })?.isFile()) return false;
+    fd = openSync(dotGit, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const buf = Buffer.alloc(1024);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    const first = buf.subarray(0, n).toString("utf8").split(/\r?\n/, 1)[0] ?? "";
+    const m = /^gitdir:\s*(.+?)\s*$/.exec(first);
+    if (!m) return false;
+    // `<main>/.git/worktrees/<name>`: the segment before the last one is `worktrees`
+    // (also for a bare repo's `<repo>.git/worktrees/<name>` and a submodule's own worktrees).
+    const segs = m[1]!.replace(/\\/g, "/").split("/").filter((s) => s !== "");
+    return segs.length >= 2 && segs[segs.length - 2] === "worktrees";
+  } catch {
+    return false;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export interface WalkResult {
   /**
    * `language` is set only for an extension-less shebang script matched via
@@ -189,6 +239,14 @@ export interface WalkResult {
    * indexed exactly as before.
    */
   skippedSymlinkDirs: string[];
+  /**
+   * Linked git worktrees found under the root and NOT descended into (see
+   * {@link isLinkedWorktree}): their repo-relative paths and how many files lay
+   * under them. A copy of the repository already being indexed would double
+   * every function name in the graph. Reported, not silent: the directories'
+   * contents are absent from every count, and the summary says so.
+   */
+  skippedWorktrees: { paths: string[]; files: number };
   /**
    * Files matched by extension but not readable (XSPEC-373 B7), with the OS
    * error. Permission-denied, a race with a delete, an I/O error.
@@ -248,7 +306,7 @@ function countFilesUnder(dir: string): number {
   }
   for (const e of entries) {
     if (e.isDirectory()) {
-      if (!SKIP_DIRS.has(e.name)) n += countFilesUnder(join(dir, e.name));
+      if (!SKIP_DIRS.has(e.name) && !isLinkedWorktree(join(dir, e.name))) n += countFilesUnder(join(dir, e.name));
     } else if (!e.isSymbolicLink() || !statSync(join(dir, e.name), { throwIfNoEntry: false })?.isDirectory()) {
       n += 1;
     }
@@ -294,7 +352,7 @@ function tallyExcluded(
       const childRel = `${rel}/${e.name}`;
       const symlinkDir = e.isSymbolicLink() && statSync(childFull, { throwIfNoEntry: false })?.isDirectory() === true;
       const childIsDir = e.isDirectory() || symlinkDir;
-      if (e.isDirectory() && SKIP_DIRS.has(e.name)) continue;
+      if (e.isDirectory() && (SKIP_DIRS.has(e.name) || isLinkedWorktree(childFull))) continue;
       const childHits = exclude.matchEach(childRel, e.name, childIsDir);
       const childCov = [...cov];
       childHits.forEach((h, i) => {
@@ -336,6 +394,7 @@ export function walkFiles(
   const detectShebangScripts = opts.detectShebangScripts ?? false;
   const files: Array<{ path: string; source: string; language?: SupportedLanguage }> = [];
   const skippedSymlinkDirs: string[] = [];
+  const skippedWorktrees = { paths: [] as string[], files: 0 };
   const unreadable: Array<{ path: string; reason: string }> = [];
   const unindexed: Array<{ path: string; ext: string }> = [];
   const exclude = opts.exclude;
@@ -366,6 +425,15 @@ export function walkFiles(
         }
       }
       if (entry.isDirectory()) {
+        // A linked git worktree is a second copy of a repository already in the index (checked
+        // only here, on subdirectories: an index ROOT that is a worktree is walked normally).
+        // After `--exclude`, so a pattern that already names it keeps counting it as excluded.
+        if (isLinkedWorktree(full)) {
+          skippedWorktrees.paths.push(`${toPosixPath(relative(root, full))}/`);
+          // Minus the worktree's own `.git` file, which is not a file of the checkout.
+          skippedWorktrees.files += Math.max(0, countFilesUnder(full) - 1);
+          continue;
+        }
         rec(full);
         continue;
       }
@@ -424,7 +492,7 @@ export function walkFiles(
   };
   rec(root);
   if (excluded) for (const t of excluded.byPattern) t.nothingMatched = t.paths === 0;
-  return { files, skippedSymlinkDirs, unreadable, unindexed, ...(excluded ? { excluded } : {}) };
+  return { files, skippedSymlinkDirs, skippedWorktrees, unreadable, unindexed, ...(excluded ? { excluded } : {}) };
 }
 
 /** Default cap on how many distinct extensions {@link summarizeUnindexed} reports (XSPEC-414 R1). */

@@ -246,6 +246,13 @@ export interface QualifiedFunction {
   name: string;
   startLine: number;
   node: Parser.SyntaxNode;
+  /**
+   * True when some ENCLOSING definition is itself a function (a `function` in a `function`, a
+   * method of a class declared inside a function): the definition is local to that function and
+   * must not be found by its bare name from the rest of the file or from other files. A method
+   * of a top-level class is not nested in this sense; only a class does not make a scope local.
+   */
+  nested: boolean;
 }
 
 /** A class definition (ids are never scope-qualified — see below). */
@@ -300,13 +307,15 @@ export function qualifyFunctions(
       classes.push({ name: def.name, node: def.node });
       continue;
     }
-    const scopeNames = ancestorsOf(def).map((a) => a.name);
+    const ancestors = ancestorsOf(def);
+    const scopeNames = ancestors.map((a) => a.name);
     const qualified = scopeNames.length > 0 ? `${scopeNames.join(".")}.${def.name}` : def.name;
     functions.push({
       id: `${filePath}#${qualified}`,
       name: def.name,
       startLine: def.node.startPosition.row + 1,
       node: def.node,
+      nested: ancestors.some((a) => a.kind === "function"),
     });
   }
 
