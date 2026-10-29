@@ -63,7 +63,13 @@ jobs:
       # 幾支 CLI 測試會啟動 dist/,而 `assertDistIsFresh` 會在 dist 比 src 舊時拒絕執行。
       - run: npm run build
 
-      - run: npm test
+      # 涵蓋率門檻在這裡就要擋,不是等到發版。
+      # 0.14.0-beta.1 的 PR #12 合併後,才在 publish.yml 的 `npm run test:coverage` 被門檻擋下
+      # (這裡原本的 `npm test` 只看測試過不過,不量涵蓋率):94 個測試檔全過,
+      # 但新測試全經 CLI 子行程執行,v8 不計子行程,incremental.ts 只有 3.7%。
+      # 沒發到 npm,但那是人已經在發版的時刻才知道。
+      # 門檻定義在 vitest.config.ts(`coverage.thresholds`);這裡只負責讓它在 PR 上也被量。
+      - run: npm run test:coverage
       # 錯誤訊息單一出口。self-test 先跑：一個壞掉的判別式對每個檔都回綠，
       # 而那與一次乾淨的通過在輸出上一模一樣。
       - run: npm run check:error-exit:self-test
