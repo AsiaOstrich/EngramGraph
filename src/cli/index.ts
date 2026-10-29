@@ -743,8 +743,10 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
       const r = await cmdRefsCheck(conn, paths);
       out(r, values.json, (d) => {
         const res = d as RefCheckResult;
+        // First line of the report, not a footnote: a reader who sees only the list must not take it for a complete one.
+        const incomplete = (res.incompleteReasons ?? []).map((why) => `refs check: INCOMPLETE — ${why}\n`).join("");
         if (res.items.length === 0) {
-          return `refs check: no references found in ${res.filesScanned.length} file(s)`;
+          return `${incomplete}refs check: no references found in ${res.filesScanned.length} file(s)`;
         }
         const counts = res.items.reduce<Record<string, number>>((acc, it) => {
           acc[it.status] = (acc[it.status] ?? 0) + 1;
@@ -766,8 +768,17 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
                     : "";
           return `  [${it.status}] ${it.kind} \`${it.raw}\` (${it.sourceFile}:${it.sourceLine})${extra}`;
         });
-        return `refs check: ${res.items.length} reference(s) in ${res.filesScanned.length} file(s) (${summary}):\n${lines.join("\n")}`;
+        return `${incomplete}refs check: ${res.items.length} reference(s) in ${res.filesScanned.length} file(s) (${summary}):\n${lines.join("\n")}`;
       });
+      // A result built on a list that could not be read is not a verdict (the same rule as `missing` above, from the
+      // other side): the report is printed in full, stderr says what is unknown (also under --json, whose stdout is
+      // the JSON alone) and the exit status refuses to call it a pass.
+      if (r.incompleteReasons && r.incompleteReasons.length > 0) {
+        exitCode = 1;
+        for (const reason of r.incompleteReasons) {
+          process.stderr.write(`egr: refs check: INCOMPLETE — ${reason}; the result may be wrong, not just partial (exit 1)\n`);
+        }
+      }
       // A `missing` reference is a finding a script must be able to stop on
       // (XSPEC-476 R4): the report is printed in full above, and the exit status
       // carries the verdict. `unresolvable` is "cannot tell" and does not fail.

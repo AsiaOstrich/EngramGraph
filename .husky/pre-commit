@@ -1,3 +1,4 @@
+#!/usr/bin/env sh
 # Typecheck before tests: vitest runs the code, it does not type it, so a type
 # error passes here and fails in CI minutes later. That happened on
 # 0.12.0-rc.1 — a `spawnSync` option that does not exist in SpawnSyncOptions
