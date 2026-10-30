@@ -76,7 +76,7 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因與各自對�
 | 工具 | 輸入 | 回傳 |
 |------|------|------|
 | `index_code` *(僅可寫入模式)* | `files: { path, source }[]` | 將原始碼索引進程式碼圖譜（跨檔 `CALLS`）。回傳 files/functions/classes/calls（+ ambiguous/unresolved）計數。 |
-| `index_docs` *(僅可寫入模式)* | `docs: { content, fallbackId? }[]` | 將帶 front-matter 的 markdown 索引進知識圖譜。回傳 specs/decisions/impacts/supersedes/relates/relatesTo 計數。 |
+| `index_docs` *(僅可寫入模式)* | `docs: { content, fallbackId? }[]` | 將帶 front-matter 的 markdown 索引進知識圖譜。回傳 specs/decisions/impacts/supersedes/relates/decisionRelates 計數。 |
 | `call_chain` | `symbol`、`direction?`（`callers`\|`callees`\|`both`）、`depth?` | 誰呼叫某函式符號 / 被它呼叫。「改 X 會壞掉什麼？」 |
 | `impact_analysis` | `nodeId`、`maxHops?` | 某 spec 影響鏈中的決策（`IMPACTS` + 多跳 `SUPERSEDES`）。 |
 | `ingest_feedback` *(僅可寫入模式)* | `nodeId`、`type`、`nodeLabel?`（`Function`\|`Spec`\|`Decision`\|`Doc`）、`weight?` | 依回饋事件（`test_fail`/`test_pass`/`human_fix`）演化節點的 SAGE 信心度。 |

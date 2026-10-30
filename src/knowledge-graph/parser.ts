@@ -10,7 +10,7 @@
  *                             is written under the `supersedes` front-matter field;
  *                             any other Decision → Decision reference (`related`,
  *                             `depends_on`, `impacts`, `impacted_by`, `implements`, or a
- *                             `[[ref]]` in the body) ⇒ RELATES_TO (issue #19)
+ *                             `[[ref]]` in the body) ⇒ DECISION_RELATES (issue #19)
  *   - Spec → Spec           ⇒ RELATES (source → referenced; doc↔doc up/downstream)
  *
  * Referenced ids absent from the batch get a stub node so the edge still lands;
@@ -299,7 +299,7 @@ export class SpecDecisionKnowledgeSource {
           edges.push(impacts(ref.id, p.id));
         } else if (p.kind === "Decision" && ref.kind === "Decision") {
           // Replacement is declared, not inferred from a mention (issue #19).
-          edges.push(ref.via.includes("supersedes") ? supersedes(p.id, ref.id) : relatesTo(p.id, ref.id));
+          edges.push(ref.via.includes("supersedes") ? supersedes(p.id, ref.id) : decisionRelates(p.id, ref.id));
         } else {
           // Spec → Spec: doc↔doc upstream/downstream (related / depends_on).
           edges.push(relates(p.id, ref.id));
@@ -353,8 +353,8 @@ function supersedes(fromId: string, toId: string): GraphEdge {
   return { label: "SUPERSEDES", fromLabel: "Decision", from: fromId, toLabel: "Decision", to: toId };
 }
 
-function relatesTo(fromId: string, toId: string): GraphEdge {
-  return { label: "RELATES_TO", fromLabel: "Decision", from: fromId, toLabel: "Decision", to: toId };
+function decisionRelates(fromId: string, toId: string): GraphEdge {
+  return { label: "DECISION_RELATES", fromLabel: "Decision", from: fromId, toLabel: "Decision", to: toId };
 }
 
 function relates(fromId: string, toId: string): GraphEdge {
@@ -368,7 +368,7 @@ export interface KnowledgeIndexResult {
   supersedes: number;
   relates: number;
   /** Decision → Decision references that do not replace anything (issue #19). */
-  relatesTo: number;
+  decisionRelates: number;
   /**
    * How many documents were read (XSPEC-373 R1).
    *
@@ -551,7 +551,7 @@ async function replacedFromEarlierIndex(conn: GraphConnection, owners: readonly 
  * mention stored as SUPERSEDES — would otherwise survive every re-index; only
  * `--clean` removed them, and `--clean` also resets SAGE's accumulated
  * confidence. A document is the only source of its decision's outbound
- * Decision → Decision edges (nothing else writes SUPERSEDES or RELATES_TO), so
+ * Decision → Decision edges (nothing else writes SUPERSEDES or DECISION_RELATES), so
  * rewriting them from the document is the same rule as rewriting the node.
  * Scoped to the decisions whose document was read in THIS run: indexing one
  * directory leaves every other decision's edges alone, and a reference removed
@@ -560,7 +560,7 @@ async function replacedFromEarlierIndex(conn: GraphConnection, owners: readonly 
 async function forgetDecisionEdgesOf(conn: GraphConnection, owners: readonly ParsedKnowledgeDoc[]): Promise<void> {
   for (const p of owners) {
     if (p.kind !== "Decision") continue;
-    for (const rel of ["SUPERSEDES", "RELATES_TO"] as const) {
+    for (const rel of ["SUPERSEDES", "DECISION_RELATES"] as const) {
       await conn.execute(`MATCH (:Decision {id: $id})-[r:${rel}]->(:Decision) DELETE r`, { id: p.id });
     }
   }
@@ -582,7 +582,7 @@ export async function indexKnowledgeDocs(
     impacts: fragment.edges.filter((e) => e.label === "IMPACTS").length,
     supersedes: fragment.edges.filter((e) => e.label === "SUPERSEDES").length,
     relates: fragment.edges.filter((e) => e.label === "RELATES").length,
-    relatesTo: fragment.edges.filter((e) => e.label === "RELATES_TO").length,
+    decisionRelates: fragment.edges.filter((e) => e.label === "DECISION_RELATES").length,
     docsScanned: docs.length,
     docsUnresolved: source.unresolved,
     conflicts: [...source.conflicts, ...replaced],

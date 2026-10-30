@@ -46,7 +46,7 @@ egr <command> [args] [options]
 
 遞迴將 `<dir>` 下的原始碼索引進**程式碼圖譜**（tree-sitter → `Function` / `Class` /
 `Module` 節點 + 跨檔 `CALLS`）。加上 `--docs` 時，也會把 `*.md` 索引進**知識圖譜**
-（front-matter → `Spec` / `Decision` + `IMPACTS` / `SUPERSEDES` / `RELATES_TO`；只有 `supersedes` 欄位會建立 `SUPERSEDES` 邊）。
+（front-matter → `Spec` / `Decision` + `IMPACTS` / `SUPERSEDES` / `DECISION_RELATES`；只有 `supersedes` 欄位會建立 `SUPERSEDES` 邊）。
 
 - 程式碼副檔名：`.ts .tsx .js .jsx .mts .cts .mjs .cjs .cs .py .go .java
   .kt .kts .rs .cpp .cc .cxx .hpp .h .hh .rb .php .dart`（排除 `.d.ts`）。
@@ -113,7 +113,7 @@ egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 
 輸出計數：`files`、`functions`、`classes`、`calls`，以及 `ambiguous`（被呼叫名稱比對到
 > 1 個函式——略過）與 `unresolved`（比對不到——略過）；加上 `--docs` 時還有
-`specs` / `decisions` / `impacts` / `supersedes` / `relates` / `relatesTo`。
+`specs` / `decisions` / `impacts` / `supersedes` / `relates` / `decisionRelates`。
 
 #### `--scip <path>` —— 疊加 SCIP 索引以提升 CALLS 精確度
 

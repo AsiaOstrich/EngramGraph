@@ -85,7 +85,7 @@ export type RelLabel =
   | "IMPACTS"
   | "SUPERSEDES"
   | "RELATES"
-  | "RELATES_TO"
+  | "DECISION_RELATES"
   | "REFERENCES";
 
 /**

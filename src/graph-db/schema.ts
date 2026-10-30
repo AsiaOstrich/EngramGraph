@@ -4,7 +4,7 @@ import type { GraphConnection } from "./connection.js";
  * Kuzu schema for EngramGraph.
  *
  * NODE tables: Function, Class, Module, Spec, Decision (+ generic Doc).
- * REL  tables: CALLS, IMPORTS, DEFINES, IMPLEMENTS, IMPACTS, SUPERSEDES, RELATES, RELATES_TO
+ * REL  tables: CALLS, IMPORTS, DEFINES, IMPLEMENTS, IMPACTS, SUPERSEDES, RELATES, DECISION_RELATES
  *              (+ generic REFERENCES for the default markdown knowledge source).
  *
  * IMPLEMENTS is Module→Spec (not Function→Spec): the `// implements XSPEC-NNN`
@@ -138,7 +138,7 @@ export const REL_TABLE_DDL: readonly string[] = [
   // table — it cannot add a second FROM/TO pair to one that exists — so a graph built
   // before this change would never accept Decision→Decision edges under that name.
   // A new table is created by `initSchema` on the next write-open of an old graph.
-  `CREATE REL TABLE RELATES_TO(FROM Decision TO Decision)`,
+  `CREATE REL TABLE DECISION_RELATES(FROM Decision TO Decision)`,
   `CREATE REL TABLE REFERENCES(FROM Doc TO Doc)`,
 ];
 
@@ -160,7 +160,7 @@ export const REL_TABLES = [
   "IMPACTS",
   "SUPERSEDES",
   "RELATES",
-  "RELATES_TO",
+  "DECISION_RELATES",
   "REFERENCES",
 ] as const;
 

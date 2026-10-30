@@ -16,7 +16,7 @@ import { runEgr } from "./helpers/run-egr.js";
  * came from. "What does this decision replace?" then answered with plain mentions.
  *
  * Now only the `supersedes` field builds SUPERSEDES. Every other Decision → Decision reference is a
- * RELATES_TO edge, which says "mentioned / related" and nothing about replacement.
+ * DECISION_RELATES edge, which says "mentioned / related" and nothing about replacement.
  *
  * The tests run the built CLI as a child process over real markdown files (the way a user does) and
  * read the graph back from disk. Each `it` makes its own tree and graph, so any one can run alone.
@@ -54,7 +54,7 @@ function index(s: { proj: string; db: string }): void {
 }
 
 /** `from->to` of every edge of `rel` between two decisions, read back from the file the CLI wrote. */
-async function edges(db: string, rel: "SUPERSEDES" | "RELATES_TO"): Promise<string[]> {
+async function edges(db: string, rel: "SUPERSEDES" | "DECISION_RELATES"): Promise<string[]> {
   const conn = GraphConnection.open(db, { readOnly: true });
   try {
     const rows = await conn.query(`MATCH (a:Decision)-[:${rel}]->(b:Decision) RETURN a.id AS src, b.id AS dst ORDER BY src, dst`);
@@ -80,7 +80,7 @@ describe("issue #19: only the `supersedes` field makes a SUPERSEDES edge", () =>
     expect(superseding).toEqual(["DEC-903->DEC-904"]);
 
     // The mention is not lost: it is kept as a relation that does not say "replaces".
-    expect(await edges(s.db, "RELATES_TO")).toEqual(["DEC-901->DEC-902"]);
+    expect(await edges(s.db, "DECISION_RELATES")).toEqual(["DEC-901->DEC-902"]);
   }, 60_000);
 
   it("a decision that mentions another only in its body, or under impacts/impacted_by/depends_on/implements, replaces nothing", async () => {
@@ -94,7 +94,7 @@ describe("issue #19: only the `supersedes` field makes a SUPERSEDES edge", () =>
     index(s);
 
     expect(await edges(s.db, "SUPERSEDES")).toEqual([]);
-    expect(await edges(s.db, "RELATES_TO")).toEqual([
+    expect(await edges(s.db, "DECISION_RELATES")).toEqual([
       "DEC-910->DEC-911",
       "DEC-910->DEC-912",
       "DEC-910->DEC-913",
@@ -111,7 +111,7 @@ describe("issue #19: only the `supersedes` field makes a SUPERSEDES edge", () =>
     index(s);
 
     expect(await edges(s.db, "SUPERSEDES")).toEqual(["DEC-920->DEC-921"]);
-    expect(await edges(s.db, "RELATES_TO"), "one pair, one kind of edge").toEqual([]);
+    expect(await edges(s.db, "DECISION_RELATES"), "one pair, one kind of edge").toEqual([]);
   }, 60_000);
 
   it("the summary line counts the two kinds apart", () => {
@@ -120,9 +120,9 @@ describe("issue #19: only the `supersedes` field makes a SUPERSEDES edge", () =>
     });
     const r = runEgr(built.cli, ["index", s.proj, "--docs", "--json"], { env: { ...process.env, ENGRAM_DB: s.db }, cwd: s.proj });
     expect(r.status, r.stderr).toBe(0);
-    const json = JSON.parse(r.stdout) as { knowledge: { supersedes: number; relatesTo: number } };
+    const json = JSON.parse(r.stdout) as { knowledge: { supersedes: number; decisionRelates: number } };
     expect(json.knowledge.supersedes).toBe(1);
-    expect(json.knowledge.relatesTo).toBe(1);
+    expect(json.knowledge.decisionRelates).toBe(1);
   }, 60_000);
 });
 
@@ -162,7 +162,7 @@ describe("issue #19: a graph indexed before the fix heals on the next plain `egr
     expect(superseding, "the declared replacement stays").toContain("DEC-942->DEC-943");
     // Only decisions whose own document was read are rewritten: DEC-999 has no document in this run.
     expect(superseding, "an edge from a decision this run did not read is not this run's to remove").toContain("DEC-999->DEC-940");
-    expect(await edges(s.db, "RELATES_TO")).toEqual(["DEC-940->DEC-941"]);
+    expect(await edges(s.db, "DECISION_RELATES")).toEqual(["DEC-940->DEC-941"]);
   }, 60_000);
 });
 

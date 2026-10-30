@@ -98,7 +98,7 @@ Why, and the terminal command for each, is under "Tools not offered over stdio".
 | Tool | Input | Returns |
 |------|-------|---------|
 | `index_code` *(writable only)* | `files: { path, source }[]` | Indexes source into the code graph (cross-file `CALLS`). Counts of files/functions/classes/calls (+ ambiguous/unresolved). |
-| `index_docs` *(writable only)* | `docs: { content, fallbackId? }[]` | Indexes front-matter markdown into the knowledge graph. Counts of specs/decisions/impacts/supersedes/relates/relatesTo, plus `conflicts`: each id claimed by more than one document, with the document kept and those set aside. |
+| `index_docs` *(writable only)* | `docs: { content, fallbackId? }[]` | Indexes front-matter markdown into the knowledge graph. Counts of specs/decisions/impacts/supersedes/relates/decisionRelates, plus `conflicts`: each id claimed by more than one document, with the document kept and those set aside. |
 | `call_chain` | `symbol`, `direction?` (`callers`\|`callees`\|`both`), `depth?` | Who calls / is called by a function symbol. "What breaks if I change X?" |
 | `impact_analysis` | `nodeId`, `maxHops?` | Decisions in a spec's impact chain (`IMPACTS` + multi-hop `SUPERSEDES`). |
 | `ingest_feedback` *(writable only)* | `nodeId`, `type`, `nodeLabel?` (`Function`\|`Spec`\|`Decision`\|`Doc`), `weight?` | Evolve a node's SAGE confidence from a feedback event (`test_fail`/`test_pass`/`human_fix`). |
