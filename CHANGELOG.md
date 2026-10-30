@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1-beta.2] - 2026-10-30
+
+*Preview of the reason `--incremental` gives after an upgrade, found by the Windows verification of 0.14.1-beta.1 ([#17](https://github.com/AsiaOstrich/EngramGraph/issues/17), [#18](https://github.com/AsiaOstrich/EngramGraph/issues/18)). Published to the `next` dist-tag. Nothing else changes from 0.14.1-beta.1 below, and the incremental-state version stays 2.*
+
+### Fixed
+
+- **`egr index --incremental` says why when the incremental state file is there but cannot be used** ([#17](https://github.com/AsiaOstrich/EngramGraph/issues/17)). After upgrading from 0.14.0 the first run indexed in full, as it should, but printed "no incremental state yet (the graph was built without --incremental, or the state was lost)" although a valid version-1 state from 0.14.0 was present, which sends a user who did use `--incremental` looking for a mistake they did not make. The reason now names the cause: `incremental state was written by an older egr (state version 1, now 2)`, `… by a newer egr (state version 3, now 2) and this egr cannot use it` (after a downgrade), or `the incremental state file could not be read (it is damaged or is not a state file)`. The original sentence is kept for a state file that really is absent. The same text appears in the summary line and in `incremental.reason` of `--json`. What the run does is unchanged: it indexes in full and writes a fresh state.
+
+### Documentation
+
+- **Windows: upgrading while `egr-mcp` is running** ([#18](https://github.com/AsiaOstrich/EngramGraph/issues/18)). `docs/MCP.md` now says what happens (Windows cannot delete the loaded `ryujs.node`, so npm leaves `%APPDATA%\npm\node_modules\.engramgraph-*` behind with an EPERM warning, and the running server keeps serving the old version), and what to do: close Claude Code or the MCP client before upgrading, delete the leftover directory afterwards, and compare `egr --version` with the `serverInfo.version` and the `doctor` tool's `egrVersion` that the server reports about itself. Those two already existed; a test now pins them. No code changed for #18, so a server started before an upgrade is still not told to restart: that is the client's job, and the version it reports is how you see it. `docs/CLI.md` lists the new reasons.
+
 ## [0.14.1-beta.1] - 2026-10-30
 
 *Preview of two index-correctness fixes (linked worktrees, nested function names) and the release-gate fixes below. Published to the `next` dist-tag for the Windows release verification. Upgrading resets the incremental-index state (STATE_VERSION 1 to 2), so the first `--incremental` run after it indexes in full.*
