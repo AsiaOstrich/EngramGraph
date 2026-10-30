@@ -321,7 +321,7 @@ egr doctor --json
 ### `serve [--port 3000]`
 
 在圖譜資料庫上執行 REST server（Hono）。路由掛載於 `/graph/*` 加上 `GET /health`。
-長時間執行——自行管理生命週期。路由介面見 [API.md](./API.md)。
+長時間執行——自行管理生命週期。路由介面見 [API.md](./API.md)。`serve` 以寫入模式持有圖譜（`POST /graph/ingest` 會改信心值），執行期間其他寫入者會被拒絕；收到 Ctrl-C 或 SIGTERM 時，會先把寫前日誌（WAL）併入 `graph.db`，再以 0 結束。
 
 ```bash
 egr serve --port 3000

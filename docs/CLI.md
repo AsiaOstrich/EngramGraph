@@ -488,7 +488,10 @@ unreadable — which is when people run it.
 
 Run the REST server (Hono) over the graph DB. Routes are mounted under
 `/graph/*` plus `GET /health`. Long-running — manages its own lifecycle.
-See [API.md](./API.md) for the route surface.
+See [API.md](./API.md) for the route surface. `serve` holds the graph open for
+writing (`POST /graph/ingest` changes confidence), so it refuses other writers
+while it runs; on Ctrl-C or SIGTERM it folds the write-ahead log into `graph.db`
+and exits 0.
 
 ```bash
 egr serve --port 3000

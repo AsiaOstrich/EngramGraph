@@ -25,6 +25,8 @@ import { callResolutionHint, knowledgeNamingHint } from "./index-hints.js";
 import { READ_ONLY_COMMANDS } from "./read-only-commands.js";
 import { SKIP_DIRS } from "./walk.js";
 import { isLockContention } from "../graph-db/lease.js";
+import { checkpointOrWarn } from "../graph-db/checkpoint.js";
+import type { GraphConnection } from "../graph-db/connection.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
 
@@ -217,6 +219,13 @@ function healthNote(h: IndexHealth | null): string {
   return `\n⚠ possibly incomplete: ${n} file(s) near this result parsed partially/failed (see \`egr blindspots\`)`;
 }
 
+/**
+ * The writable connection this process opened, once it has one. `main().catch` below uses it:
+ * a command that fails after it has written (an `index` whose `--scip` file is missing, say)
+ * must not leave what it wrote only in the write-ahead log.
+ */
+let openedForWriting: GraphConnection | null = null;
+
 async function main(): Promise<void> {
   const { values, positionals } = parseArgs({
     args: process.argv.slice(2),
@@ -384,6 +393,20 @@ async function main(): Promise<void> {
   if (cmd === "mcp") return startMcpStdio(resolveDbPath(loc));
   if (cmd === "serve") {
     const conn = await openGraph(loc);
+    openedForWriting = conn;
+    // `serve` runs until it is stopped, and `POST /graph/ingest` writes. Stopping it with Ctrl-C or
+    // SIGTERM used to leave those writes only in graph.db.wal; fold them in before the process ends.
+    // A second signal while that runs ends the process at once.
+    let stopping = false;
+    const stop = (): void => {
+      if (stopping) process.exit(1);
+      stopping = true;
+      checkpointOrWarn(conn)
+        .catch((err: unknown) => process.stderr.write(`egr: ${err instanceof Error ? err.message : String(err)}\n`))
+        .finally(() => process.exit(0));
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
     const app = createServer({ connection: conn, manifestPath: manifestPathForDb(resolveDbPath(loc)) });
     const port = num(values.port, 3000);
     createHttpServer(async (req, res) => {
@@ -408,6 +431,7 @@ async function main(): Promise<void> {
 
   // Data commands: open graph, run, print, exit.
   const conn = await openGraph(loc, { readOnly: READ_ONLY_COMMANDS.has(cmd) });
+  if (!conn.readOnly) openedForWriting = conn;
   // Set by a command whose RESULT is a failure verdict although it ran fine
   // (`refs check` found a missing reference). Applied at the single exit below.
   let exitCode = 0;
@@ -812,7 +836,10 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
   // that case into an error; it also folds the write-ahead log into the
   // database file, so the next open (an MCP query, which now opens per call)
   // does not replay it — measured 245 ms vs 49 ms per query on a 4 MB log.
-  if (!READ_ONLY_COMMANDS.has(cmd)) await conn.execute("CHECKPOINT;");
+  //
+  // A CHECKPOINT that fails for any other reason (disk full) comes after the command did its
+  // work and printed its result: it is a warning, not a failure (see `checkpointOrWarn`).
+  await checkpointOrWarn(conn);
   process.exit(exitCode); // do not await conn.close() (ryugraph+tree-sitter teardown caveat)
 }
 
@@ -828,5 +855,10 @@ main().catch((err) => {
         "Wait for it to finish and retry; an `egr mcp` server does not hold the graph between queries.\n",
     );
   }
-  process.exit(1);
+  // What the command had written before it failed still belongs in graph.db, not only in the log.
+  // Best effort and silent: the failure being reported is the one above, and if the graph is locked
+  // by another process this cannot take the lock either.
+  const writer = openedForWriting;
+  const folded = writer ? checkpointOrWarn(writer, () => undefined).catch(() => undefined) : Promise.resolve();
+  folded.finally(() => process.exit(1));
 });
