@@ -89,15 +89,46 @@ export function statePathForManifest(manifestPath: string): string {
   return manifestPath.replace(/\.parse-manifest\.json$/, "") + ".incremental-state.json";
 }
 
-/** Read the state, or `null` when it is absent, unreadable or of another version. */
-export function readState(path: string): IncrementalState | null {
+/**
+ * Why a state file could not be used, when there is one to speak of: absent (never written, or
+ * removed), unreadable (not JSON, or not shaped like a state), or written by another egr's state
+ * format. Kept apart because the user is told which one it was — "the state was lost" for a file
+ * that is right there (0.14.0 wrote version 1, this egr reads 2) sends them looking for a mistake
+ * they did not make (issue #17).
+ */
+export type StateProblem =
+  | { kind: "absent" }
+  | { kind: "unreadable" }
+  | { kind: "older" | "newer"; version: number };
+
+/** The state file as found: the state when usable, else why not. */
+export type StateRead = { state: IncrementalState; problem?: undefined } | { state: null; problem: StateProblem };
+
+/** Read the state and, when it cannot be used, say which way. */
+export function inspectState(path: string): StateRead {
+  let text: string;
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<IncrementalState>;
-    if (parsed.version !== STATE_VERSION || typeof parsed.roots !== "object" || parsed.roots === null) return null;
-    return parsed as IncrementalState;
-  } catch {
-    return null;
+    text = readFileSync(path, "utf8");
+  } catch (err) {
+    return { state: null, problem: (err as NodeJS.ErrnoException)?.code === "ENOENT" ? { kind: "absent" } : { kind: "unreadable" } };
   }
+  let parsed: Partial<IncrementalState> | null;
+  try {
+    parsed = JSON.parse(text) as Partial<IncrementalState> | null;
+  } catch {
+    return { state: null, problem: { kind: "unreadable" } };
+  }
+  if (typeof parsed !== "object" || parsed === null || typeof parsed.version !== "number") return { state: null, problem: { kind: "unreadable" } };
+  if (parsed.version !== STATE_VERSION) {
+    return { state: null, problem: { kind: parsed.version < STATE_VERSION ? "older" : "newer", version: parsed.version } };
+  }
+  if (typeof parsed.roots !== "object" || parsed.roots === null) return { state: null, problem: { kind: "unreadable" } };
+  return { state: parsed as IncrementalState };
+}
+
+/** Read the state, or `null` when it is absent, unreadable or of another version ({@link inspectState} says which). */
+export function readState(path: string): IncrementalState | null {
+  return inspectState(path).state;
 }
 
 /** Atomic write (temp + rename), as the manifest does. */
@@ -158,6 +189,20 @@ function sameFingerprint(
 /** Why an `--incremental` run had to index in full. */
 export type FullReason = string;
 
+/** The sentence for a state file that cannot be used. Each cause names itself: none is passed off as another. */
+function stateProblemReason(problem: StateProblem | undefined): string {
+  switch (problem?.kind) {
+    case "older":
+      return `incremental state was written by an older egr (state version ${problem.version}, now ${STATE_VERSION}), so every file is parsed again`;
+    case "newer":
+      return `incremental state was written by a newer egr (state version ${problem.version}, now ${STATE_VERSION}) and this egr cannot use it, so every file is parsed again`;
+    case "unreadable":
+      return "the incremental state file could not be read (it is damaged or is not a state file), so every file is parsed again";
+    default:
+      return "no incremental state yet (the graph was built without --incremental, or the state was lost)";
+  }
+}
+
 /**
  * Decide whether the remembered facts can be used. Returns the section to diff
  * against, or the reason the run must index in full.
@@ -166,13 +211,15 @@ export function usableState(args: {
   root: string;
   manifest: ParseManifest | null;
   state: IncrementalState | null;
+  /** Why `state` is null, from {@link inspectState}. Left out, a null state reads as "absent". */
+  stateProblem?: StateProblem;
   egrVersion: string;
 }): { ok: true; prev: RootState } | { ok: false; reason: FullReason } {
-  const { root, manifest, state, egrVersion } = args;
+  const { root, manifest, state, stateProblem, egrVersion } = args;
   if (!manifest) return { ok: false, reason: "no parse-health manifest yet (first index of this graph)" };
   const section = manifest.runs[root];
   if (!section) return { ok: false, reason: "this root has not been indexed into this graph before" };
-  if (!state) return { ok: false, reason: "no incremental state yet (the graph was built without --incremental, or the state was lost)" };
+  if (!state) return { ok: false, reason: stateProblemReason(stateProblem) };
   const prev = state.roots[root];
   if (!prev) return { ok: false, reason: "no incremental state for this root yet" };
   if (!section.incrementalToken || section.incrementalToken !== prev.token) {

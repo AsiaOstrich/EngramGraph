@@ -102,7 +102,10 @@ With `--docs`, also indexes `*.md` files into the **knowledge graph**
   egr repository itself (210 files), a full rebuild took about 26 s and an
   incremental index after editing 3 files about 0.4 s.
   **It indexes in full instead — and prints the reason — when** it is the first
-  `--incremental` run; egr or a tree-sitter grammar version differs from the one
+  `--incremental` run; the state file was written by an older egr whose state
+  format differs (`incremental state was written by an older egr (state version
+  1, now 2)`; a newer egr's file says `newer`, and a file that is damaged says it
+  could not be read); egr or a tree-sitter grammar version differs from the one
   that wrote the state (so a grammar upgrade re-parses everything); the graph was
   indexed again without `--incremental` since (the state is tied to the
   manifest by a token); the graph holds fewer files than the state remembers; or

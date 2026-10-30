@@ -223,7 +223,7 @@ describe("cmdIndex --incremental, called in-process (XSPEC-508 R6)", () => {
     });
   });
 
-  it("a state file that is not JSON is not trusted: full, and the reason says there is no state", async () => {
+  it("a state file that is not JSON is not trusted: full, and the reason says it could not be read", async () => {
     await withEnv("badstate", async (e) => {
       const proj = join(e.dir, "proj");
       writeTree(proj, TREE);
@@ -231,13 +231,13 @@ describe("cmdIndex --incremental, called in-process (XSPEC-508 R6)", () => {
       writeFileSync(e.statePath, "{ this is not json");
       const r = await cmdIndex(e.conn, { dir: proj, incremental: true, manifestPath: e.manifestPath });
       expect(inc(r).mode).toBe("full");
-      expect(inc(r).reason).toContain("no incremental state yet");
+      expect(inc(r).reason).toContain("could not be read");
       // and the run repaired it: the next one is incremental again
       expect(inc(await cmdIndex(e.conn, { dir: proj, incremental: true, manifestPath: e.manifestPath })).mode).toBe("incremental");
     });
   });
 
-  it("a state file of another version is not trusted either", async () => {
+  it("a state file of another version is not trusted either, and the reason names the versions (issue #17)", async () => {
     await withEnv("oldversion", async (e) => {
       const proj = join(e.dir, "proj");
       writeTree(proj, TREE);
@@ -246,7 +246,11 @@ describe("cmdIndex --incremental, called in-process (XSPEC-508 R6)", () => {
       writeFileSync(e.statePath, JSON.stringify({ ...state, version: state.version + 1 }));
       const r = await cmdIndex(e.conn, { dir: proj, incremental: true, manifestPath: e.manifestPath });
       expect(inc(r).mode).toBe("full");
-      expect(inc(r).reason).toContain("no incremental state yet");
+      expect(inc(r).reason).toContain(`written by a newer egr (state version ${state.version + 1}, now ${state.version})`);
+      writeFileSync(e.statePath, JSON.stringify({ ...state, version: state.version - 1 }));
+      const older = await cmdIndex(e.conn, { dir: proj, incremental: true, manifestPath: e.manifestPath });
+      expect(inc(older).mode).toBe("full");
+      expect(inc(older).reason).toContain(`written by an older egr (state version ${state.version - 1}, now ${state.version})`);
     });
   });
 

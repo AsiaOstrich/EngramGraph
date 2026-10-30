@@ -43,6 +43,33 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
 The `npx egr-mcp` form above has **not** been verified on native Windows. If it
 does not connect there, use the global install and the command above.
 
+**Windows: upgrading while `egr-mcp` is running.** Windows will not delete a
+native module that a running process has loaded, and `egr-mcp` loads
+`ryugraph\ryujs.node`. So `npm i -g engramgraph@<version>` run while Claude Code
+(or any MCP client) has `egr-mcp` open still reports success and `egr --version`
+prints the new version, but two things are wrong (macOS and Linux can delete open
+files, so neither shows up there):
+
+1. npm cannot remove the old package directory. It prints `npm warn cleanup
+   Failed to remove some directories … EPERM … ryujs.node` and leaves a renamed
+   copy, `%APPDATA%\npm\node_modules\.engramgraph-<random>`.
+2. The `egr-mcp` that is already running keeps serving the **old** version until
+   its client restarts it. Nothing tells you.
+
+What to do:
+
+1. **Close Claude Code (or the MCP client) before upgrading**, so no `egr-mcp`
+   process is left. A remaining one shows up in Task Manager as a `node.exe`
+   whose command line ends in `…\node_modules\engramgraph\dist\mcp\stdio.js`.
+2. Upgrade, then **delete any leftover `%APPDATA%\npm\node_modules\.engramgraph-*`
+   directory**. It is a renamed copy of the old package and nothing uses it.
+   (If the delete is refused, an `egr-mcp` is still running: close it first.)
+3. Start the client again. To check that the server it started is the new one,
+   compare `egr --version` with what the server reports about itself: the
+   `serverInfo.version` of its `initialize` answer and `egrVersion` in the result
+   of the `doctor` tool (ask the assistant to run it). A server started before
+   the upgrade reports the old number.
+
 ### Codex / Cursor / Windsurf (and other MCP clients)
 
 Add a stdio server to the client's MCP config. The shape varies per client, but

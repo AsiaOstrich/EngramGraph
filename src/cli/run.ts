@@ -54,6 +54,7 @@ import {
   dropRootState,
   fingerprint,
   gitChangedPaths,
+  inspectState,
   newToken,
   readState,
   statePathForManifest,
@@ -434,7 +435,8 @@ async function indexCodeIncrementally(
     // because it outlasts every other reason (a full index does not separate the nodes).
     reason = sharedNodesReason(assignment);
   } else {
-    const usable = usableState({ root, manifest, state: readState(statePath), egrVersion: EGR_VERSION });
+    const found = inspectState(statePath);
+    const usable = usableState({ root, manifest, state: found.state, stateProblem: found.problem, egrVersion: EGR_VERSION });
     if (usable.ok) {
       prev = usable.prev;
       const rows = await conn.query("MATCH (m:Module) RETURN count(m) AS c");

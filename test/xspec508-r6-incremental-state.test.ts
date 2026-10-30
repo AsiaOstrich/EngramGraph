@@ -14,6 +14,7 @@ import {
   fingerprint,
   gitChangedPaths,
   newToken,
+  inspectState,
   readState,
   statePathForManifest,
   usableState,
@@ -85,6 +86,30 @@ describe("the state file: read, write, drop (XSPEC-508 R6)", () => {
     expect(readState(p)).toBeNull();
     writeFileSync(p, JSON.stringify({ version: STATE_VERSION, roots: {} }));
     expect(readState(p)).toEqual({ version: STATE_VERSION, roots: {} });
+  });
+
+  it("inspectState says WHY a state cannot be used: absent, unreadable, older, newer (issue #17)", () => {
+    const dir = fresh("inspect");
+    const p = join(dir, "s.json");
+    expect(inspectState(p)).toEqual({ state: null, problem: { kind: "absent" } });
+    writeFileSync(p, "not json");
+    expect(inspectState(p)).toEqual({ state: null, problem: { kind: "unreadable" } });
+    writeFileSync(p, "null");
+    expect(inspectState(p)).toEqual({ state: null, problem: { kind: "unreadable" } });
+    writeFileSync(p, JSON.stringify({ roots: {} })); // no version at all
+    expect(inspectState(p)).toEqual({ state: null, problem: { kind: "unreadable" } });
+    writeFileSync(p, JSON.stringify({ version: "2", roots: {} }));
+    expect(inspectState(p)).toEqual({ state: null, problem: { kind: "unreadable" } });
+    writeFileSync(p, JSON.stringify({ version: STATE_VERSION, roots: "x" }));
+    expect(inspectState(p)).toEqual({ state: null, problem: { kind: "unreadable" } });
+    writeFileSync(p, JSON.stringify({ version: STATE_VERSION - 1, roots: {} }));
+    expect(inspectState(p)).toEqual({ state: null, problem: { kind: "older", version: STATE_VERSION - 1 } });
+    writeFileSync(p, JSON.stringify({ version: STATE_VERSION + 1, roots: {} }));
+    expect(inspectState(p)).toEqual({ state: null, problem: { kind: "newer", version: STATE_VERSION + 1 } });
+    writeFileSync(p, JSON.stringify({ version: STATE_VERSION, roots: {} }));
+    expect(inspectState(p)).toEqual({ state: { version: STATE_VERSION, roots: {} } });
+    mkdirSync(join(dir, "adir"));
+    expect(inspectState(join(dir, "adir"))).toEqual({ state: null, problem: { kind: "unreadable" } }); // exists, cannot be read as a file
   });
 
   it("writeState round-trips through readState and leaves no temp file", () => {
@@ -198,6 +223,9 @@ describe("usableState: the reasons a remembered state is refused (XSPEC-508 R6)"
       { manifest: manifestWith({ incrementalToken: "t1" }), state: stateWith({ ...rootState(facts, "t1"), grammarVersions: { "tree-sitter": "1" } }) },
       "parser fingerprint differs",
     ],
+    ["no state, and the file was written by an older egr", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "older", version: 1 } }, "written by an older egr (state version 1, now 2)"],
+    ["no state, and the file was written by a newer egr", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "newer", version: 3 } }, "written by a newer egr (state version 3, now 2)"],
+    ["no state, because the file could not be read", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "unreadable" } }, "could not be read"],
   ] as const)("refuses %s", (_name, input, reason) => {
     const r = usableState({ root: "/r", egrVersion: "9.9.9", ...input });
     expect(r.ok).toBe(false);
