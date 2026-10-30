@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-30
+
+> **Stable Release**: the same content as 0.14.1-beta.2 below, which passed the Windows release verification (run 40998498315) and the cross-platform compatibility check (run 40998237287). Skips git linked worktrees, keeps nested function names local, and names the real reason `--incremental` re-indexes after an upgrade; see 0.14.1-beta.1 and beta.2 for the details.
+
 ## [0.14.1-beta.2] - 2026-10-30
 
 *Preview of the reason `--incremental` gives after an upgrade, found by the Windows verification of 0.14.1-beta.1 ([#17](https://github.com/AsiaOstrich/EngramGraph/issues/17), [#18](https://github.com/AsiaOstrich/EngramGraph/issues/18)). Published to the `next` dist-tag. Nothing else changes from 0.14.1-beta.1 below, and the incremental-state version stays 2.*
