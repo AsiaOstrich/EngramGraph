@@ -58,7 +58,7 @@ describe("graph-db schema (AC-1)", () => {
     expect(rows[0]?.name).toBe("helper");
 
     // Sanity: the schema declares the expected number of rel tables.
-    expect(REL_TABLES.length).toBe(8);
+    expect(REL_TABLES.length).toBe(9);
   });
 
   it("initSchema is idempotent (safe to call twice)", async () => {

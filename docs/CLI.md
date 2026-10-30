@@ -42,7 +42,8 @@ The directory is created on demand and the schema is ensured on every open
 Recursively indexes source files under `<dir>` into the **code graph**
 (tree-sitter → `Function` / `Class` / `Module` nodes + cross-file `CALLS`).
 With `--docs`, also indexes `*.md` files into the **knowledge graph**
-(front-matter → `Spec` / `Decision` + `IMPACTS` / `SUPERSEDES`).
+(front-matter → `Spec` / `Decision` + `IMPACTS` / `SUPERSEDES` / `RELATES_TO`;
+only the `supersedes` field makes a `SUPERSEDES` edge).
 
 - Which document is which id (`--docs`): a document is a spec or decision when
   its front-matter `id`, its filename, or its first `#` heading **starts with**
@@ -185,7 +186,7 @@ egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 
 Output counts: `files`, `functions`, `classes`, `calls`, plus `ambiguous`
 (callee name matched > 1 function — skipped) and `unresolved` (callee matched
-none — skipped); with `--docs`, `specs` / `decisions` / `impacts` / `supersedes`.
+none — skipped); with `--docs`, `specs` / `decisions` / `impacts` / `supersedes` / `relates` / `relatesTo`.
 
 #### `--scip <path>` — overlay a SCIP index for higher-precision CALLS
 

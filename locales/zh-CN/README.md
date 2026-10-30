@@ -300,8 +300,8 @@ egr refs check MEMORY.md
 ## 图谱 schema
 
 6 个节点表——`Function`、`Class`、`Module`、`Spec`、`Decision`、`Doc`。
-8 个关系表——`CALLS`、`IMPORTS`、`DEFINES`、`IMPLEMENTS`、`IMPACTS`、`SUPERSEDES`、
-`RELATES`、`REFERENCES`。完整 DDL 与驱动知识导入的 front-matter schema 见 **[docs/API.md](./docs/API.md)**。
+9 个关系表——`CALLS`、`IMPORTS`、`DEFINES`、`IMPLEMENTS`、`IMPACTS`、`SUPERSEDES`、
+`RELATES`、`RELATES_TO`、`REFERENCES`。完整 DDL 与驱动知识导入的 front-matter schema 见 **[docs/API.md](./docs/API.md)**。
 
 ## EngramGraph 不存储什么
 

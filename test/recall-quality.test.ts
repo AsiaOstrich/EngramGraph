@@ -26,9 +26,10 @@ import {
  *           with no SUPERSEDES edge at all — the "推翻" case, not the
  *           "過期" case
  *
- * "a3 supersedes a2" is written as a3's doc linking to [[a2]] — parser.ts's
- * Decision→Decision rule turns that into SUPERSEDES(a3 -> a2), i.e. the edge
- * points from the newer decision to the one it replaces.
+ * "a3 supersedes a2" is written as a3's doc listing a2 under `supersedes:` —
+ * parser.ts turns that into SUPERSEDES(a3 -> a2), i.e. the edge points from the
+ * newer decision to the one it replaces. (Until issue #19 a body link
+ * `[[a2]]` was enough; now only the `supersedes` field replaces.)
  *
  * 4 valid (a3, b2, c1, c2) out of 9 total — this composition, not any
  * particular naming of it, is what the fixture's ground truth is about.
@@ -94,10 +95,10 @@ const VALID_IDS_SORT_FIRST_NAMING: FixtureNaming = {
 async function buildFixture(conn: GraphConnection, naming: FixtureNaming): Promise<{ validIds: Set<string> }> {
   await indexKnowledgeDocs(conn, [
     { content: `---\nid: ${naming.a1}\n---\n# a1\nfirst cut` },
-    { content: `---\nid: ${naming.a2}\n---\n# a2\nsupersedes [[${naming.a1}]]` },
-    { content: `---\nid: ${naming.a3}\n---\n# a3\nsupersedes [[${naming.a2}]]` },
+    { content: `---\nid: ${naming.a2}\nsupersedes: [${naming.a1}]\n---\n# a2\nreplaces its predecessor` },
+    { content: `---\nid: ${naming.a3}\nsupersedes: [${naming.a2}]\n---\n# a3\nreplaces its predecessor` },
     { content: `---\nid: ${naming.b1}\n---\n# b1\nfirst cut` },
-    { content: `---\nid: ${naming.b2}\n---\n# b2\nsupersedes [[${naming.b1}]]` },
+    { content: `---\nid: ${naming.b2}\nsupersedes: [${naming.b1}]\n---\n# b2\nreplaces its predecessor` },
     { content: `---\nid: ${naming.c1}\n---\n# c1\nnever revisited` },
     { content: `---\nid: ${naming.c2}\n---\n# c2\nnever revisited` },
     { content: `---\nid: ${naming.d1}\n---\n# d1\nwill be overturned by a failing test` },

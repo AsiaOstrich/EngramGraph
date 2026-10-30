@@ -32,9 +32,10 @@ const DEC_069 = `---
 id: DEC-069
 title: EngramGraph Architecture
 date: 2026-05-27
+supersedes: [DEC-062]
 ---
 # DEC-069
-Supersedes [[DEC-062]].
+Replaces DEC-062 (declared in the supersedes field; issue #19: a mention alone does not replace).
 `;
 
 const CORPUS = [{ content: SPEC_205 }, { content: DEC_062 }, { content: DEC_069 }];
@@ -67,7 +68,7 @@ describe("KnowledgeGraph parser/linker (Phase 3)", () => {
     expect(parsed?.kind).toBe("Spec");
     expect(parsed?.id).toBe("SPEC-205");
     expect(parsed?.title).toBe("Agent/Role Spec SDD Variant");
-    expect(parsed?.refs).toEqual([{ kind: "Decision", id: "DEC-062" }]);
+    expect(parsed?.refs).toEqual([{ kind: "Decision", id: "DEC-062", via: ["body"] }]);
   });
 
   it("derives id from fallbackId when front-matter omits it", () => {

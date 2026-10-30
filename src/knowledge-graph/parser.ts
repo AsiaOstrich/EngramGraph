@@ -6,7 +6,11 @@
  * becomes a typed edge:
  *   - Decision → Spec link  ⇒ IMPACTS (Decision → Spec)
  *   - Spec → Decision link  ⇒ IMPACTS (Decision → Spec)  (decision impacts spec)
- *   - Decision → Decision   ⇒ SUPERSEDES (source → referenced)
+ *   - Decision → Decision   ⇒ SUPERSEDES (source → referenced) ONLY when the reference
+ *                             is written under the `supersedes` front-matter field;
+ *                             any other Decision → Decision reference (`related`,
+ *                             `depends_on`, `impacts`, `impacted_by`, `implements`, or a
+ *                             `[[ref]]` in the body) ⇒ RELATES_TO (issue #19)
  *   - Spec → Spec           ⇒ RELATES (source → referenced; doc↔doc up/downstream)
  *
  * Referenced ids absent from the batch get a stub node so the edge still lands;
@@ -41,8 +45,19 @@ export interface ParsedKnowledgeDoc {
   source?: string;
   title: string;
   /** Classified outbound references (self-references removed). */
-  refs: Array<{ kind: KnowledgeNodeKind; id: string }>;
+  refs: KnowledgeRef[];
   node: GraphNode;
+}
+
+/** Where in a document a reference was written: its body (`[[ref]]`), or one relationship front-matter field. */
+export type RefSource = "body" | (typeof RELATIONSHIP_FIELDS)[number];
+
+/** One outbound reference of a document, with every place the document wrote it (issue #19). */
+export interface KnowledgeRef {
+  kind: KnowledgeNodeKind;
+  id: string;
+  /** Never empty. The same id written under `related` and `supersedes` lists both. */
+  via: RefSource[];
 }
 
 function firstHeading(body: string): string | null {
@@ -164,28 +179,34 @@ export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null 
 
   // Refs come from two sources: inline [[ref]] links in the body, and the
   // relationship front-matter fields defined by the knowledge-graph-memory
-  // standard. The kind-based edge rule in ingest() turns each typed ref into
-  // the right directed edge, so listing a ref under any relationship field
-  // yields the correct IMPACTS/SUPERSEDES edge.
-  const seen = new Set<string>();
-  const refs: Array<{ kind: KnowledgeNodeKind; id: string }> = [];
-  const addRef = (raw: string): void => {
+  // standard. Each ref remembers WHERE it was written (`via`): ingest() needs
+  // it, because "this decision replaces that one" is something only the
+  // `supersedes` field says. Before issue #19 the places were merged into one
+  // list and forgotten, and every Decision → Decision link became SUPERSEDES.
+  const byKey = new Map<string, KnowledgeRef>();
+  const refs: KnowledgeRef[] = [];
+  const addRef = (raw: string, via: RefSource): void => {
     const c = classifyRef(raw);
     if (!c || c.id === id) return;
     const key = `${c.kind}:${c.id}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    refs.push(c);
+    const seen = byKey.get(key);
+    if (seen) {
+      if (!seen.via.includes(via)) seen.via.push(via);
+      return;
+    }
+    const ref: KnowledgeRef = { kind: c.kind, id: c.id, via: [via] };
+    byKey.set(key, ref);
+    refs.push(ref);
   };
 
-  for (const ref of extractRefs(body)) addRef(ref);
+  for (const ref of extractRefs(body)) addRef(ref, "body");
 
   for (const field of RELATIONSHIP_FIELDS) {
     const value = fields[field];
     if (!value) continue;
     // Pattern lives in linker.ts — this used to restate it, with a comment
     // saying so, which is exactly how the two drifted apart (XSPEC-373 R4a).
-    for (const id of extractRefIds(value)) addRef(id);
+    for (const id of extractRefIds(value)) addRef(id, field);
   }
 
   return {
@@ -277,7 +298,8 @@ export class SpecDecisionKnowledgeSource {
         } else if (p.kind === "Spec" && ref.kind === "Decision") {
           edges.push(impacts(ref.id, p.id));
         } else if (p.kind === "Decision" && ref.kind === "Decision") {
-          edges.push(supersedes(p.id, ref.id));
+          // Replacement is declared, not inferred from a mention (issue #19).
+          edges.push(ref.via.includes("supersedes") ? supersedes(p.id, ref.id) : relatesTo(p.id, ref.id));
         } else {
           // Spec → Spec: doc↔doc upstream/downstream (related / depends_on).
           edges.push(relates(p.id, ref.id));
@@ -331,6 +353,10 @@ function supersedes(fromId: string, toId: string): GraphEdge {
   return { label: "SUPERSEDES", fromLabel: "Decision", from: fromId, toLabel: "Decision", to: toId };
 }
 
+function relatesTo(fromId: string, toId: string): GraphEdge {
+  return { label: "RELATES_TO", fromLabel: "Decision", from: fromId, toLabel: "Decision", to: toId };
+}
+
 function relates(fromId: string, toId: string): GraphEdge {
   return { label: "RELATES", fromLabel: "Spec", from: fromId, toLabel: "Spec", to: toId };
 }
@@ -341,6 +367,8 @@ export interface KnowledgeIndexResult {
   impacts: number;
   supersedes: number;
   relates: number;
+  /** Decision → Decision references that do not replace anything (issue #19). */
+  relatesTo: number;
   /**
    * How many documents were read (XSPEC-373 R1).
    *
@@ -515,6 +543,29 @@ async function replacedFromEarlierIndex(conn: GraphConnection, owners: readonly 
   return out;
 }
 
+/**
+ * Forget what an earlier index recorded as each owning Decision's own
+ * Decision → Decision edges, so this run's document replaces it (issue #19).
+ *
+ * The writer only MERGEs, so the edges an older egr wrongly wrote — a plain
+ * mention stored as SUPERSEDES — would otherwise survive every re-index; only
+ * `--clean` removed them, and `--clean` also resets SAGE's accumulated
+ * confidence. A document is the only source of its decision's outbound
+ * Decision → Decision edges (nothing else writes SUPERSEDES or RELATES_TO), so
+ * rewriting them from the document is the same rule as rewriting the node.
+ * Scoped to the decisions whose document was read in THIS run: indexing one
+ * directory leaves every other decision's edges alone, and a reference removed
+ * from a document stops being an edge.
+ */
+async function forgetDecisionEdgesOf(conn: GraphConnection, owners: readonly ParsedKnowledgeDoc[]): Promise<void> {
+  for (const p of owners) {
+    if (p.kind !== "Decision") continue;
+    for (const rel of ["SUPERSEDES", "RELATES_TO"] as const) {
+      await conn.execute(`MATCH (:Decision {id: $id})-[r:${rel}]->(:Decision) DELETE r`, { id: p.id });
+    }
+  }
+}
+
 /** Ingest spec/decision docs and write them to the graph. */
 export async function indexKnowledgeDocs(
   conn: GraphConnection,
@@ -523,6 +574,7 @@ export async function indexKnowledgeDocs(
   const source = new SpecDecisionKnowledgeSource(docs);
   const fragment = await source.ingest();
   const replaced = await replacedFromEarlierIndex(conn, source.owners);
+  await forgetDecisionEdgesOf(conn, source.owners);
   await writeFragment(conn, fragment);
   return {
     specs: fragment.nodes.filter((n) => n.label === "Spec").length,
@@ -530,6 +582,7 @@ export async function indexKnowledgeDocs(
     impacts: fragment.edges.filter((e) => e.label === "IMPACTS").length,
     supersedes: fragment.edges.filter((e) => e.label === "SUPERSEDES").length,
     relates: fragment.edges.filter((e) => e.label === "RELATES").length,
+    relatesTo: fragment.edges.filter((e) => e.label === "RELATES_TO").length,
     docsScanned: docs.length,
     docsUnresolved: source.unresolved,
     conflicts: [...source.conflicts, ...replaced],

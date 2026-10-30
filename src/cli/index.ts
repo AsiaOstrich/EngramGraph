@@ -427,7 +427,7 @@ async function main(): Promise<void> {
         const dupConflicts = (s.knowledge?.conflicts ?? []).filter((c): c is DocIdConflict => c.reason === "duplicate-id");
         const replacedConflicts = (s.knowledge?.conflicts ?? []).filter((c): c is ReplacedDocument => c.reason === "replaced-from-earlier-index");
         const k = s.knowledge
-          ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relates} relates` +
+          ? `\nknowledge: ${s.knowledge.specs} specs, ${s.knowledge.decisions} decisions, ${s.knowledge.impacts} impacts, ${s.knowledge.supersedes} supersedes, ${s.knowledge.relatesTo} relates-to, ${s.knowledge.relates} relates` +
             ` (${s.knowledge.docsScanned} doc(s) scanned, ${s.knowledge.docsUnresolved.length} unnamed` +
             // Documents set aside because another document owns their id (XSPEC-476 R2).
             // Named in the count so scanned = nodes' sources + unnamed + set aside adds up.

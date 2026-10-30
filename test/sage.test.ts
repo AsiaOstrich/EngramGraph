@@ -99,7 +99,7 @@ describe("SAGE reader (Phase 4)", () => {
     await indexKnowledgeDocs(conn, [
       { content: "---\nid: SPEC-900\n---\n# s\nsee [[DEC-900]] [[DEC-901]]" },
       { content: "---\nid: DEC-900\n---\n# d\nimpacts [[SPEC-900]]" },
-      { content: "---\nid: DEC-901\n---\n# d\nsupersedes [[DEC-900]]" },
+      { content: "---\nid: DEC-901\nsupersedes: [DEC-900]\n---\n# d\nreplaces DEC-900" },
     ]);
     // lower DEC-900 confidence so DEC-901 ranks first
     await applyFeedback(conn, { nodeId: "DEC-900", signal: "negative", weight: 1 }, "Decision");

@@ -66,6 +66,7 @@ REL IMPLEMENTS(Module → Spec)
 REL IMPACTS(Decision → Spec)
 REL SUPERSEDES(Decision → Decision)
 REL RELATES(Spec → Spec)
+REL RELATES_TO(Decision → Decision)
 REL REFERENCES(Doc → Doc)
 ```
 
@@ -105,10 +106,10 @@ tree-sitter 將 `.ts` / `.tsx` / `.js` 解析為 `Function` / `Class` / `Module`
 ## knowledge-graph — spec/decision markdown → 圖譜
 
 一個 **參考** 知識 adapter：spec 文件 → `Spec`、decision / ADR 文件 → `Decision`、
-關係 front-matter + `[[ref]]` 連結 → `IMPACTS` / `SUPERSEDES`。
+關係 front-matter + `[[ref]]` 連結 → `IMPACTS` / `SUPERSEDES` / `RELATES_TO`。只有 `supersedes` 欄位會建立 `SUPERSEDES` 邊；兩個決策之間的其他引用一律是 `RELATES_TO`。
 
 - `indexKnowledgeDocs(conn, docs: KnowledgeDoc[]): Promise<KnowledgeIndexResult>`
-  — `KnowledgeDoc = { content, fallbackId? }`；結果計數 `{ specs, decisions, impacts, supersedes }`。
+  — `KnowledgeDoc = { content, fallbackId? }`；結果計數 `{ specs, decisions, impacts, supersedes, relates, relatesTo }`。
 - `parseKnowledgeDoc(doc): ParsedKnowledgeDoc | null` — 解析單一文件（不寫入）；
   若無法解析出 id（來自 front-matter `id`、`fallbackId` 或內文）則回傳 `null`。
 - `classifyRef(id): ClassifiedRef` — 將 id 分類為 `Spec` 或 `Decision`。
@@ -127,7 +128,7 @@ tree-sitter 將 `.ts` / `.tsx` / `.js` 解析為 `Function` / `Class` / `Module`
 | `id` | 節點 id（否則用 `fallbackId`，再否則從內文推斷）|
 | `title` | 節點標題 |
 | `status` | 節點狀態（預設 `unknown`）|
-| `related`、`impacts`、`impacted_by`、`supersedes`、`implements` | 關係欄位 → `IMPACTS` / `SUPERSEDES` 邊 |
+| `related`、`impacts`、`impacted_by`、`supersedes`、`implements` | 關係欄位 → `IMPACTS` / `SUPERSEDES` / `RELATES_TO` 邊。只有 `supersedes`（須完全此拼法）建立 `SUPERSEDES`；兩個決策之間的 `related`、`depends_on`、`impacts`、`impacted_by`、`implements` 建立 `RELATES_TO` |
 
 內文中的行內 `[[ref]]` 連結也會被擷取為參考。
 

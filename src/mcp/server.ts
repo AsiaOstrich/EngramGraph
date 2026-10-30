@@ -186,7 +186,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     {
       title: "Index docs",
       description:
-        "Index spec/decision markdown into the knowledge graph (front-matter related/impacts/supersedes + [[ref]] → Spec/Decision + IMPACTS/SUPERSEDES).",
+        "Index spec/decision markdown into the knowledge graph (front-matter related/impacts/supersedes + [[ref]] → Spec/Decision + IMPACTS/SUPERSEDES/RELATES_TO; only the supersedes field replaces).",
       inputSchema: {
         docs: z.array(z.object({ content: z.string(), fallbackId: z.string().optional() })),
       },

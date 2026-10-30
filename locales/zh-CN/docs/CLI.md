@@ -46,7 +46,7 @@ egr <command> [args] [options]
 
 递归将 `<dir>` 下的源代码索引进**代码图谱**（tree-sitter → `Function` / `Class` /
 `Module` 节点 + 跨文件 `CALLS`）。加上 `--docs` 时，也会把 `*.md` 索引进**知识图谱**
-（front-matter → `Spec` / `Decision` + `IMPACTS` / `SUPERSEDES`）。
+（front-matter → `Spec` / `Decision` + `IMPACTS` / `SUPERSEDES` / `RELATES_TO`；只有 `supersedes` 字段会建立 `SUPERSEDES` 边）。
 
 - 代码扩展名：`.ts .tsx .js .jsx .mts .cts .mjs .cjs .cs .py .go .java
   .kt .kts .rs .cpp .cc .cxx .hpp .h .hh .rb .php .dart`（排除 `.d.ts`）。
@@ -113,7 +113,7 @@ egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 
 输出计数：`files`、`functions`、`classes`、`calls`，以及 `ambiguous`（被调用名称匹配到
 > 1 个函数——跳过）与 `unresolved`（匹配不到——跳过）；加上 `--docs` 时还有
-`specs` / `decisions` / `impacts` / `supersedes`。
+`specs` / `decisions` / `impacts` / `supersedes` / `relates` / `relatesTo`。
 
 #### `--scip <path>` —— 叠加 SCIP 索引以提升 CALLS 精确度
 

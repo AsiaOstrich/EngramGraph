@@ -2,7 +2,8 @@
  * KnowledgeGraph module types.
  *
  * A *reference* knowledge adapter: spec docs → Spec nodes; decision/ADR docs →
- * Decision nodes, `[[ref]]` links → IMPACTS / SUPERSEDES edges. The generic,
+ * Decision nodes, `[[ref]]` links and relationship fields → IMPACTS / SUPERSEDES / RELATES_TO
+ * edges (SUPERSEDES only from the `supersedes` field). The generic,
  * provider-agnostic default lives in adapters/knowledge-source (Doc nodes).
  */
 

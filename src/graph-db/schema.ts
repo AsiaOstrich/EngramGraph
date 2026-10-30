@@ -4,7 +4,7 @@ import type { GraphConnection } from "./connection.js";
  * Kuzu schema for EngramGraph.
  *
  * NODE tables: Function, Class, Module, Spec, Decision (+ generic Doc).
- * REL  tables: CALLS, IMPORTS, DEFINES, IMPLEMENTS, IMPACTS, SUPERSEDES, RELATES
+ * REL  tables: CALLS, IMPORTS, DEFINES, IMPLEMENTS, IMPACTS, SUPERSEDES, RELATES, RELATES_TO
  *              (+ generic REFERENCES for the default markdown knowledge source).
  *
  * IMPLEMENTS is Module→Spec (not Function→Spec): the `// implements XSPEC-NNN`
@@ -131,6 +131,14 @@ export const REL_TABLE_DDL: readonly string[] = [
   // so the doc↔doc graph joins the code graph on the same Spec nodes IMPLEMENTS
   // points at — one node per artifact, no parallel Doc nodes (XSPEC-331 R2).
   `CREATE REL TABLE RELATES(FROM Spec TO Spec)`,
+  // Decision→Decision that does NOT replace anything (issue #19): one decision names
+  // another under `related`/`depends_on`/`impacts`/…, or links it in its body. These
+  // used to become SUPERSEDES, so every mention read as a replacement. `RELATES` cannot
+  // carry them: it is declared Spec→Spec, and `initSchema` only ever creates a missing
+  // table — it cannot add a second FROM/TO pair to one that exists — so a graph built
+  // before this change would never accept Decision→Decision edges under that name.
+  // A new table is created by `initSchema` on the next write-open of an old graph.
+  `CREATE REL TABLE RELATES_TO(FROM Decision TO Decision)`,
   `CREATE REL TABLE REFERENCES(FROM Doc TO Doc)`,
 ];
 
@@ -152,6 +160,7 @@ export const REL_TABLES = [
   "IMPACTS",
   "SUPERSEDES",
   "RELATES",
+  "RELATES_TO",
   "REFERENCES",
 ] as const;
 

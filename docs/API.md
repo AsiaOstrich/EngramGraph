@@ -60,6 +60,7 @@ REL IMPLEMENTS(Module → Spec)
 REL IMPACTS(Decision → Spec)
 REL SUPERSEDES(Decision → Decision)
 REL RELATES(Spec → Spec)
+REL RELATES_TO(Decision → Decision)
 REL REFERENCES(Doc → Doc)
 ```
 
@@ -103,11 +104,12 @@ path extension when omitted.
 
 A **reference** knowledge adapter: spec documents → `Spec`, decision / ADR
 documents → `Decision`, relationship front-matter + `[[ref]]` links →
-`IMPACTS` / `SUPERSEDES`.
+`IMPACTS` / `SUPERSEDES` / `RELATES_TO`. Only the `supersedes` field makes a
+`SUPERSEDES` edge; any other Decision → Decision reference is `RELATES_TO`.
 
 - `indexKnowledgeDocs(conn, docs: KnowledgeDoc[]): Promise<KnowledgeIndexResult>`
   — `KnowledgeDoc = { content, fallbackId? }`; result counts
-  `{ specs, decisions, impacts, supersedes }`.
+  `{ specs, decisions, impacts, supersedes, relates, relatesTo }`.
 - `parseKnowledgeDoc(doc): ParsedKnowledgeDoc | null` — parse one doc (no write);
   `null` if no id can be resolved (from front-matter `id`, the `fallbackId`, or
   the body).
@@ -127,9 +129,12 @@ Knowledge ingestion reads a leading `---` YAML-ish front-matter block:
 | `id` | Node id (else `fallbackId`, else inferred from body) |
 | `title` | Node title |
 | `status` | Node status (default `unknown`) |
-| `related`, `impacts`, `impacted_by`, `supersedes`, `implements` | Relationship fields → `IMPACTS` / `SUPERSEDES` edges |
+| `related`, `impacts`, `impacted_by`, `supersedes`, `implements` | Relationship fields → `IMPACTS` / `SUPERSEDES` / `RELATES_TO` edges. Only `supersedes` (exactly this spelling) builds `SUPERSEDES`; `related`, `depends_on`, `impacts`, `impacted_by`, `implements` between two decisions build `RELATES_TO` |
 
-Inline `[[ref]]` links in the body are also extracted as references.
+Inline `[[ref]]` links in the body are also extracted as references. A body link
+between two decisions is `RELATES_TO`, never `SUPERSEDES` (a mention is not a
+replacement). Re-indexing a decision replaces its own outgoing `SUPERSEDES` /
+`RELATES_TO` edges with what its document says now.
 
 ## sage — self-evolving confidence
 

@@ -378,8 +378,8 @@ Full extraction rule and examples: **[docs/CLI.md](./docs/CLI.md)**.
 ## Graph schema
 
 6 node tables — `Function`, `Class`, `Module`, `Spec`, `Decision`, `Doc`.
-8 relationship tables — `CALLS`, `IMPORTS`, `DEFINES`, `IMPLEMENTS`, `IMPACTS`,
-`SUPERSEDES`, `RELATES`, `REFERENCES`. See **[docs/API.md](./docs/API.md)** for the
+9 relationship tables — `CALLS`, `IMPORTS`, `DEFINES`, `IMPLEMENTS`, `IMPACTS`,
+`SUPERSEDES`, `RELATES`, `RELATES_TO`, `REFERENCES`. See **[docs/API.md](./docs/API.md)** for the
 full DDL and the front-matter schema that drives knowledge ingestion.
 
 ## What EngramGraph does not store
