@@ -24,14 +24,22 @@
  * `edgeForRef`, the function `ingest` itself builds edges with, so "which edge
  * would this reference become" is answered in one place.
  *
+ * ## Where the status comes from
+ *
+ * The front-matter `status` field wins. When the front matter has none, the status
+ * line in the document's opening section is used (`> **狀態**: Superseded`, see
+ * status.ts: the first match before the first `## `). Each finding says which one
+ * it read (`statusSource`). Nothing is written back: the graph's `status` is
+ * still the front-matter field only.
+ *
  * ## A status it cannot read is not a pass
  *
- * `status` is the front-matter field, nothing else (the same value a Spec node
- * stores). A document with none cannot be judged as superseded and cannot be
- * judged as live, so it is judged as neither: it is counted as 無法判定, listed
- * in the report, and a report with any of them is never `clean`. A folder with
- * no named spec/decision document at all is `undetermined` for the same reason:
- * zero findings over zero documents is not a verdict.
+ * A document with neither cannot be judged as superseded and cannot be judged as
+ * live, so it is judged as neither: it is counted as 無法判定, listed in the
+ * report, and a report with any of them is never `clean`. A folder with no named
+ * spec/decision document at all is `undetermined` for the same reason: zero
+ * findings over zero documents is not a verdict. The CLI exits 1 for either
+ * (`undeterminedReason` is set), whether or not there are also findings.
  *
  * A decision that is only a stub (some document cited it, none was scanned) has
  * no status to read and is not counted as unreadable: no document was seen, so
@@ -59,8 +67,10 @@ export interface LintFinding {
   file: string;
   /** Its artifact id. */
   id: string;
-  /** Its status, verbatim. */
+  /** Its status, as read (a body status line has its leading symbols and `**` removed). */
   status: string;
+  /** Where `status` was read: the front matter, or the status line in the opening section. */
+  statusSource: "front-matter" | "body";
   /** Plain-language reason, naming the ids involved. */
   reason: string;
   /** `live-cites-superseded` only: the superseded decision it cites. */
@@ -80,7 +90,11 @@ export interface LintReport {
    * `clean`: at least one named document, every status readable, nothing found.
    */
   status: LintStatus;
-  /** Why `undetermined`, when it is. */
+  /**
+   * Set whenever the answer is incomplete - a status could not be read, or no
+   * spec/decision document was named - even when there are findings too. The CLI
+   * exits 1 exactly when this is set.
+   */
   undeterminedReason?: string;
   scanned: {
     /** Markdown files read. */
@@ -96,13 +110,25 @@ export interface LintReport {
   supersededStatuses: readonly string[];
   findings: LintFinding[];
   counts: Record<LintRule, number>;
-  /** Named documents whose status could not be read: not judged, never counted as passing. */
+  /** Named documents with no status in the front matter or the opening section: not judged, never counted as passing. */
   undeterminable: { count: number; files: string[] };
 }
 
 function statusKnown(status: string): boolean {
   const t = status.trim();
   return t !== "" && t.toLowerCase() !== "unknown";
+}
+
+interface ReadStatus {
+  value: string;
+  source: "front-matter" | "body";
+}
+
+/** The status of a document: the front matter wins, then the opening-section status line, else none. */
+function readStatus(p: ParsedKnowledgeDoc): ReadStatus | undefined {
+  if (statusKnown(p.status)) return { value: p.status, source: "front-matter" };
+  if (p.bodyStatus !== undefined && statusKnown(p.bodyStatus)) return { value: p.bodyStatus, source: "body" };
+  return undefined;
 }
 
 function isSupersededStatus(status: string): boolean {
@@ -121,6 +147,7 @@ export async function lintKnowledgeDocs(docs: readonly KnowledgeDoc[]): Promise<
   const fragment = await source.ingest();
   const owners = source.owners;
   const byId = new Map<string, ParsedKnowledgeDoc>(owners.map((p) => [p.id, p]));
+  const statusOf = new Map<string, ReadStatus | undefined>(owners.map((p) => [p.id, readStatus(p)]));
 
   // Every SUPERSEDES edge that exists among the scanned documents, by the decision it points at.
   const supersededFrom = new Map<string, string[]>();
@@ -146,19 +173,21 @@ export async function lintKnowledgeDocs(docs: readonly KnowledgeDoc[]): Promise<
   const undeterminable: string[] = [];
 
   for (const p of owners) {
-    if (!statusKnown(p.status)) undeterminable.push(p.path);
+    if (!statusOf.get(p.id)) undeterminable.push(p.path);
   }
 
   // Class 1: status superseded, nobody declares it.
   for (const p of owners) {
-    if (!statusKnown(p.status) || !isSupersededStatus(p.status)) continue;
+    const st = statusOf.get(p.id);
+    if (!st || !isSupersededStatus(st.value)) continue;
     if ((declaredBy.get(p.id) ?? []).length > 0) continue;
     findings.push({
       rule: "superseded-without-declaration",
       file: p.path,
       id: p.id,
-      status: p.status,
-      reason: `${p.id} has status "${p.status}", but no document declares \`supersedes: ${p.id}\` in its front matter, so the graph still treats it as live`,
+      status: st.value,
+      statusSource: st.source,
+      reason: `${p.id} has status "${st.value}"${st.source === "body" ? " (read from its status line)" : ""}, but no document declares \`supersedes: ${p.id}\` in its front matter, so the graph still treats it as live`,
     });
   }
 
@@ -167,13 +196,15 @@ export async function lintKnowledgeDocs(docs: readonly KnowledgeDoc[]): Promise<
     const why: NonNullable<LintFinding["supersededBecause"]> = [];
     for (const from of supersededFrom.get(d) ?? []) why.push({ by: "SUPERSEDES edge", from });
     const owner = byId.get(d);
-    if (owner && owner.kind === "Decision" && statusKnown(owner.status) && isSupersededStatus(owner.status)) {
-      why.push({ by: "status", status: owner.status });
+    const ost = owner ? statusOf.get(owner.id) : undefined;
+    if (owner && owner.kind === "Decision" && ost && isSupersededStatus(ost.value)) {
+      why.push({ by: "status", status: ost.value });
     }
     return why;
   };
   for (const p of owners) {
-    if (!statusKnown(p.status) || isSupersededStatus(p.status)) continue;
+    const st = statusOf.get(p.id);
+    if (!st || isSupersededStatus(st.value)) continue;
     const seen = new Set<string>();
     for (const ref of p.refs as readonly KnowledgeRef[]) {
       if (ref.kind !== "Decision" || seen.has(ref.id)) continue;
@@ -189,11 +220,12 @@ export async function lintKnowledgeDocs(docs: readonly KnowledgeDoc[]): Promise<
         rule: "live-cites-superseded",
         file: p.path,
         id: p.id,
-        status: p.status,
+        status: st.value,
+        statusSource: st.source,
         cites: ref.id,
         edge: edge.label,
         supersededBecause: why,
-        reason: `${p.id} has status "${p.status}" and still cites ${ref.id} (${edge.label}), which is superseded: ${because}`,
+        reason: `${p.id} has status "${st.value}"${st.source === "body" ? " (read from its status line)" : ""} and still cites ${ref.id} (${edge.label}), which is superseded: ${because}`,
       });
     }
   }
@@ -210,16 +242,13 @@ export async function lintKnowledgeDocs(docs: readonly KnowledgeDoc[]): Promise<
     unnamed: source.unresolved.length,
     setAside: source.conflicts.reduce((n, c) => n + c.setAside.length, 0),
   };
-  let status: LintStatus;
   let undeterminedReason: string | undefined;
-  if (findings.length > 0) status = "findings";
-  else if (owners.length === 0) {
-    status = "undetermined";
+  if (owners.length === 0) {
     undeterminedReason = `no spec/decision document was found among the ${docs.length} Markdown file(s) scanned, so there was nothing to judge`;
   } else if (undeterminable.length > 0) {
-    status = "undetermined";
-    undeterminedReason = `${undeterminable.length} of ${owners.length} named document(s) have no readable front-matter status and were not judged`;
-  } else status = "clean";
+    undeterminedReason = `${undeterminable.length} of ${owners.length} named document(s) have no status in their front matter or opening section and were not judged`;
+  }
+  const status: LintStatus = findings.length > 0 ? "findings" : undeterminedReason !== undefined ? "undetermined" : "clean";
 
   return {
     status,
@@ -238,7 +267,7 @@ export function formatLint(r: LintReport, dir: string): string {
   const lines: string[] = [
     `lint: ${s.documents} Markdown file(s) in ${dir}: ${s.named} named spec/decision document(s), ${s.unnamed} without an id` +
       `${s.setAside ? `, ${s.setAside} set aside (duplicate id)` : ""}`,
-    `status read as superseded: ${r.supersededStatuses.join(" | ")} (front-matter \`status\` only)`,
+    `status read as superseded: ${r.supersededStatuses.join(" | ")} (front-matter \`status\`, else the status line of the opening section)`,
   ];
   for (const f of r.findings) lines.push(`  [${f.rule}] ${f.file} - ${f.reason}`);
   lines.push(
@@ -247,18 +276,20 @@ export function formatLint(r: LintReport, dir: string): string {
   if (r.undeterminable.count > 0) {
     const shown = r.undeterminable.files.slice(0, 5).join(", ");
     lines.push(
-      `無法判定 (cannot determine): ${r.undeterminable.count} document(s) have no readable front-matter status; not judged, not counted as passing` +
+      `無法判定 (cannot determine): ${r.undeterminable.count} document(s) have no status in their front matter or opening section; not judged, not counted as passing` +
         `${shown ? ` (e.g. ${shown}${r.undeterminable.count > 5 ? ", ..." : ""}; --json lists all)` : ""}`,
     );
   } else {
     lines.push("無法判定 (cannot determine): 0");
   }
-  lines.push(
-    r.status === "findings"
-      ? "result: findings (reported, nothing is blocked; exit 0)"
-      : r.status === "clean"
-        ? "result: clean"
-        : `result: undetermined - ${r.undeterminedReason ?? "not a pass"}`,
-  );
+  if (r.undeterminedReason !== undefined) {
+    lines.push(
+      r.status === "findings"
+        ? `result: findings, and the answer is incomplete: ${r.undeterminedReason} (exit 1)`
+        : `result: undetermined - ${r.undeterminedReason} (exit 1)`,
+    );
+  } else {
+    lines.push(r.status === "findings" ? "result: findings (reported, nothing is blocked; exit 0)" : "result: clean");
+  }
   return lines.join("\n");
 }

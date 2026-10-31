@@ -557,13 +557,16 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       title: "Replacement-relation consistency of spec/decision documents",
       description:
         "Two ways the replacement relations of the spec/decision Markdown documents under `dir` disagree with themselves " +
-        "(no model, no graph): (1) `superseded-without-declaration` - a document whose front-matter `status` says Superseded " +
+        "(no model, no graph): (1) `superseded-without-declaration` - a document whose status says Superseded " +
         "(or Replaced) while no document declares `supersedes: <its id>` in its front matter; (2) `live-cites-superseded` - " +
         "a document with a live status that still cites a superseded decision (through related/depends_on/impacts/" +
-        "impacted_by/implements or a [[ref]]). Reports and does not block. A document with no readable front-matter " +
-        "status is counted under `undeterminable` (無法判定): it is not judged and not a pass, and a result with any, or " +
-        "with no spec/decision document at all, has `status: \"undetermined\"`, never `clean`. `status` is " +
-        "`findings` | `undetermined` | `clean`. `dir` is a directory; `exclude` takes the same globs as `egr index --exclude`.",
+        "impacted_by/implements or a [[ref]]). A status is the front-matter `status`, else the first status line (for example " +
+        "`> **狀態**: Draft`) before the first `## `; each finding says which (`statusSource`). Reports and does not block " +
+        "on findings. A document with no status is counted under `undeterminable` (無法判定): not judged, not a pass. " +
+        "When any document could not be judged, or no spec/decision document was found, the result is an ERROR result " +
+        "(`isError: true`; the text is the report followed by the 無法判定 sentence), with or without findings next to it - " +
+        "never an empty or clean answer. `status` is `findings` | `undetermined` | `clean`. `dir` is a directory; " +
+        "`exclude` takes the same globs as `egr index --exclude`.",
       inputSchema: {
         dir: z.string().min(1),
         exclude: z.array(z.string().min(1)).optional(),
@@ -572,7 +575,13 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     },
     async ({ dir, exclude }) => {
       try {
-        return ok(await cmdLint({ dir, exclude }));
+        const r = await cmdLint({ dir, exclude });
+        // Like `cochange`: an answer that could not judge everything is an error result, not a pass - the structured
+        // report AND the sentence - whether or not findings sit next to it.
+        if (r.undeterminedReason !== undefined) {
+          return { content: [{ type: "text" as const, text: JSON.stringify(r, null, 2) + "\n無法判定 (cannot determine) — " + r.undeterminedReason }], isError: true };
+        }
+        return ok(r);
       } catch (e) {
         return failFrom(e);
       }

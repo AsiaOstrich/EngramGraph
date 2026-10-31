@@ -21,6 +21,7 @@ import { extractRefs, parseFrontMatter } from "../adapters/knowledge-source.js";
 import type { GraphConnection } from "../graph-db/connection.js";
 import type { GraphEdge, GraphFragment, GraphNode } from "../graph-db/types.js";
 import { writeFragment } from "../graph-db/writer.js";
+import { readBodyStatus } from "./status.js";
 import { canonicalFilePath } from "../code-graph/path-utils.js";
 import { classifyLeadingRef, classifyRef, extractRefIds, type ClassifiedRef } from "./linker.js";
 import type { KnowledgeDoc, KnowledgeNodeKind } from "./types.js";
@@ -49,6 +50,11 @@ export interface ParsedKnowledgeDoc {
    * value a Spec node stores). Kept here, not on the Decision node: `egr lint` reads it for both kinds.
    */
   status: string;
+  /**
+   * The status line in the document's opening section (see status.ts), when it has one. Not stored on any
+   * node; `egr lint` falls back to it when the front matter has no status.
+   */
+  bodyStatus?: string;
   /** Classified outbound references (self-references removed). */
   refs: KnowledgeRef[];
   node: GraphNode;
@@ -214,6 +220,7 @@ export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null 
     for (const id of extractRefIds(value)) addRef(id, field);
   }
 
+  const bodyStatus = readBodyStatus(body);
   return {
     id,
     kind,
@@ -222,6 +229,7 @@ export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null 
     ...(doc.source !== undefined ? { source: doc.source } : {}),
     title,
     status: fields.status ?? "unknown",
+    ...(bodyStatus !== undefined ? { bodyStatus } : {}),
     refs,
     node: makeNode(kind, id, title, fields, doc.source),
   };

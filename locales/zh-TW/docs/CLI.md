@@ -307,25 +307,26 @@ egr cochange --json -- -odd-name.py      # 檔名以 "-" 開頭：選項在前�
 
 ### `lint <dir> [--exclude <glob>]... [--json]`
 
-檢查 `<dir>` 底下規格／決策文件的「取代關係」有沒有自相矛盾（DEC-140）。它用與 `egr index <dir> --docs` 相同的走訪、相同的 `--exclude` 規則、相同的 id 規則與同一個解析器讀同一批 Markdown，全程在記憶體內：**不用模型、不連網、不開啟也不寫入圖**（沒有 `.engram/graph.db` 也能跑，別的行程握著圖時也能跑），而且**只報告、不擋**。
+檢查 `<dir>` 底下規格／決策文件的「取代關係」有沒有自相矛盾（DEC-140）。它用與 `egr index <dir> --docs` 相同的走訪、相同的 `--exclude` 規則、相同的 id 規則與同一個解析器讀同一批 Markdown，全程在記憶體內：**不用模型、不連網、不開啟也不寫入圖**（沒有 `.engram/graph.db` 也能跑，別的行程握著圖時也能跑），而且**發現本身不擋**（每份文件都判得出時結束碼 0）。
 
 ```bash
 egr lint docs/
 #  lint: 41 Markdown file(s) in docs/: 38 named spec/decision document(s), 3 without an id
-#  status read as superseded: superseded | replaced | 已取代 | 被取代 (front-matter `status` only)
+#  status read as superseded: superseded | replaced | 已取代 | 被取代 (front-matter `status`, else the status line of the opening section)
 #    [live-cites-superseded] specs/XSPEC-12.md - XSPEC-12 has status "Draft" and still cites DEC-7 (IMPACTS), which is superseded: DEC-9 declares `supersedes: DEC-7`
 #    [superseded-without-declaration] decisions/DEC-3.md - DEC-3 has status "Superseded", but no document declares `supersedes: DEC-3` in its front matter, so the graph still treats it as live
 #  findings: 2 (1 superseded-without-declaration, 1 live-cites-superseded)
-#  無法判定 (cannot determine): 5 document(s) have no readable front-matter status; not judged, not counted as passing (e.g. ...; --json lists all)
-#  result: findings (reported, nothing is blocked; exit 0)
+#  無法判定 (cannot determine): 5 document(s) have no status in their front matter or opening section; not judged, not counted as passing (e.g. ...; --json lists all)
+#  result: findings, and the answer is incomplete: 5 of 38 named document(s) have no status in their front matter or opening section and were not judged (exit 1)
 egr lint docs/ --json --exclude "archive/**"
 ```
 
-- **`superseded-without-declaration`。** 文件的 front matter `status` 以 `Superseded` 或 `Replaced`（或 `已取代`／`被取代`；不分大小寫，且須在字詞邊界，所以 `Superseded（DevAP 已退場）` 算、`supersededness` 不算；`Deprecated` **不在**清單內，因為廢棄的文件不一定有後繼者）開頭，但**沒有任何文件在 front matter 宣告 `supersedes: <它的 id>`**。比對的是「宣告」而不是圖上的邊：規格與規格之間沒有 `SUPERSEDES` 邊（Spec → Spec 一律是 `RELATES`），若比對邊，每一份作廢的規格都會被報。任何文件的宣告都算，決策與規格相同。寫在 `related`、`depends_on` 或內文裡的提及不是宣告。
-- **`live-cites-superseded`。** 狀態讀得到、且不是已取代的文件，把某個決策當作依據引用（Spec 指向 Decision 的 `IMPACTS` 邊，或 Decision 的 `DECISION_RELATES` 邊；邊就是 `egr index --docs` 會為該引用建的那條），而該決策已被取代：被掃描的文件中有人為它宣告了 `supersedes`（`SUPERSEDES` 邊），或它自己的 status 就寫已取代。決策自己用 `supersedes:` 取代另一個決策是「取代」，不算「引用」。沒有任何被掃描文件定義的決策（只被引用）讀不到狀態，只在有人宣告取代它時才算已取代。
-- **讀不到的狀態不算通過。** `status` 只看 front matter 欄位：沒有該欄位、或寫 `unknown` 的文件，兩邊都不判，計入 `無法判定 (cannot determine)`（`--json` 的 `undeterminable`，附檔案清單），**只要有任何一份，結果就絕不是 `clean`**。資料夾裡沒有任何文件能解析出規格／決策 id（空資料夾，或只有 README）也是 `undetermined`，並印出分母：零份文件零個發現不是結論。只寫在內文的狀態（例如 `> **狀態**: Superseded` 這一行）不會被讀。
-- **`--json`。** `{ status: "findings" | "undetermined" | "clean", undeterminedReason?, scanned: { documents, named, unnamed, setAside }, supersededStatuses, findings: [{ rule, file, id, status, reason, cites?, edge?, supersededBecause? }], counts, undeterminable: { count, files } }`。`file` 相對於 `<dir>`。
-- **結束碼。** 指令完成了工作就是 `0`，包括有發現、以及有些文件無法判定的報告（結論在報告與 `--json` 的 `status` 裡）；跑不起來才是 `1`：沒給 `<dir>`、`<dir>` 不是目錄、檔案讀不了。所以 `1` 永遠是工具失敗，不是「找到東西」。想讓發現讓建置失敗的 repo，自己檢查 `--json` 的 `.status`。
+- **狀態從哪裡讀。** front matter 的 `status` 欄位優先。front matter 沒有時，讀**開頭區段的第一行狀態行**：在第一個 `## ` 標題之前，第一個符合 `> **狀態**: X`、`**狀態**: X`、`- **狀態**: X` 的行（`Status`、`状态` 同樣可以；半形 `:` 與全形 `：` 都可以），或表格列 `| **狀態** | X |`。程式碼區塊裡的行、以及第一個 `## ` 之後的任何行都不算狀態（內文常常引述別的狀態）。開頭的符號（`✅`、`⚠️`、`**`、反引號）會被去掉，限定詞會保留：`Superseded（被 DEC-9 取代）` 讀成已取代，`Draft（下一版）` 讀成有效。每筆發現都寫明讀的是哪一個（`statusSource`：`front-matter` 或 `body`）。這只有 `lint` 會讀：`egr index` 與圖仍然只存 front matter 的 `status`，所以狀態只寫在內文的 Spec，在圖裡仍是 `unknown`。
+- **`superseded-without-declaration`。** 文件的狀態以 `Superseded` 或 `Replaced`（或 `已取代`／`被取代`；不分大小寫，且須在字詞邊界，所以 `Superseded（DevAP 已退場）` 算、`supersededness` 不算；`Deprecated` **不在**清單內，因為廢棄的文件不一定有後繼者）開頭，但**沒有任何文件在 front matter 宣告 `supersedes: <它的 id>`**。比對的是「宣告」而不是圖上的邊：規格與規格之間沒有 `SUPERSEDES` 邊（Spec → Spec 一律是 `RELATES`），若比對邊，每一份作廢的規格都會被報。任何文件的宣告都算，決策與規格相同。寫在 `related`、`depends_on` 或內文裡的提及不是宣告。
+- **`live-cites-superseded`。** 狀態讀得到、且不是已取代的文件，把某個決策當作依據引用（Spec 指向 Decision 的 `IMPACTS` 邊，或 Decision 的 `DECISION_RELATES` 邊；邊就是 `egr index --docs` 會為該引用建的那條），而該決策已被取代：被掃描的文件中有人為它宣告了 `supersedes`（`SUPERSEDES` 邊），或它自己的狀態就寫已取代。決策自己用 `supersedes:` 取代另一個決策是「取代」，不算「引用」。沒有任何被掃描文件定義的決策（只被引用）讀不到狀態，只在有人宣告取代它時才算已取代。
+- **讀不到的狀態不算通過。** front matter 與開頭區段都沒有狀態、或寫 `unknown` 的文件，兩邊都不判，計入 `無法判定 (cannot determine)`（`--json` 的 `undeterminable`，附檔案清單），**只要有任何一份，結果就絕不是 `clean`**。資料夾裡沒有任何文件能解析出規格／決策 id（空資料夾，或只有 README）也是 `undetermined`，並印出分母：零份文件零個發現不是結論。
+- **`--json`。** `{ status: "findings" | "undetermined" | "clean", undeterminedReason?（只要答案不完整就會有，不論有沒有發現）, scanned: { documents, named, unnamed, setAside }, supersededStatuses, findings: [{ rule, file, id, status, statusSource, reason, cites?, edge?, supersededBecause? }], counts, undeterminable: { count, files } }`。`file` 相對於 `<dir>`。
+- **結束碼**，與 `cochange` 對齊：每份文件都判得出時為 `0`，不論有沒有發現（只報告、不擋）；有文件判不出狀態、或根本沒有規格／決策文件時為 `1`，**stdout 印完整報告、stderr 印 `egr: lint: 無法判定 (cannot determine) — <原因>`**，不論有沒有發現（有發現又有判不出的文件，也是 `1`，兩者都印）；跑不起來（沒給 `<dir>`、`<dir>` 不是目錄、檔案讀不了）為 `1` 且**沒有報告**。單單「找到東西」永遠不是失敗的結束碼。想讓發現讓建置失敗的 repo，自己檢查 `--json` 的 `.status`。
 
 ### `gc [--dry-run]`
 
@@ -410,4 +411,4 @@ egr callers paymentGateway --depth 3 --json > callers.json
 成功為 `0`；錯誤為 `1`（訊息以 `egr: <message>` 寫到 stderr）。錯誤包括：圖被另一個行程鎖住，以及
 圖裡沒有的輸入——符號（`callers`、`callees`）、spec id（`impact`、`implementers`）、節點 id
 （`feedback`、`related`）或模組路徑（`implemented-by`）。到 0.12.0 為止，其中好幾個會印一行訊息然後以 `0`
-結束；依賴那個行為的腳本現在必須處理結束碼 `1`。結束碼 `0` 的 `(none)` 永遠代表「它在圖裡，只是沒有結果」。`cochange` 讀的是 git 不是圖：目錄不在 git 工作樹內、沒有任何提交碰過該檔、或碰過它的提交全被略過時，以結束碼 `1` 與「無法判定 (cannot determine)」結束；它的 `(none)` 代表該檔有可用的歷史，而且從來沒有別的檔案跟它一起改過。`lint` 讀的是文件不是圖，而且不擋：有發現、或有文件無法判定的報告仍然結束碼 `0`（結論在報告與 `--json` 的 `status`）；`1` 代表它跑不起來。
+結束；依賴那個行為的腳本現在必須處理結束碼 `1`。結束碼 `0` 的 `(none)` 永遠代表「它在圖裡，只是沒有結果」。`cochange` 讀的是 git 不是圖：目錄不在 git 工作樹內、沒有任何提交碰過該檔、或碰過它的提交全被略過時，以結束碼 `1` 與「無法判定 (cannot determine)」結束；它的 `(none)` 代表該檔有可用的歷史，而且從來沒有別的檔案跟它一起改過。`lint` 讀的是文件不是圖：每份文件都判得出時結束碼 `0`，不論有沒有發現（只報告、不擋）；有文件沒有狀態、或找不到任何規格／決策文件（無法判定）時結束碼 `1` 並印出完整報告，不論有沒有發現；`1` 且沒有報告代表它跑不起來。

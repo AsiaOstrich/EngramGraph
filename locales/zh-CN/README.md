@@ -205,7 +205,7 @@ egr impact SPEC-001
 egr cochange src/model.ts --limit 5
 
 # 5.“有没有文档写着 Superseded、却没有任何文档声明谁取代了它，或仍引用已被取代的决策？”
-#    （读文档，不读图；只报告，不拦）
+#    （读文档，不读图；单有发现不算失败）
 egr lint docs/
 ```
 

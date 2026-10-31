@@ -271,7 +271,7 @@ egr impact SPEC-001
 egr cochange src/model.ts --limit 5
 
 # 5. "Does any document still say Superseded without anything declaring the replacement,
-#    or cite a decision that was superseded?" (reads the documents, not the graph; reports, never blocks)
+#    or cite a decision that was superseded?" (reads the documents, not the graph; findings alone do not fail it)
 egr lint docs/
 ```
 
