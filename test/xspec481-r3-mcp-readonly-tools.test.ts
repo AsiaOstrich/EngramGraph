@@ -120,7 +120,7 @@ describe("XSPEC-481 R3: tools/list of the read-only stdio server", () => {
         // Read back: the answer is about this graph, not an empty shell.
         if (name === "call_chain") expect(res.content[0]!.text).toContain("beta");
         if (name === "implementers") expect(res.content[0]!.text).toContain("a.ts");
-        if (name === "cochange") expect(JSON.parse(res.content[0]!.text).cochanged).toEqual([{ file: "b.ts", count: 2 }]);
+        if (name === "cochange") expect(JSON.parse(res.content[0]!.text).cochanged).toEqual([{ file: "b.ts", count: 2, existsAtHead: true }]);
       }
     } finally {
       await client.close();

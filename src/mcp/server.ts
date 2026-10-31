@@ -518,7 +518,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
         "(default 30) files; the answer says how many were used and how many skipped. Merge commits are not counted and " +
         "renames are NOT followed (a renamed file's earlier history is credited to its old name). `file` is relative to `repo` " +
         "(a directory inside the git work tree; default: the server's working directory) or absolute; results are repository-root " +
-        "paths. If the answer carries `status: \"undetermined\"` (not a git work tree, no commit touches the file, git failed " +
+        "paths. Each file carries `existsAtHead` (still in HEAD's tree? false for a deleted file or the old path of a renamed one; null = not known; never filtered). If the answer carries `status: \"undetermined\"` (not a git work tree, no commit touches the file, git failed " +
         "or timed out, every commit skipped as too large) the tool result is an error: that is 無法判定 (cannot determine), " +
         "NOT an empty list.",
       inputSchema: {

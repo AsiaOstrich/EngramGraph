@@ -297,8 +297,9 @@ egr cochange --json -- -odd-name.py      # 檔名以 "-" 開頭：選項在前�
 ```
 
 - **怎麼算。** 在碰過該檔的最近 `--commits`（預設 200）個**非合併**提交裡，凡是改動**超過 `--max-files`（預設 30）個檔案**的提交一律略過：大掃除看不出哪些檔案屬於一組。剛好 30 個檔案的提交會被採用；計數包含 `<file>` 本身。每個留下來的提交，替它改到的每一個*其他*檔案加一次。`--limit`（預設 10）保留排名前段，次數相同時依路徑排序。三個數字都必須是正整數，其他值是錯誤。
-- **分母是答案的一部分。** 第一行寫明用了幾個提交、因過大略過幾個；`--json` 帶有 `commitsExamined`、`commitsUsed`、`commitsSkippedLarge`、`commitsSkippedShallowBoundary`、`maxCommits`、`maxFilesPerCommit`、`totalFiles`（套用 `--limit` 之前）與 `cochanged: [{ file, count }]`。
+- **分母是答案的一部分。** 第一行寫明用了幾個提交、因過大略過幾個；`--json` 帶有 `commitsExamined`、`commitsUsed`、`commitsSkippedLarge`、`commitsSkippedShallowBoundary`、`maxCommits`、`maxFilesPerCommit`、`totalFiles`（套用 `--limit` 之前）與 `cochanged: [{ file, count, existsAtHead }]`。
 - **不追重新命名**，也不算合併提交（`--json` 中 `renamesFollowed: false`、`mergesIncluded: false`）。重新命名在歷史裡是「刪掉舊路徑、新增新路徑」，所以改名之前的歷史記在舊名字底下，不會算到新名字。要追改名得靠相似度猜測，而猜測不是歷史。問新名字時，它的歷史從改名那一刻開始。
+- **還在嗎？** 每一列都有 `existsAtHead`（`--json`；文字輸出標 `(not at HEAD)`）：該路徑是否還在 `HEAD` 的樹裡，整份答案只用一次 `git ls-tree` 查。被刪掉的檔案，以及**重新命名之前的舊路徑**都是 `false`，這是預期行為（因為不追重新命名）。這些檔案照樣**列出、計數、排序，不過濾**。若 git 讀不出 `HEAD` 的樹，該欄是 `null`（文字輸出 `(HEAD unreadable)`），代表無法判定；絕不預設成 `true` 或 `false`。它看的是已提交的樹，不是工作目錄。
 - **路徑。** `<file>` 相對於目前目錄（或 `--repo <dir>`，工作樹內的一個目錄），也可用絕對路徑；結果是相對於 repo 根目錄的路徑。以 `-` 開頭的檔名要放在 `--` 之後（選項在前），git 不會把它當選項；含 `*` 或 `[` 的名字就是那個檔案，不是萬用字元。
 - **淺層 clone**（`git clone --depth N`，多數 CI checkout 的預設）會標 `shallow: true` 並印出說明：深度之前的歷史不存在，次數是下限。它的邊界提交在 git 看來像「新增了每一個檔案」，會被排除並計入 `commitsSkippedShallowBoundary`。
 - **無法判定（cannot determine）是結束碼 1，不是空清單。** 情況包括：目錄不在 git 工作樹內；`HEAD` 可達的提交沒有任何一個碰過該檔（從未提交，或路徑不存在）；路徑是目錄或在 repo 之外；`git` 不存在、失敗，或 60 秒內沒結束（會被終止）；或碰過該檔的每個提交都被略過（因過大，或是淺層邊界）。訊息寫到 stderr：`egr: cochange: 無法判定 (cannot determine) — <原因>`；加 `--json` 時 stdout 也會有 `{ "status": "undetermined", "file", "reason" }`。結束碼 `0` 的 `(none)` 代表：該檔有可用的歷史，而且從來沒有別的檔案跟它一起改過。

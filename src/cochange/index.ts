@@ -22,6 +22,9 @@
  *   one, so history under an old name is not credited to the new name. Following renames needs similarity
  *   guesses, and a guess presented as history is exactly what this tool must not do. The result says
  *   `renamesFollowed: false`.
+ * - **Each file says whether it is still in HEAD** (`existsAtHead`): one `git ls-tree` of HEAD, not a process per file.
+ *   The files are NOT filtered by it and counts and order do not depend on it; a deleted file, or the old path of a
+ *   renamed one, is listed with `false`. If HEAD's tree cannot be read the field is `null` (not known), never a guess.
  * - **"Cannot determine" is an answer, an empty list is not.** Not a git repository, no commit touches the
  *   file, git missing, git timing out, or every commit that touched the file was skipped as too big: all of
  *   these are `status: "undetermined"` with the reason. `cochanged: []` with `status: "ok"` is reserved for
@@ -73,6 +76,12 @@ export interface CoChangedFile {
   file: string;
   /** In how many of the used commits it changed together with the asked-for file. */
   count: number;
+  /**
+   * Is this path still in the tree of `HEAD`? `false` for a file that was deleted, or renamed away (renames are not
+   * followed, so the old path of a renamed file is `false` and its new path is a different row). `null` when HEAD's
+   * tree could not be read: not known, which is neither true nor false. Counts and order do not depend on it.
+   */
+  existsAtHead: boolean | null;
 }
 
 export interface CoChangeOk {
@@ -291,8 +300,11 @@ export function coChange(opts: CoChangeOptions): CoChangeResult {
     );
   }
 
+  // Which of them are still there? ONE `git ls-tree` of HEAD for the whole answer, not a process per file. When it
+  // cannot be read the column is `null` (not known), never a guess in either direction.
+  const atHead = headPaths(bin, repoRoot, timeoutMs);
   const sorted = [...counts.entries()]
-    .map(([file, count]) => ({ file, count }))
+    .map(([file, count]) => ({ file, count, existsAtHead: atHead === null ? null : atHead.has(file) }))
     .sort((a, b) => b.count - a.count || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   return {
     status: "ok",
@@ -311,6 +323,13 @@ export function coChange(opts: CoChangeOptions): CoChangeResult {
     limit,
     cochanged: sorted.slice(0, limit),
   };
+}
+
+/** Every path in HEAD's tree, or `null` when git cannot say (no HEAD, timeout, failure). */
+function headPaths(bin: string, repoRoot: string, timeoutMs: number): Set<string> | null {
+  const r = runGit(bin, repoRoot, ["ls-tree", "-r", "--name-only", "-z", "HEAD"], timeoutMs);
+  if (!r.ok) return null;
+  return new Set(r.stdout.split("\0").filter((p) => p !== ""));
 }
 
 /**
@@ -340,11 +359,19 @@ export function formatCoChange(r: CoChangeOk): string {
     `(limit ${r.maxCommits}); ${r.commitsSkippedLarge} skipped for changing more than ${r.maxFilesPerCommit} files` +
     (r.commitsSkippedShallowBoundary ? `, ${r.commitsSkippedShallowBoundary} skipped as the shallow clone's boundary` : "");
   const body = r.cochanged.length
-    ? r.cochanged.map((c) => `  ${String(c.count).padStart(4)}  ${c.file}`).join("\n")
+    ? r.cochanged
+        .map((c) => `  ${String(c.count).padStart(4)}  ${c.file}${c.existsAtHead === false ? "  (not at HEAD)" : c.existsAtHead === null ? "  (HEAD unreadable)" : ""}`)
+        .join("\n")
     : "  (none — in the commits used, no other file changed with it)";
   const more = r.totalFiles > r.cochanged.length ? `\n  … ${r.totalFiles - r.cochanged.length} more file(s); --limit N shows more` : "";
   const notes = [
     "counts are commits in which the file changed together with this one; merge commits are not counted; renames are not followed (a renamed file's earlier history is credited to its old name)",
+    ...(r.cochanged.some((c) => c.existsAtHead === false)
+      ? ["(not at HEAD) = the path is no longer in HEAD's tree: deleted, or renamed away; it is listed, counted and ranked like any other"]
+      : []),
+    ...(r.cochanged.some((c) => c.existsAtHead === null)
+      ? ["(HEAD unreadable) = git could not list HEAD's tree, so whether the path still exists is not known"]
+      : []),
     ...(r.shallow ? ["shallow clone: history before the clone depth is absent, so counts are lower bounds"] : []),
   ];
   return `${head}\n${body}${more}\n${notes.map((n) => `note: ${n}`).join("\n")}`;

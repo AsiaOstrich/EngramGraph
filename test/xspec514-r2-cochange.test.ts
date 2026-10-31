@@ -37,7 +37,7 @@ import { runEgr } from "./helpers/run-egr.js";
  *   M   merge of feature that resolves the conflict in core.ts by hand: a merge commit that is NOT identical to either
  *       parent, so `git log -- core.ts` lists it unless merges are excluded
  *   c6  core a b + 32 files big/*, decoy   36 files, over the limit of 30
- *   c8  core, `git mv a.ts a2.ts`    a rename
+ *   c8  core, `git mv a.ts a2.ts`    a rename          d1  `git rm c.ts`   (a deletion that does not touch core.ts)
  *   w1  -weird.py sub/partner.ts         w2  -weird.py sub/partner.ts star*file.ts       w3  starXfile.ts decoy-partner.ts
  */
 
@@ -103,11 +103,11 @@ function egrJson<T>(args: string[], opts: { cwd?: string } = {}): { r: ReturnTyp
 }
 
 const CORE_EXPECTED = [
-  { file: "a.ts", count: 4 }, // c1 c2 c3 and c8 (a rename is a delete of a.ts here); c6 is skipped
-  { file: "b.ts", count: 2 }, // c1 c3
-  { file: "a2.ts", count: 1 }, // the rename's new name: not linked to a.ts
-  { file: "c.ts", count: 1 },
-  { file: "m.ts", count: 1 }, // the feature branch commit; the merge itself is not a commit that counts
+  { file: "a.ts", count: 4, existsAtHead: false }, // c1 c2 c3 and c8 (a rename is a delete of a.ts here); c6 is skipped; renamed away
+  { file: "b.ts", count: 2, existsAtHead: true }, // c1 c3
+  { file: "a2.ts", count: 1, existsAtHead: true }, // the rename's new name: not linked to a.ts
+  { file: "c.ts", count: 1, existsAtHead: false }, // deleted by d1
+  { file: "m.ts", count: 1, existsAtHead: true }, // the feature branch commit; the merge itself is not a commit that counts
 ];
 
 beforeAll(() => {
@@ -150,6 +150,10 @@ beforeAll(() => {
   git(repo, "mv", "a.ts", "a2.ts");
   git(repo, "add", "-A");
   git(repo, "commit", "-q", "-m", "c8");
+  // d1 deletes c.ts (it does not touch core.ts, so core.ts's own history and counts are unchanged).
+  tick++;
+  git(repo, "rm", "-q", "c.ts");
+  git(repo, "commit", "-q", "-m", "d1");
 
   commit(["-weird.py", "sub/partner.ts"], "w1");
   commit(IS_WINDOWS ? ["-weird.py", "sub/partner.ts"] : ["-weird.py", "sub/partner.ts", "star*file.ts"], "w2");
@@ -189,7 +193,7 @@ describe("XSPEC-514 R2: egr cochange, through the built CLI", () => {
     const lines = r.stdout.trimEnd().split("\n");
     expect(lines[0]).toContain("cochange(core.ts): 8 commit(s) used of the last 9 non-merge commit(s)");
     expect(lines[0]).toContain("1 skipped for changing more than 30 files");
-    expect(lines.slice(1, 6).map((l) => l.trim())).toEqual(["4  a.ts", "2  b.ts", "1  a2.ts", "1  c.ts", "1  m.ts"]);
+    expect(lines.slice(1, 6).map((l) => l.trim())).toEqual(["4  a.ts  (not at HEAD)", "2  b.ts", "1  a2.ts", "1  c.ts  (not at HEAD)", "1  m.ts"]);
     expect(r.stdout).toContain("renames are not followed");
     expect(r.stdout).toContain("merge commits are not counted");
   });
@@ -211,9 +215,9 @@ describe("XSPEC-514 R2: egr cochange, through the built CLI", () => {
     expect(narrow.commitsUsed).toBe(5);
     expect(narrow.commitsSkippedLarge).toBe(4);
     expect(narrow.cochanged).toEqual([
-      { file: "a.ts", count: 1 },
-      { file: "c.ts", count: 1 },
-      { file: "m.ts", count: 1 },
+      { file: "a.ts", count: 1, existsAtHead: false },
+      { file: "c.ts", count: 1, existsAtHead: false },
+      { file: "m.ts", count: 1, existsAtHead: true },
     ]);
   });
 
@@ -226,8 +230,8 @@ describe("XSPEC-514 R2: egr cochange, through the built CLI", () => {
     expect(json.commitsSkippedLarge).toBe(1);
     expect(json.maxCommits).toBe(2);
     expect(json.cochanged).toEqual([
-      { file: "a.ts", count: 1 },
-      { file: "a2.ts", count: 1 },
+      { file: "a.ts", count: 1, existsAtHead: false },
+      { file: "a2.ts", count: 1, existsAtHead: true },
     ]);
   });
 
@@ -341,10 +345,10 @@ describe("XSPEC-514 R2: egr cochange, through the built CLI", () => {
     expect(json.commitsUsed).toBe(2);
     expect(json.cochanged).toEqual(
       IS_WINDOWS
-        ? [{ file: "sub/partner.ts", count: 2 }]
+        ? [{ file: "sub/partner.ts", count: 2, existsAtHead: true }]
         : [
-            { file: "sub/partner.ts", count: 2 },
-            { file: "star*file.ts", count: 1 },
+            { file: "sub/partner.ts", count: 2, existsAtHead: true },
+            { file: "star*file.ts", count: 1, existsAtHead: true },
           ],
     );
     // Written as ./-weird.py it is the same file (and `-weird.py` without `--` is parseArgs' problem, not git's).
@@ -358,8 +362,8 @@ describe("XSPEC-514 R2: egr cochange, through the built CLI", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(json.commitsExamined).toBe(1); // only w2; as a pattern it would also match starXfile.ts (w3)
     expect(json.cochanged).toEqual([
-      { file: "-weird.py", count: 1 },
-      { file: "sub/partner.ts", count: 1 },
+      { file: "-weird.py", count: 1, existsAtHead: true },
+      { file: "sub/partner.ts", count: 1, existsAtHead: true },
     ]);
     expect(json.cochanged.map((c) => c.file)).not.toContain("decoy-partner.ts");
   });
@@ -425,6 +429,38 @@ describe("XSPEC-514 R2: egr cochange, through the built CLI", () => {
     expect((JSON.parse(r.stdout) as CoChangeOk).cochanged).toEqual(CORE_EXPECTED);
   });
 
+  it("each row says whether the path is still in HEAD: a deleted file and a renamed-away path are false, the rest true, and nothing is filtered [xspec514-r2-exists-at-head]", () => {
+    const { r, json } = egrJson<CoChangeOk>(["cochange", "core.ts", "--limit", "100"]);
+    expect(r.status, r.stderr).toBe(0);
+    const at = Object.fromEntries(json.cochanged.map((c) => [c.file, c.existsAtHead]));
+    expect(at["c.ts"]).toBe(false); // git rm c.ts (d1)
+    expect(at["a.ts"]).toBe(false); // renamed to a2.ts: the old path is gone, as expected
+    expect(at["a2.ts"]).toBe(true);
+    expect(at["b.ts"]).toBe(true);
+    expect(at["m.ts"]).toBe(true);
+    // Not filtered, and counts and order are the same as without the column: the five rows of CORE_EXPECTED, all there.
+    expect(json.cochanged.map(({ file, count }) => ({ file, count }))).toEqual(CORE_EXPECTED.map(({ file, count }) => ({ file, count })));
+    expect(json.totalFiles).toBe(5);
+    // The same in words, for a person.
+    const human = egr(["cochange", "core.ts"]).stdout.split("\n");
+    expect(human.find((l) => l.includes("c.ts"))).toContain("(not at HEAD)");
+    expect(human.find((l) => /\ba\.ts\b/.test(l) && !l.includes("a2"))).toContain("(not at HEAD)");
+    expect(human.find((l) => l.includes("b.ts"))).not.toContain("(not at HEAD)");
+    expect(human.join("\n")).toContain("renamed away");
+  });
+
+  it.skipIf(IS_WINDOWS)("when HEAD's tree cannot be listed the column is null — not true, not false — and the rest of the answer stays [xspec514-r2-exists-at-head-unknown]", () => {
+    // A git that behaves like git except that `ls-tree` fails.
+    const shim = join(work, "git-without-ls-tree");
+    writeFileSync(shim, '#!/bin/sh\nfor a in "$@"; do [ "$a" = "ls-tree" ] && { echo "fatal: simulated ls-tree failure" >&2; exit 128; }; done\nexec git "$@"\n');
+    chmodSync(shim, 0o755);
+    const r = coChange({ file: "core.ts", repo, limit: 100, gitBinary: shim }) as CoChangeOk;
+    expect(r.status).toBe("ok");
+    expect(r.cochanged.map((c) => c.existsAtHead)).toEqual([null, null, null, null, null]);
+    expect(r.cochanged.map(({ file, count }) => ({ file, count }))).toEqual(CORE_EXPECTED.map(({ file, count }) => ({ file, count })));
+    expect(formatCoChange(r)).toContain("(HEAD unreadable)");
+  });
+
   it("answers without a graph and does not create one [xspec514-r2-no-graph]", () => {
     // `egr` here points ENGRAM_DB into a directory that does not exist. Any command that opened the graph would create it.
     const r = egr(["cochange", "core.ts"]);
@@ -486,7 +522,7 @@ describe("XSPEC-514 R2: the MCP tool cochange, through the built stdio server", 
       })) as ToolResult;
       const n = JSON.parse(narrow.content[0]!.text) as CoChangeOk;
       expect(n.commitsUsed).toBe(5);
-      expect(n.cochanged).toEqual([{ file: "a.ts", count: 1 }]);
+      expect(n.cochanged).toEqual([{ file: "a.ts", count: 1, existsAtHead: false }]);
       expect(n.totalFiles).toBe(3); // a.ts, c.ts, m.ts
     } finally {
       await client.close();
