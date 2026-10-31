@@ -187,7 +187,7 @@ egr index . --scip index.scip
 `callsSkippedUnresolvedTarget`。若文件有匹配到、但解析结果是零，人类可读输出
 会多打印一行 `WARNING`，而不是把全零结果悄悄当成成功报告。
 
-### `callers <symbol> [--depth N]`
+### `callers <symbol> [--depth N] [--file <path>]`
 
 （可传递，最多到 `--depth`，默认 1）调用 `<symbol>` 的函数。“改这个会牵动什么？”
 
@@ -199,7 +199,30 @@ egr callers callChain --depth 2
 不是 `(none)`。退出码 `0` 的 `(none)` 表示：这个函数在图里，只是没有人调用它。
 （到 0.12.0 为止，两者都打印 `(none)` 并以 `0` 退出。）
 
-### `callees <symbol> [--depth N]`
+**多个函数共用同一个名字时，会回答，而且答案会说明这件事。** 符号按名称匹配，所以定义在两个文件里的 `render`，
+两边的调用者会在同一份清单里。这份清单过去看起来像单个函数的调用者。现在输出会说明合并了几个定义，
+并把每个定义列成 `file:line`：
+
+```text
+callers(render):
+  ⚠ merged: "render" is defined 2 times (a/render.ts:2, b/render.ts:2); this answer combines all 2. Narrow it to one with --file <path>.
+  pageA (a/render.ts)
+  pageB (b/render.ts)
+```
+
+`--file <path>` 只问该文件里的定义（`--depth` 往上追到的调用者，也只属于该定义）。路径用 `egr` 打印出的那种写法；
+以 `./` 开头、绝对路径、或只写尾段都可以，但尾段必须恰好对上一个定义所在的文件（若两个文件都以 `render.ts` 结尾，
+就要写 `a/render.ts`）。回答时会注明这只是多个定义中的一个
+（`narrowed to the definition at a/render.ts:2 (1 of 2 definitions of "render")`）。
+**指定的文件里没有这个符号的定义，是错误**——退出码 `1`，并列出真正定义它的文件；尾段对上多个文件同样是错误；
+两者都不会打印成 `(none)`。若同一个文件把名字定义了不止一次（两个类各有 `paint` 方法），`--file` 分不开它们，
+答案会明说，而不是假装选了其中一个。
+
+`--json` 对每一种答案都仍是和以前一样的纯数组：脚本在解析它，而数组没办法说明自己。答案合并了多个定义时，
+同一句 `⚠ merged: …` 会写到 **stderr**（stdout 不变，`JSON.parse` 照旧可用；丢掉 stderr 的脚本看不到这句警告）。
+要把定义当数据获取，请用 MCP 工具 `call_chain`（`definitions`、`mergedDefinitions`）。只有一个定义的名字，两个输出流都与以前完全相同。
+
+### `callees <symbol> [--depth N] [--file <path>]`
 
 `<symbol>`（可传递，最多到 `--depth`，默认 1）所调用的函数。
 
@@ -208,6 +231,8 @@ egr callees createMcpServer
 ```
 
 > `--depth` 会被夹到 `1..10`。符号以**名称**匹配；若名称在多个文件中重复使用，所有匹配项都会被纳入。
+> `callees` 对共用名字的规则和 `callers` 相同：输出会说明合并了几个定义，`--file` 可收窄，没有该定义的文件是错误，
+> `--json` 同样是纯数组，警告写在 stderr，与 `callers` 相同。
 
 ### `impact <spec-id> [--max-hops N]`
 

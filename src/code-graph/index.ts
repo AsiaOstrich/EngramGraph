@@ -14,11 +14,25 @@ export {
   nodeExists,
 } from "./lookup.js";
 export type { LookupKind } from "./lookup.js";
-export { callers, callees, callChain, definitionFiles, implementers, implementedSpecs } from "./query.js";
+export {
+  callers,
+  callees,
+  callChain,
+  definitionFiles,
+  functionDefinitions,
+  definitionScope,
+  resolveDefinitionFile,
+  describeDefinitionScope,
+  DefinitionFileError,
+  implementers,
+  implementedSpecs,
+} from "./query.js";
 export type {
   CallDirection,
   CallNode,
   CallChainResult,
+  FunctionDefinition,
+  DefinitionScope,
   ImplementerModule,
   ImplementersResult,
   ImplementedSpec,

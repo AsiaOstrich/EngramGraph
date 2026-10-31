@@ -94,14 +94,18 @@ tree-sitter 將 `.ts` / `.tsx` / `.js` 解析為 `Function` / `Class` / `Module`
 
 ### 查詢
 
-- `callers(conn, name: string, depth = 1): Promise<CallNode[]>` — 可遞移呼叫
-  `name` 的函式（depth 夾到 `1..10`）。
-- `callees(conn, name: string, depth = 1): Promise<CallNode[]>` — `name` 可遞移呼叫的函式。
-- `callChain(conn, symbol: string, direction: CallDirection = "both", depth = 1):
-  Promise<CallChainResult>`。
+- `callers(conn, name: string, depth = 1, file?: string): Promise<CallNode[]>` — 可遞移呼叫
+  `name` 的函式（depth 夾到 `1..10`）。`file` 是某個定義儲存時的檔案（見 `resolveDefinitionFile`）；
+  省略時，該名字的所有定義一起回答。
+- `callees(conn, name: string, depth = 1, file?: string): Promise<CallNode[]>` — `name` 可遞移呼叫的函式。
+- `callChain(conn, symbol: string, direction: CallDirection = "both", depth = 1,
+  file?: string): Promise<CallChainResult>`。`file` 裡沒有 `symbol` 的定義時丟出 `DefinitionFileError`。
 
 `CallNode = { id, name, file }`。`CallDirection = "callers" | "callees" | "both"`。
-`CallChainResult = { symbol, direction, depth, callers, callees }`。
+`CallChainResult = { symbol, direction, depth, callers, callees, definitions, mergedDefinitions, file? }`
+——`definitions` 是該名字的每個函式（`{ id, file, startLine }`）；`mergedDefinitions` 是答案合併了幾個
+（大於 1 代表不同函式的呼叫者在同一份清單裡）；`file` 在答案已收窄時才有。REST 路由
+`POST /graph/call-chain` 回傳相同欄位，目前不接受 `file`。
 
 ## knowledge-graph — spec/decision markdown → 圖譜
 

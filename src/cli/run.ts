@@ -21,6 +21,7 @@ import {
   type DetailedProjectExtraction,
   callers,
   callees,
+  definitionScope,
   implementers,
   implementedSpecs,
   NotInGraphError,
@@ -30,6 +31,7 @@ import {
   suggestModules,
   suggestSpecs,
   type CallNode,
+  type DefinitionScope,
   type ImplementersResult,
   type ImplementedSpecsResult,
 } from "../code-graph/index.js";
@@ -760,14 +762,48 @@ async function knownSymbol<T>(conn: GraphConnection, symbol: string, ask: () => 
   return ask();
 }
 
-/** `egr callers <symbol> [--depth N]`. */
-export function cmdCallers(conn: GraphConnection, symbol: string, depth = 1): Promise<CallNode[]> {
-  return knownSymbol(conn, symbol, () => callers(conn, symbol, depth));
+/**
+ * What `egr callers` / `egr callees` answer: the nodes and the definitions they
+ * were made from (XSPEC-514 R1). A name reused by several functions is answered,
+ * and the answer says so — `scope.mergedDefinitions` and `scope.definitions`.
+ */
+export interface CallQueryAnswer extends DefinitionScope {
+  symbol: string;
+  rows: CallNode[];
 }
 
-/** `egr callees <symbol> [--depth N]`. */
-export function cmdCallees(conn: GraphConnection, symbol: string, depth = 1): Promise<CallNode[]> {
-  return knownSymbol(conn, symbol, () => callees(conn, symbol, depth));
+async function callQuery(
+  conn: GraphConnection,
+  symbol: string,
+  depth: number,
+  file: string | undefined,
+  ask: (stored: string | undefined) => Promise<CallNode[]>,
+): Promise<CallQueryAnswer> {
+  await requireFunction(conn, symbol);
+  // A --file that names none of the definitions throws here (exit 1): it is a
+  // question about a definition that is not there, not an empty list of callers.
+  const scope = await definitionScope(conn, symbol, file);
+  return { symbol, ...scope, rows: await ask(scope.file) };
+}
+
+/** `egr callers <symbol> [--depth N] [--file <path>]`, with the definitions the answer combines. */
+export function cmdCallersAnswer(conn: GraphConnection, symbol: string, depth = 1, file?: string): Promise<CallQueryAnswer> {
+  return callQuery(conn, symbol, depth, file, (stored) => callers(conn, symbol, depth, stored));
+}
+
+/** `egr callees <symbol> [--depth N] [--file <path>]`, with the definitions the answer combines. */
+export function cmdCalleesAnswer(conn: GraphConnection, symbol: string, depth = 1, file?: string): Promise<CallQueryAnswer> {
+  return callQuery(conn, symbol, depth, file, (stored) => callees(conn, symbol, depth, stored));
+}
+
+/** The caller rows of {@link cmdCallersAnswer}. */
+export async function cmdCallers(conn: GraphConnection, symbol: string, depth = 1, file?: string): Promise<CallNode[]> {
+  return (await cmdCallersAnswer(conn, symbol, depth, file)).rows;
+}
+
+/** The callee rows of {@link cmdCalleesAnswer}. */
+export async function cmdCallees(conn: GraphConnection, symbol: string, depth = 1, file?: string): Promise<CallNode[]> {
+  return (await cmdCalleesAnswer(conn, symbol, depth, file)).rows;
 }
 
 /**

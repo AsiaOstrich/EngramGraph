@@ -99,7 +99,7 @@ Why, and the terminal command for each, is under "Tools not offered over stdio".
 |------|-------|---------|
 | `index_code` *(writable only)* | `files: { path, source }[]` | Indexes source into the code graph (cross-file `CALLS`). Counts of files/functions/classes/calls (+ ambiguous/unresolved). |
 | `index_docs` *(writable only)* | `docs: { content, fallbackId? }[]` | Indexes front-matter markdown into the knowledge graph. Counts of specs/decisions/impacts/supersedes/relates/decisionRelates, plus `conflicts`: each id claimed by more than one document, with the document kept and those set aside. |
-| `call_chain` | `symbol`, `direction?` (`callers`\|`callees`\|`both`), `depth?` | Who calls / is called by a function symbol. "What breaks if I change X?" |
+| `call_chain` | `symbol`, `direction?` (`callers`\|`callees`\|`both`), `depth?`, `file?` | Who calls / is called by a function symbol. "What breaks if I change X?" A name several functions share is answered, not refused: `definitions` lists every one (`{ id, file, startLine }`) and `mergedDefinitions` says how many the answer combines, so `mergedDefinitions > 1` means the callers (and callees) of different functions are in one list. `file` (a path, or its trailing part when that fits exactly one definition file) asks about the definition(s) in that file only, for callers and callees alike; the result then carries `file` (as stored) and `mergedDefinitions` for that file. A `file` that holds no definition of the symbol, or a trailing part that fits several files, is an error result (`isError: true`) naming the files that do define it: **never `callers: []`**. Fields only added: a name with one definition returns what it always did plus `definitions` (one entry) and `mergedDefinitions: 1`. See [CLI.md](./CLI.md). |
 | `impact_analysis` | `nodeId`, `maxHops?` | Decisions in a spec's impact chain (`IMPACTS` + multi-hop `SUPERSEDES`). |
 | `ingest_feedback` *(writable only)* | `nodeId`, `type`, `nodeLabel?` (`Function`\|`Spec`\|`Decision`\|`Doc`), `weight?` | Evolve a node's SAGE confidence from a feedback event (`test_fail`/`test_pass`/`human_fix`). |
 | `implementers` | `specId` | Files declaring `// implements <specId>` and the functions they define. "Which code implements this spec?" Reads `IMPLEMENTS(Module→Spec)` + `DEFINES`. |
@@ -123,6 +123,10 @@ result:
   error (`no function named "X" is in the graph — this is not the same as
   "nothing calls it"`), with near names when there are any. A function that is
   in the graph and has no callers returns `callers: []` with `symbolFound: true`.
+- **The `file` names no definition of the symbol.** `call_chain` with a `file`
+  that does not define the symbol is an error (`"X" has no definition in "path"
+  — this is not the same as "nothing calls it"; it is defined in: …`), not
+  `callers: []`.
 - **Another process is writing the graph.** The query retries for about 5 s
   (`ENGRAM_LOCK_WAIT_MS` changes it) and then returns `the graph … is being
   written by another process … This is not an empty result`.

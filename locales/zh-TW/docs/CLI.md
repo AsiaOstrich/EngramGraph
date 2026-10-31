@@ -187,7 +187,7 @@ egr index . --scip index.scip
 `callsSkippedUnresolvedTarget`。若檔案有匹配到、但解析結果是零，人類可讀輸出
 會多印一行 `WARNING`，而不是把全零結果悄悄當成成功回報。
 
-### `callers <symbol> [--depth N]`
+### `callers <symbol> [--depth N] [--file <path>]`
 
 （可遞移，最多到 `--depth`，預設 1）呼叫 `<symbol>` 的函式。「改這個會牽動什麼？」
 
@@ -199,7 +199,30 @@ egr callers callChain --depth 2
 不是 `(none)`。結束碼 `0` 的 `(none)` 代表：這個函式在圖裡，只是沒有人呼叫它。
 （到 0.12.0 為止，兩者都印 `(none)` 並以 `0` 結束。）
 
-### `callees <symbol> [--depth N]`
+**多個函式共用同一個名字時，會回答，而且答案會說明這件事。** 符號以名稱比對，所以定義在兩個檔案的 `render`，
+兩邊的呼叫者會在同一份清單裡。這份清單過去看起來像單一函式的呼叫者。現在輸出會說明合併了幾個定義，
+並把每個定義列成 `file:line`：
+
+```text
+callers(render):
+  ⚠ merged: "render" is defined 2 times (a/render.ts:2, b/render.ts:2); this answer combines all 2. Narrow it to one with --file <path>.
+  pageA (a/render.ts)
+  pageB (b/render.ts)
+```
+
+`--file <path>` 只問該檔案裡的定義（`--depth` 往上追到的呼叫者，也只屬於該定義）。路徑用 `egr` 印出的那種寫法；
+`./` 開頭、絕對路徑、或只寫尾段都可以，但尾段必須剛好對到一個定義所在的檔案（若兩個檔案都以 `render.ts` 結尾，
+就要寫 `a/render.ts`）。回答時會註明這只是多個定義中的一個
+（`narrowed to the definition at a/render.ts:2 (1 of 2 definitions of "render")`）。
+**指定的檔案裡沒有這個符號的定義，是錯誤**——結束碼 `1`，並列出真正定義它的檔案；尾段對到多個檔案同樣是錯誤；
+兩者都不會印成 `(none)`。若同一個檔案把名字定義了不只一次（兩個類別各有 `paint` 方法），`--file` 分不開它們，
+答案會明說，而不是假裝選了其中一個。
+
+`--json` 對每一種答案都仍是和以前一樣的純陣列：腳本在解析它，而陣列沒辦法說明自己。答案合併了多個定義時，
+同一句 `⚠ merged: …` 會寫到 **stderr**（stdout 不變，`JSON.parse` 照舊可用；丟掉 stderr 的腳本看不到這句警告）。
+要把定義當資料取得，請用 MCP 工具 `call_chain`（`definitions`、`mergedDefinitions`）。只有一個定義的名字，兩個輸出串流都與以前完全相同。
+
+### `callees <symbol> [--depth N] [--file <path>]`
 
 `<symbol>`（可遞移，最多到 `--depth`，預設 1）所呼叫的函式。
 
@@ -208,6 +231,8 @@ egr callees createMcpServer
 ```
 
 > `--depth` 會被夾到 `1..10`。符號以**名稱**比對；若名稱在多個檔案重複使用，所有相符者都會被納入。
+> `callees` 對共用名字的規則和 `callers` 相同：輸出會說明合併了幾個定義，`--file` 可收窄，沒有該定義的檔案是錯誤，
+> `--json` 同樣是純陣列，警告寫在 stderr，與 `callers` 相同。
 
 ### `impact <spec-id> [--max-hops N]`
 

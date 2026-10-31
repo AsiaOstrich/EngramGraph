@@ -14,11 +14,11 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, shapeCommunities, type CommunitiesReport, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, cmdRefsCheck, cmdLint, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
+import { cmdIndex, cmdCallersAnswer, cmdCalleesAnswer, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, shapeCommunities, type CommunitiesReport, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, cmdRefsCheck, cmdLint, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
 import type { RefCheckResult } from "./refs-check.js";
 import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
-import { readIndexHealth, definitionFiles, type IndexHealth } from "../code-graph/index.js";
+import { readIndexHealth, describeDefinitionScope, type IndexHealth } from "../code-graph/index.js";
 import { manifestPathForDb } from "../code-graph/parse-manifest.js";
 import { formatLint } from "../knowledge-graph/lint.js";
 import { unresolvedIdClusters, type DocIdConflict, type ReplacedDocument } from "../knowledge-graph/parser.js";
@@ -64,11 +64,26 @@ Commands:
                                   hashing every file (see "Incremental index").
                                   Skips a fixed list of directories (see
                                   below); .gitignore is NOT read
-  callers <symbol> [--depth N]    Functions that (transitively) call <symbol>.
+  callers <symbol> [--depth N] [--file <path>]
+                                  Functions that (transitively) call <symbol>.
                                   A symbol the graph does not contain is an
-                                  error (exit 1), not "(none)"
-  callees <symbol> [--depth N]    Functions that <symbol> (transitively) calls
-                                  (same rule for an unknown symbol)
+                                  error (exit 1), not "(none)". A name that
+                                  several functions share is answered, not
+                                  refused: the callers of all of them are
+                                  combined, and the output says so and lists
+                                  every definition (file:line). --file <path>
+                                  asks about the definition(s) in that file
+                                  only (a path that ends the same way is
+                                  enough if it is unique); a file with no such
+                                  definition is an error (exit 1), not
+                                  "(none)". --json is the bare array as
+                                  before; an answer that combines several
+                                  definitions says so on stderr (the MCP tool
+                                  call_chain returns them as data)
+  callees <symbol> [--depth N] [--file <path>]
+                                  Functions that <symbol> (transitively) calls
+                                  (same rules: unknown symbol, shared name,
+                                  --file, --json)
   implementers <spec-id>          Files (+ functions) that implement a spec (spec→code)
   implemented-by <module-path>    Specs a file declares it implements (code→spec)
   impact <spec-id> [--max-hops N] Decisions in a spec's impact chain
@@ -296,6 +311,7 @@ async function main(): Promise<void> {
       commits: { type: "string" },
       "max-files": { type: "string" },
       repo: { type: "string" },
+      file: { type: "string" },
     },
   });
 
@@ -748,16 +764,27 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
     case "callers":
     case "callees": {
       if (!a1) throw new Error(`${cmd} requires a <symbol>`);
-      const rows = cmd === "callers" ? await cmdCallers(conn, a1, num(values.depth, 1)) : await cmdCallees(conn, a1, num(values.depth, 1));
+      const depth = num(values.depth, 1);
+      // A name several functions share is answered with the definitions it combines (XSPEC-514 R1);
+      // a --file with no such definition throws here (exit 1) instead of printing "(none)".
+      const ans = cmd === "callers" ? await cmdCallersAnswer(conn, a1, depth, values.file) : await cmdCalleesAnswer(conn, a1, depth, values.file);
+      const rows = ans.rows;
       // Coarse index-health note (R2): warn a human reader when blindspot files
       // sit near this result — most pointed for `callers` ("nothing calls X,
       // safe to delete" is wrong if X's caller lives in an unparsed file). The
       // anchor includes X's OWN definition file(s) so an EMPTY result (the
-      // highest-risk answer) still gets the check. --json stays a bare array
-      // (its established shape); `egr blindspots` is the machine-readable surface.
-      const anchor = [...(await definitionFiles(conn, a1)), ...rows.map((r) => r.file)];
+      // highest-risk answer) still gets the check; with --file it is that file.
+      const anchor = [...(ans.file !== undefined ? [ans.file] : ans.definitions.map((d) => d.file)), ...rows.map((r) => r.file)];
       const health = readIndexHealth(manifestPathForDb(resolveDbPath(loc)), anchor);
-      out(rows, values.json, (d) => `${cmd}(${a1}):\n${fmtNodes(d as Array<{ name: string; file: string }>)}${healthNote(health)}`);
+      const scopeNote = describeDefinitionScope(ans, a1);
+      // --json stays the bare array it has always been, for every answer: scripts parse it (this repo's own
+      // release verifier does), and an array cannot carry a statement about itself. So an answer that
+      // combines several definitions says so on stderr, in the words of the text output, where a person
+      // or an agent reading the terminal sees it and `JSON.parse(stdout)` is untouched. A caller that
+      // needs the definitions as data gets them from the MCP tool `call_chain` (`definitions`,
+      // `mergedDefinitions`). `egr blindspots` is the machine-readable surface for index health.
+      if (values.json && ans.mergedDefinitions > 1) process.stderr.write(`egr: ${scopeNote}\n`);
+      out(rows, values.json, () => `${cmd}(${a1}):\n${scopeNote ? `  ${scopeNote}\n` : ""}${fmtNodes(rows)}${healthNote(health)}`);
       break;
     }
     case "implementers": {

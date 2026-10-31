@@ -90,15 +90,23 @@ path extension when omitted.
 
 ### Queries
 
-- `callers(conn, name: string, depth = 1): Promise<CallNode[]>` — functions that
-  transitively call `name` (depth clamped `1..10`).
-- `callees(conn, name: string, depth = 1): Promise<CallNode[]>` — functions
-  `name` transitively calls.
-- `callChain(conn, symbol: string, direction: CallDirection = "both", depth = 1):
-  Promise<CallChainResult>`.
+- `callers(conn, name: string, depth = 1, file?: string): Promise<CallNode[]>` —
+  functions that transitively call `name` (depth clamped `1..10`). `file` is the
+  stored file of one definition (see `resolveDefinitionFile`); without it every
+  definition of the name answers together.
+- `callees(conn, name: string, depth = 1, file?: string): Promise<CallNode[]>` —
+  functions `name` transitively calls.
+- `callChain(conn, symbol: string, direction: CallDirection = "both", depth = 1,
+  file?: string): Promise<CallChainResult>`. A `file` that holds no definition of
+  `symbol` throws `DefinitionFileError`.
 
 `CallNode = { id, name, file }`. `CallDirection = "callers" | "callees" | "both"`.
-`CallChainResult = { symbol, direction, depth, callers, callees }`.
+`CallChainResult = { symbol, direction, depth, callers, callees, definitions,
+mergedDefinitions, file? }` — `definitions` is every function of that name,
+`{ id, file, startLine }`; `mergedDefinitions` is how many the answer combines
+(more than 1 means the callers of different functions share one list); `file` is
+set when the answer was narrowed. The REST route `POST /graph/call-chain` returns
+the same fields and does not take `file`.
 
 ## knowledge-graph — spec/decision markdown → graph
 

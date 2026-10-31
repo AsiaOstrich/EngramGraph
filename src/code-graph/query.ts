@@ -9,6 +9,11 @@
  * Queried by function name (a symbol may map to several Function nodes if the
  * name is reused; all matches are considered). `depth` follows CALLS edges
  * transitively (Kuzu `*1..N`; clamped).
+ *
+ * Name reuse is answered, not refused, and not hidden (XSPEC-514 R1): the answer
+ * says how many definitions it combined and where they are, and `file` narrows it
+ * to the definition(s) in one file. A `file` that holds no such definition is an
+ * error — an empty list would read as "nobody calls it".
  */
 
 import type { GraphConnection } from "../graph-db/connection.js";
@@ -23,7 +28,35 @@ export interface CallNode {
   file: string;
 }
 
-export interface CallChainResult {
+/** One Function node that carries the queried name (XSPEC-514 R1). */
+export interface FunctionDefinition {
+  id: string;
+  /** The module id of the defining file (a repo-relative path, root-qualified when two roots share it). */
+  file: string;
+  /** 1-based line of the definition, or null when the graph holds none. */
+  startLine: number | null;
+}
+
+/**
+ * Which definitions a callers/callees answer is made of (XSPEC-514 R1).
+ *
+ * The queries match `Function {name}`, so every function of that name answered
+ * together and nothing in the result said so. These fields are the statement.
+ */
+export interface DefinitionScope {
+  /** Every definition of the queried name in the graph, ordered by file and line. */
+  definitions: FunctionDefinition[];
+  /**
+   * How many definitions this answer combines: all of them when no `file` was
+   * given, otherwise the ones in that file (usually one; several when a file
+   * defines the name more than once, which a file cannot tell apart).
+   */
+  mergedDefinitions: number;
+  /** The file the answer was narrowed to, exactly as stored. Absent when none was asked. */
+  file?: string;
+}
+
+export interface CallChainResult extends DefinitionScope {
   symbol: string;
   direction: CallDirection;
   depth: number;
@@ -40,36 +73,164 @@ function toNodes(rows: Array<Record<string, unknown>>): CallNode[] {
   return rows.map((r) => ({ id: String(r.id), name: String(r.name), file: String(r.file) }));
 }
 
-/** Functions that (transitively, up to `depth`) call `name`. */
+/**
+ * The pattern that names the definition(s) being asked about. With `file`, only
+ * the Function nodes of that name stored under that file match; the parameters
+ * are bound, never spliced into the query text.
+ */
+function targetPattern(file: string | undefined): { match: string; params: Record<string, unknown> } {
+  return file === undefined
+    ? { match: "{name: $name}", params: {} }
+    : { match: "{name: $name, file: $file}", params: { file } };
+}
+
+/**
+ * Functions that (transitively, up to `depth`) call `name`. `file` is the stored
+ * file of the definition to ask about (see {@link resolveDefinitionFile}); without
+ * it every definition of the name answers together.
+ */
 export async function callers(
   conn: GraphConnection,
   name: string,
   depth = 1,
+  file?: string,
 ): Promise<CallNode[]> {
   const d = safeDepth(depth);
+  const t = targetPattern(file);
   const rows = await conn.query(
-    `MATCH (c:Function)-[:CALLS*1..${d}]->(f:Function {name: $name})
+    `MATCH (c:Function)-[:CALLS*1..${d}]->(f:Function ${t.match})
      RETURN DISTINCT c.id AS id, c.name AS name, c.file AS file
      ORDER BY file, name`,
-    { name },
+    { name, ...t.params },
   );
   return toNodes(rows);
 }
 
-/** Functions that `name` (transitively, up to `depth`) calls. */
+/** Functions that `name` (transitively, up to `depth`) calls. `file` as in {@link callers}. */
 export async function callees(
   conn: GraphConnection,
   name: string,
   depth = 1,
+  file?: string,
 ): Promise<CallNode[]> {
   const d = safeDepth(depth);
+  const t = targetPattern(file);
   const rows = await conn.query(
-    `MATCH (f:Function {name: $name})-[:CALLS*1..${d}]->(g:Function)
+    `MATCH (f:Function ${t.match})-[:CALLS*1..${d}]->(g:Function)
      RETURN DISTINCT g.id AS id, g.name AS name, g.file AS file
      ORDER BY file, name`,
-    { name },
+    { name, ...t.params },
   );
   return toNodes(rows);
+}
+
+/** Every Function node named `name`, ordered by file and line (XSPEC-514 R1). */
+export async function functionDefinitions(conn: GraphConnection, name: string): Promise<FunctionDefinition[]> {
+  const rows = await conn.query(
+    `MATCH (f:Function {name: $name})
+     RETURN f.id AS id, f.file AS file, f.start_line AS line
+     ORDER BY file, line, id`,
+    { name },
+  );
+  return rows.map((r) => ({
+    id: String(r.id),
+    file: String(r.file),
+    startLine: r.line == null ? null : Number(r.line),
+  }));
+}
+
+/**
+ * The `file` given for a symbol matched no definition, or matched several files
+ * and so was not resolved. Mapped to a non-zero exit by the CLI, to `isError` by
+ * MCP: an unmatched file must never come back as an empty caller list (XSPEC-514 R1).
+ */
+export class DefinitionFileError extends Error {
+  readonly kind: "none" | "ambiguous";
+  readonly symbol: string;
+  readonly wanted: string;
+  /** The files that do define the symbol (kind none), or the ones the path matched (kind ambiguous). */
+  readonly candidates: string[];
+
+  constructor(kind: "none" | "ambiguous", symbol: string, wanted: string, candidates: string[]) {
+    const list = candidates.map((c) => `\n  ${c}`).join("");
+    super(
+      kind === "none"
+        ? `"${symbol}" has no definition in "${wanted}" — this is not the same as "nothing calls it"; it is defined in:${list}\n` +
+            `Check the path, or leave out the file to ask about every definition.`
+        : `"${wanted}" is ambiguous for "${symbol}" — ${candidates.length} definitions are in files that end with this path:${list}\n` +
+            `Give more of the path.`,
+    );
+    this.name = "DefinitionFileError";
+    this.kind = kind;
+    this.symbol = symbol;
+    this.wanted = wanted;
+    this.candidates = candidates;
+  }
+}
+
+/**
+ * Turn the path a user typed into the stored file of one of `definitions`.
+ *
+ * Same tolerance as `implemented-by`: POSIX separators, no `./`, no leading `/`,
+ * and — when the exact id is not a definition file — a match on a whole trailing
+ * path segment in either direction (an absolute path from an editor is longer than
+ * the id; a bare file name is shorter). `render.ts` never matches `prerender.ts`.
+ * An exact id wins over a suffix match. No match, or a suffix that fits several
+ * files, throws {@link DefinitionFileError}; nothing is guessed.
+ */
+export function resolveDefinitionFile(
+  definitions: readonly FunctionDefinition[],
+  symbol: string,
+  wanted: string,
+): string {
+  const w = normalizeModulePath(wanted);
+  const files = [...new Set(definitions.map((d) => d.file))].sort();
+  if (files.includes(w)) return w;
+  const matches = files.filter((id) => id.endsWith(`/${w}`) || w.endsWith(`/${id}`));
+  if (matches.length === 1 && matches[0] !== undefined) return matches[0];
+  if (matches.length > 1) throw new DefinitionFileError("ambiguous", symbol, wanted, matches);
+  throw new DefinitionFileError("none", symbol, wanted, files);
+}
+
+/**
+ * Which definitions a question about `name` covers: all of them, or — with `file`
+ * — the ones in that file. Throws {@link DefinitionFileError} for a `file` that
+ * names none of them. A name with no definition at all gives an empty scope; the
+ * entry points that must refuse an unknown name ask `requireFunction` first.
+ */
+export async function definitionScope(conn: GraphConnection, name: string, file?: string): Promise<DefinitionScope> {
+  const definitions = await functionDefinitions(conn, name);
+  if (file === undefined) return { definitions, mergedDefinitions: definitions.length };
+  const stored = resolveDefinitionFile(definitions, name, file);
+  return { definitions, mergedDefinitions: definitions.filter((d) => d.file === stored).length, file: stored };
+}
+
+/**
+ * One sentence for a human reader about what a callers/callees answer combines,
+ * or `""` when it is the answer of exactly one definition that nothing narrowed
+ * (then there is nothing to say and the output stays as it always was).
+ */
+export function describeDefinitionScope(scope: DefinitionScope, symbol: string): string {
+  const where = (d: FunctionDefinition) => (d.startLine === null ? d.file : `${d.file}:${d.startLine}`);
+  const { definitions, mergedDefinitions, file } = scope;
+  if (file !== undefined) {
+    const mine = definitions.filter((d) => d.file === file);
+    const others = definitions.length - mine.length;
+    if (mine.length > 1) {
+      return (
+        `⚠ merged: "${symbol}" is defined ${mine.length} times in ${file} (${mine.map(where).join(", ")}); ` +
+        `a file cannot tell them apart, so this answer combines all ${mine.length}.`
+      );
+    }
+    return others > 0 ? `narrowed to the definition at ${where(mine[0]!)} (1 of ${definitions.length} definitions of "${symbol}").` : "";
+  }
+  if (mergedDefinitions > 1) {
+    return (
+      `⚠ merged: "${symbol}" is defined ${mergedDefinitions} times (${definitions.map(where).join(", ")}); ` +
+      `this answer combines all ${mergedDefinitions}. Narrow it to one with --file <path>.`
+    );
+  }
+  return "";
 }
 
 /**
@@ -90,22 +251,28 @@ export async function definitionFiles(conn: GraphConnection, name: string): Prom
   return rows.map((r) => String(r.file)).filter((f) => f && f !== "null");
 }
 
-/** Combined call chain for a symbol. */
+/**
+ * Combined call chain for a symbol. `file` narrows it to the definition(s) in that
+ * file, for callers and callees alike (see {@link definitionScope}).
+ */
 export async function callChain(
   conn: GraphConnection,
   symbol: string,
   direction: CallDirection = "both",
   depth = 1,
+  file?: string,
 ): Promise<CallChainResult> {
   const d = safeDepth(depth);
   const wantCallers = direction === "callers" || direction === "both";
   const wantCallees = direction === "callees" || direction === "both";
+  const scope = await definitionScope(conn, symbol, file);
   return {
     symbol,
     direction,
     depth: d,
-    callers: wantCallers ? await callers(conn, symbol, d) : [],
-    callees: wantCallees ? await callees(conn, symbol, d) : [],
+    ...scope,
+    callers: wantCallers ? await callers(conn, symbol, d, scope.file) : [],
+    callees: wantCallees ? await callees(conn, symbol, d, scope.file) : [],
   };
 }
 

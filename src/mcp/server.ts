@@ -209,16 +209,20 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     {
       title: "Call chain",
       description:
-        "Who calls / is called by a function symbol — 'what breaks if I change X?'. direction: callers | callees | both.",
+        "Who calls / is called by a function symbol — 'what breaks if I change X?'. direction: callers | callees | both. " +
+        "A name several functions share is answered, not refused: the result lists every definition (`definitions`, with file and line) " +
+        "and `mergedDefinitions` says how many the answer combines — more than 1 means the callers of different functions are in one list. " +
+        "Pass `file` (a path, or its trailing part if unique) to ask about the definition(s) in that file only; a file with no such definition is an error, not an empty list.",
       inputSchema: {
         symbol: z.string(),
         direction: z.enum(["callers", "callees", "both"]).optional(),
         depth: z.number().int().optional(),
+        file: z.string().optional(),
       },
       // Pure MATCH query — no writeFragment call anywhere in callChain/query.ts.
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ symbol, direction, depth }) => {
+    async ({ symbol, direction, depth, file }) => {
       try {
         // `requireFunction` answers "is this symbol in the graph at all" before the
         // query does: an unknown name used to come back as `callers: []`, which is
@@ -226,7 +230,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
         // symbol's own definition file(s), the anchor for the blindspot match.
         return await source.use(async (conn) => {
           const defFiles = await requireFunction(conn, symbol);
-          const result = await callChain(conn, symbol, direction ?? "both", depth ?? 1);
+          // A `file` that holds no definition of the symbol throws (isError) rather than answering `callers: []`.
+          const result = await callChain(conn, symbol, direction ?? "both", depth ?? 1, file);
           // Coarse index-health (R2). The anchor set for the blindspot match is
           // the queried symbol's OWN definition file(s) PLUS the result files —
           // critically including the def file(s), because the flagship case is an
@@ -234,7 +239,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
           // result files: without the def-file anchor that highest-risk answer
           // would carry no warning even when foo's neighborhood has unparsed
           // files.
-          const anchor = [...defFiles, ...result.callers.map((n) => n.file), ...result.callees.map((n) => n.file)];
+          const anchor = [...(result.file !== undefined ? [result.file] : defFiles), ...result.callers.map((n) => n.file), ...result.callees.map((n) => n.file)];
           const health = readIndexHealth(manifestPath, anchor);
           // `symbolFound` is always true here (absence is an error above); it is in
           // the payload so a consumer reading `callers: []` can see which kind of

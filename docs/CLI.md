@@ -268,7 +268,7 @@ indexer sees but `egr` deliberately skips), `definitionsResolved` /
 matched but resolution came back at zero, the human-readable output adds a
 `WARNING` line rather than silently reporting an all-zero result as success.
 
-### `callers <symbol> [--depth N]`
+### `callers <symbol> [--depth N] [--file <path>]`
 
 Functions that (transitively, up to `--depth`, default 1) call `<symbol>`.
 "What breaks if I change this?"
@@ -282,7 +282,40 @@ named "X" is in the graph`, with near names when there are any — not `(none)`.
 `(none)` with exit `0` means the function is in the graph and nothing calls it.
 (Through 0.12.0 both printed `(none)` and exited `0`.)
 
-### `callees <symbol> [--depth N]`
+**A name that several functions share is answered, and the answer says so.** A
+symbol is matched by name, so `render` defined in two files has the callers of
+both in one list. That list used to look like the callers of one function. Now
+the output says how many definitions it combines and lists each one as
+`file:line`:
+
+```text
+callers(render):
+  ⚠ merged: "render" is defined 2 times (a/render.ts:2, b/render.ts:2); this answer combines all 2. Narrow it to one with --file <path>.
+  pageA (a/render.ts)
+  pageB (b/render.ts)
+```
+
+`--file <path>` asks about the definition(s) in that file only (callers reached
+through `--depth` are those of that definition). The path is the one `egr`
+prints, with `./`, an absolute path, or just the trailing part accepted when it
+fits exactly one definition file (`a/render.ts`, not `render.ts` if two files end
+that way). The answer then says it is one of several
+(`narrowed to the definition at a/render.ts:2 (1 of 2 definitions of "render")`).
+**A file that holds no definition of the symbol is an error** — exit `1`, naming
+the files that do define it — and so is a trailing part that fits several files;
+neither is ever printed as `(none)`. A file that defines the name more than once
+(two classes with a `paint` method) cannot be split by `--file`; the answer says
+so instead of pretending to have chosen one.
+
+`--json` is the bare array it always was, for every answer: scripts parse it, and
+an array cannot say anything about itself. When the answer combines several
+definitions, the same `⚠ merged: …` sentence is written to **stderr** (stdout is
+untouched, so `JSON.parse` of it works as before; a script that discards stderr
+does not see the warning). To get the definitions as data, use the MCP tool
+`call_chain` (`definitions`, `mergedDefinitions`). A name with one definition
+prints exactly what it always printed, on both streams.
+
+### `callees <symbol> [--depth N] [--file <path>]`
 
 Functions that `<symbol>` (transitively, up to `--depth`, default 1) calls.
 
@@ -291,7 +324,10 @@ egr callees createMcpServer
 ```
 
 > `--depth` is clamped to `1..10`. A symbol is matched by **name**; if a name is
-> reused across files, all matches are considered.
+> reused across files, all matches are considered. `callees` follows the same
+> rules as `callers` for a shared name: the output says how many definitions it
+> combines, `--file` narrows it, a file with no such definition is an error, and
+> `--json` is the bare array with the warning on stderr, as for `callers`.
 
 ### `impact <spec-id> [--max-hops N]`
 

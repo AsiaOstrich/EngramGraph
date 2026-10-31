@@ -77,7 +77,7 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对�
 |------|------|------|
 | `index_code` *(仅可写入模式)* | `files: { path, source }[]` | 将源代码索引进代码图谱（跨文件 `CALLS`）。返回 files/functions/classes/calls（+ ambiguous/unresolved）计数。 |
 | `index_docs` *(仅可写入模式)* | `docs: { content, fallbackId? }[]` | 将带 front-matter 的 markdown 索引进知识图谱。返回 specs/decisions/impacts/supersedes/relates/decisionRelates 计数。 |
-| `call_chain` | `symbol`、`direction?`（`callers`\|`callees`\|`both`）、`depth?` | 谁调用某函数符号 / 被它调用。“改 X 会坏掉什么？” |
+| `call_chain` | `symbol`、`direction?`（`callers`\|`callees`\|`both`）、`depth?`、`file?` | 谁调用某函数符号 / 被它调用。“改 X 会坏掉什么？”多个函数共用同一个名字时会回答而不是拒答：`definitions` 列出每一个定义（`{ id, file, startLine }`），`mergedDefinitions` 说明答案合并了几个，所以 `mergedDefinitions > 1` 表示不同函数的调用者（与被调用者）在同一份清单里。`file`（路径，或恰好对上一个定义所在文件的尾段）只问该文件里的定义，调用者与被调用者都适用；结果会带 `file`（存储时的写法）与该文件的 `mergedDefinitions`。`file` 里没有这个符号的定义、或尾段对上多个文件，是错误结果（`isError: true`），并列出真正定义它的文件：**绝不是 `callers: []`**。字段只增不减：只有一个定义的名字，返回和以前相同，另加 `definitions`（一项）与 `mergedDefinitions: 1`。见 [CLI.md](./CLI.md)。 |
 | `impact_analysis` | `nodeId`、`maxHops?` | 某 spec 影响链中的决策（`IMPACTS` + 多跳 `SUPERSEDES`）。 |
 | `ingest_feedback` *(仅可写入模式)* | `nodeId`、`type`、`nodeLabel?`（`Function`\|`Spec`\|`Decision`\|`Doc`）、`weight?` | 按反馈事件（`test_fail`/`test_pass`/`human_fix`）演化节点的 SAGE 置信度。 |
 | `implementers` | `specId` | 声明 `// implements <specId>` 的文件及其定义的函数。「哪些代码实现了这个 spec？」读取 `IMPLEMENTS(Module→Spec)` + `DEFINES`。 |
@@ -97,6 +97,9 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对�
 - **图里没有这个名字。** 对图里没有的函数调用 `call_chain`、对没见过的 spec id 调用 `impact_analysis`，
   返回错误（`no function named "X" is in the graph — this is not the same as "nothing calls it"`），
   有相近名称时一并列出。在图里但没有调用者的函数，返回 `callers: []` 并带 `symbolFound: true`。
+- **`file` 指到的文件没有这个符号的定义。** 带 `file` 的 `call_chain`，若该文件没有定义这个符号，返回错误
+  （`"X" has no definition in "path" — this is not the same as "nothing calls it"; it is defined in: …`），
+  不是 `callers: []`。
 - **另一个进程正在写图。** 查询会重试约 5 秒（可用 `ENGRAM_LOCK_WAIT_MS` 调整），然后返回
   `the graph … is being written by another process … This is not an empty result`。
 
