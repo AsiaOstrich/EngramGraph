@@ -283,6 +283,27 @@ egr refs check MEMORY.md
 egr refs check ./notes --json
 ```
 
+### `cochange <file> [--limit N] [--commits N] [--max-files N] [--repo <dir>] [--json]`
+
+从**本机 git 历史**找出与 `<file>` 出现在同一批提交里的文件，次数多的在前（XSPEC-514 R2）。调用图看不到“因为某个不是调用的理由而必须跟着改”的文件（测试、文档、schema、同级模块）；历史看得到。它只读 `git`：不用模型、不联网，**也不打开图**，所以没有 `.engram/graph.db` 时能用，别的进程占着图时也能用。
+
+```bash
+egr cochange src/model.py --limit 5
+#  cochange(src/model.py): 41 commit(s) used of the last 44 non-merge commit(s) that touched it (limit 200); 3 skipped for changing more than 30 files
+#    17  src/schema.py
+#    12  tests/test_model.py
+#    ...
+egr cochange --json -- -odd-name.py      # 文件名以 "-" 开头：选项在前，再接 "--"，最后才是文件名
+```
+
+- **怎么算。** 在碰过该文件的最近 `--commits`（默认 200）个**非合并**提交里，凡是改动**超过 `--max-files`（默认 30）个文件**的提交一律跳过：大范围的批量改动看不出哪些文件属于一组。刚好 30 个文件的提交会被采用；计数包含 `<file>` 本身。每个留下来的提交，给它改到的每一个*其他*文件加一次。`--limit`（默认 10）保留排名靠前的部分，次数相同时按路径排序。三个数字都必须是正整数，其他值是错误。
+- **分母是答案的一部分。** 第一行写明用了几个提交、因过大跳过几个；`--json` 带有 `commitsExamined`、`commitsUsed`、`commitsSkippedLarge`、`commitsSkippedShallowBoundary`、`maxCommits`、`maxFilesPerCommit`、`totalFiles`（应用 `--limit` 之前）与 `cochanged: [{ file, count }]`。
+- **不追踪重命名**，也不算合并提交（`--json` 中 `renamesFollowed: false`、`mergesIncluded: false`）。重命名在历史里是“删掉旧路径、新增新路径”，所以改名之前的历史记在旧名字下面，不会算到新名字上。要追踪改名得靠相似度猜测，而猜测不是历史。问新名字时，它的历史从改名那一刻开始。
+- **路径。** `<file>` 相对于当前目录（或 `--repo <dir>`，工作树内的一个目录），也可以用绝对路径；结果是相对于仓库根目录的路径。以 `-` 开头的文件名要放在 `--` 之后（选项在前），git 不会把它当成选项；含 `*` 或 `[` 的名字就是那个文件，不是通配符。
+- **浅克隆**（`git clone --depth N`，多数 CI checkout 的默认值）会标出 `shallow: true` 并打印说明：深度之前的历史不存在，次数是下限。它的边界提交在 git 看来像“新增了每一个文件”，会被排除并计入 `commitsSkippedShallowBoundary`。
+- **无法判定（cannot determine）是退出码 1，不是空列表。** 情况包括：目录不在 git 工作树内；`HEAD` 可达的提交里没有任何一个碰过该文件（从未提交，或路径不存在）；路径是目录或在仓库之外；`git` 不存在、失败，或 60 秒内没有结束（会被终止）；或碰过该文件的每个提交都被跳过（因过大，或是浅克隆边界）。消息写到 stderr：`egr: cochange: 无法判定 (cannot determine) — <原因>`；加 `--json` 时 stdout 也会有 `{ "status": "undetermined", "file", "reason" }`。退出码 `0` 的 `(none)` 表示：该文件有可用的历史，而且从来没有别的文件跟它一起改过。
+- 量过，不是承诺：在同一个仓库之后的 40 个提交上，把这个排名前两名的文件加进调用图的答案，F1 从 0.20 升到 0.23（实验 3，facts F27；只有一个仓库，还不是 XSPEC-514 R4 的结果）。它是与调用图并读的信号，不是取代调用图。
+
 ### `gc [--dry-run]`
 
 回收已不存在分支的 per-branch 图谱。检查 `<git-common-dir>/engram/`；当没有任何现存
@@ -366,4 +387,4 @@ egr callers paymentGateway --depth 3 --json > callers.json
 成功为 `0`；错误为 `1`（消息以 `egr: <message>` 写到 stderr）。错误包括：图被另一个进程锁住，以及
 图里没有的输入——符号（`callers`、`callees`）、spec id（`impact`、`implementers`）、节点 id
 （`feedback`、`related`）或模块路径（`implemented-by`）。到 0.12.0 为止，其中好几个会打印一行消息然后以 `0`
-退出；依赖那个行为的脚本现在必须处理退出码 `1`。退出码 `0` 的 `(none)` 永远表示“它在图里，只是没有结果”。
+退出；依赖那个行为的脚本现在必须处理退出码 `1`。退出码 `0` 的 `(none)` 永远表示“它在图里，只是没有结果”。`cochange` 读的是 git 不是图：目录不在 git 工作树内、没有任何提交碰过该文件、或碰过它的提交全被跳过时，以退出码 `1` 与“无法判定 (cannot determine)”结束；它的 `(none)` 表示该文件有可用的历史，而且从来没有别的文件跟它一起改过。

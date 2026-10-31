@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // implements XSPEC-481
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,13 +25,32 @@ import { runEgr } from "./helpers/run-egr.js";
  * that "not a refusal" is not satisfied by an error of another kind.
  */
 
-const READ_ONLY_TOOLS = ["blindspots", "call_chain", "doctor", "impact_analysis", "implemented_specs", "implementers", "refs_check", "signatures"];
+const READ_ONLY_TOOLS = ["blindspots", "call_chain", "cochange", "doctor", "impact_analysis", "implemented_specs", "implementers", "refs_check", "signatures"];
 const WRITING_TOOLS = ["index_code", "index_docs", "ingest_feedback", "related"];
 
 let built: BuiltEgr;
 let work: string;
 let db: string;
 let note: string;
+let histRepo: string;
+
+/** A repository for `cochange` (XSPEC-514 R2), made without the user's git config or any git variable a hook exports. */
+function makeHistory(root: string): void {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: join(root, "empty-gitconfig") };
+  for (const n of execFileSync("git", ["rev-parse", "--local-env-vars"], { encoding: "utf8", env: process.env }).split("\n")) {
+    if (n.trim()) delete env[n.trim()];
+  }
+  writeFileSync(join(root, "empty-gitconfig"), "");
+  const g = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...a], { cwd: histRepo, env, stdio: "pipe" });
+  mkdirSync(histRepo);
+  g("init", "-q");
+  for (const n of [1, 2]) {
+    writeFileSync(join(histRepo, "a.ts"), `// ${n}\n`);
+    writeFileSync(join(histRepo, "b.ts"), `// ${n}\n`);
+    g("add", "-A");
+    g("commit", "-q", "-m", `together ${n}`);
+  }
+}
 
 beforeAll(() => {
   built = buildEgr();
@@ -42,6 +62,8 @@ beforeAll(() => {
   writeFileSync(join(proj, "XSPEC-7.md"), "---\nid: XSPEC-7\ntitle: The spec\n---\n# XSPEC-7\nbody\n");
   const r = runEgr(built.cli, ["index", proj, "--docs"], { env: { ...process.env, ENGRAM_DB: db }, cwd: work });
   if (r.status !== 0) throw new Error(`fixture index failed: ${r.stderr}`);
+  histRepo = join(work, "hist");
+  makeHistory(work);
   note = join(work, "note.md");
   writeFileSync(note, "Calls `alpha()` in `a.ts`.\n");
 }, 120_000);
@@ -62,7 +84,7 @@ async function connect(args: string[]): Promise<Client> {
 type ToolResult = { isError?: boolean; content: Array<{ text: string }> };
 
 describe("XSPEC-481 R3: tools/list of the read-only stdio server", () => {
-  it("lists the eight tools that work and none of the four that cannot, over egr-mcp and over egr mcp [xspec481-r3-list]", async () => {
+  it("lists the nine tools that work and none of the four that cannot, over egr-mcp and over egr mcp [xspec481-r3-list]", async () => {
     for (const args of [[built.mcp], [built.cli, "mcp"]]) {
       const client = await connect(args);
       try {
@@ -78,6 +100,7 @@ describe("XSPEC-481 R3: tools/list of the read-only stdio server", () => {
   it("every listed tool, called with arguments that exist in the graph, answers without a read-only refusal and without an error [xspec481-r3-every-listed-tool-works]", async () => {
     const calls: Record<string, Record<string, unknown>> = {
       blindspots: {},
+      cochange: { file: "a.ts", repo: histRepo },
       call_chain: { symbol: "alpha", direction: "callees" },
       doctor: {},
       impact_analysis: { nodeId: "XSPEC-7" },
@@ -97,6 +120,7 @@ describe("XSPEC-481 R3: tools/list of the read-only stdio server", () => {
         // Read back: the answer is about this graph, not an empty shell.
         if (name === "call_chain") expect(res.content[0]!.text).toContain("beta");
         if (name === "implementers") expect(res.content[0]!.text).toContain("a.ts");
+        if (name === "cochange") expect(JSON.parse(res.content[0]!.text).cochanged).toEqual([{ file: "b.ts", count: 2 }]);
       }
     } finally {
       await client.close();

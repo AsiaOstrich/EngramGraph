@@ -283,6 +283,27 @@ egr refs check MEMORY.md
 egr refs check ./notes --json
 ```
 
+### `cochange <file> [--limit N] [--commits N] [--max-files N] [--repo <dir>] [--json]`
+
+從**本機 git 歷史**找出與 `<file>` 出現在同一批提交裡的檔案，次數多的在前（XSPEC-514 R2）。呼叫圖看不到「因為某個不是呼叫的理由而必須跟著改」的檔案（測試、文件、schema、同層模組）；歷史看得到。它只讀 `git`：不用模型、不連網，**也不開圖**，所以沒有 `.engram/graph.db` 時能用，別的行程占著圖時也能用。
+
+```bash
+egr cochange src/model.py --limit 5
+#  cochange(src/model.py): 41 commit(s) used of the last 44 non-merge commit(s) that touched it (limit 200); 3 skipped for changing more than 30 files
+#    17  src/schema.py
+#    12  tests/test_model.py
+#    ...
+egr cochange --json -- -odd-name.py      # 檔名以 "-" 開頭：選項在前，再接 "--"，最後才是檔名
+```
+
+- **怎麼算。** 在碰過該檔的最近 `--commits`（預設 200）個**非合併**提交裡，凡是改動**超過 `--max-files`（預設 30）個檔案**的提交一律略過：大掃除看不出哪些檔案屬於一組。剛好 30 個檔案的提交會被採用；計數包含 `<file>` 本身。每個留下來的提交，替它改到的每一個*其他*檔案加一次。`--limit`（預設 10）保留排名前段，次數相同時依路徑排序。三個數字都必須是正整數，其他值是錯誤。
+- **分母是答案的一部分。** 第一行寫明用了幾個提交、因過大略過幾個；`--json` 帶有 `commitsExamined`、`commitsUsed`、`commitsSkippedLarge`、`commitsSkippedShallowBoundary`、`maxCommits`、`maxFilesPerCommit`、`totalFiles`（套用 `--limit` 之前）與 `cochanged: [{ file, count }]`。
+- **不追重新命名**，也不算合併提交（`--json` 中 `renamesFollowed: false`、`mergesIncluded: false`）。重新命名在歷史裡是「刪掉舊路徑、新增新路徑」，所以改名之前的歷史記在舊名字底下，不會算到新名字。要追改名得靠相似度猜測，而猜測不是歷史。問新名字時，它的歷史從改名那一刻開始。
+- **路徑。** `<file>` 相對於目前目錄（或 `--repo <dir>`，工作樹內的一個目錄），也可用絕對路徑；結果是相對於 repo 根目錄的路徑。以 `-` 開頭的檔名要放在 `--` 之後（選項在前），git 不會把它當選項；含 `*` 或 `[` 的名字就是那個檔案，不是萬用字元。
+- **淺層 clone**（`git clone --depth N`，多數 CI checkout 的預設）會標 `shallow: true` 並印出說明：深度之前的歷史不存在，次數是下限。它的邊界提交在 git 看來像「新增了每一個檔案」，會被排除並計入 `commitsSkippedShallowBoundary`。
+- **無法判定（cannot determine）是結束碼 1，不是空清單。** 情況包括：目錄不在 git 工作樹內；`HEAD` 可達的提交沒有任何一個碰過該檔（從未提交，或路徑不存在）；路徑是目錄或在 repo 之外；`git` 不存在、失敗，或 60 秒內沒結束（會被終止）；或碰過該檔的每個提交都被略過（因過大，或是淺層邊界）。訊息寫到 stderr：`egr: cochange: 無法判定 (cannot determine) — <原因>`；加 `--json` 時 stdout 也會有 `{ "status": "undetermined", "file", "reason" }`。結束碼 `0` 的 `(none)` 代表：該檔有可用的歷史，而且從來沒有別的檔案跟它一起改過。
+- 量過，不是承諾：在同一個 repo 之後的 40 個提交上，把這個排名前兩名的檔案加進呼叫圖的答案，F1 從 0.20 升到 0.23（實驗 3，facts F27；只有一個 repo，還不是 XSPEC-514 R4 的結果）。它是與呼叫圖並讀的訊號，不是取代呼叫圖。
+
 ### `gc [--dry-run]`
 
 回收已不存在分支的 per-branch 圖譜。檢查 `<git-common-dir>/engram/`；當沒有任何現存
@@ -366,4 +387,4 @@ egr callers paymentGateway --depth 3 --json > callers.json
 成功為 `0`；錯誤為 `1`（訊息以 `egr: <message>` 寫到 stderr）。錯誤包括：圖被另一個行程鎖住，以及
 圖裡沒有的輸入——符號（`callers`、`callees`）、spec id（`impact`、`implementers`）、節點 id
 （`feedback`、`related`）或模組路徑（`implemented-by`）。到 0.12.0 為止，其中好幾個會印一行訊息然後以 `0`
-結束；依賴那個行為的腳本現在必須處理結束碼 `1`。結束碼 `0` 的 `(none)` 永遠代表「它在圖裡，只是沒有結果」。
+結束；依賴那個行為的腳本現在必須處理結束碼 `1`。結束碼 `0` 的 `(none)` 永遠代表「它在圖裡，只是沒有結果」。`cochange` 讀的是 git 不是圖：目錄不在 git 工作樹內、沒有任何提交碰過該檔、或碰過它的提交全被略過時，以結束碼 `1` 與「無法判定 (cannot determine)」結束；它的 `(none)` 代表該檔有可用的歷史，而且從來沒有別的檔案跟它一起改過。

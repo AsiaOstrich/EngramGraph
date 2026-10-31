@@ -68,7 +68,7 @@ command/args/env 都一样：
 
 ## 工具
 
-下表列出全部十二个。**stdio server（`egr-mcp`、`egr mcp`）是只读的，只提供其中八个**：除了 `index_code`、
+下表列出全部十三个。**stdio server（`egr-mcp`、`egr mcp`）是只读的，只提供其中九个**：除了 `index_code`、
 `index_docs`、`ingest_feedback`、`related` 之外的所有工具；这四个会写入图，下表标为*仅可写入模式*。
 stdio 的 `tools/list` 不含这四个（0.13.0-beta.4 会列出它们、再在每次调用时拒绝）；它们只存在于以可写入连接创建的
 server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对应的终端命令见下方“通过 stdio 不提供的工具”。
@@ -86,6 +86,7 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对�
 | `blindspots` | — | 解析不完全或失败的文件（来自 parse-health manifest）——图可能缺少节点／边的地方。当查询报告 `indexHealth.possiblyIncomplete` 时用它查出**缺的是什么**。`manifestPresent` 用来区分「没有问题」与「从未测量过」。 |
 | `signatures` | — | 同一批文件改以**根本原因**分组而非逐一列出——把「584 个文件」变成「1 个问题」。当 `blindspots` 返回很长的列表时使用。 |
 | `doctor` | — | 哪些语言可用、不可用的原因、这台机器上有哪些是自行编译的、哪些命令需要网络。**不打开图**，所以在「索引本身坏掉」时仍然回答得出来。 |
+| `cochange` | `file`、`repo?`、`commits?`、`maxFilesPerCommit?`、`limit?` | 从**本机 git 历史**找出与 `file` 出现在同一批提交里的文件，次数多的在前（XSPEC-514 R2）：“这个文件以前通常还会一起改哪些文件？”读的是 `git`，不是图。`commits`（默认 200）是看该文件最近几个非合并提交；改动超过 `maxFilesPerCommit`（默认 30）个文件的提交会被跳过，答案会写明用了几个、跳过几个。不算合并提交，**不追踪重命名**。`file` 相对于 `repo`（git 工作树内的一个目录；默认为 server 的工作目录）或使用绝对路径；结果是相对于仓库根目录的路径。结果为 `{ status: "ok", file, commitsExamined, commitsUsed, commitsSkippedLarge, commitsSkippedShallowBoundary, shallow, totalFiles, cochanged: [{ file, count }], … }`。无法回答时（不在 git 工作树内、没有提交碰过该文件、git 失败或超时、每个提交都被跳过）结果是错误（`isError: true`），文本带有 `status: "undetermined"`、原因与“无法判定 (cannot determine)”：**绝不回空列表**。见 [CLI.md](./CLI.md)。 |
 | `refs_check` | `paths: string[]` | 检查 Markdown 文件／目录中（反引号包住的）文件路径与符号引用，对照图与 `git` 是否仍然正确。每个引用回报 `present`（仍存在）｜`moved`（附新位置）｜`missing`（找不到）｜`unresolvable`（信息不足，例如引用的是这个图没有索引的另一个 repo——绝不回报成 `missing`）。只读，不会修改图或被检查的文件。抽取规则见 [CLI.md](./CLI.md)。 |
 
 每个工具都返回一个 JSON 文本内容块；失败时返回 `error: <message>` 并带 `isError: true`。
@@ -143,8 +144,9 @@ server 会在下一次查询时看到结果——不需要重启。在第一次 
 | `signatures` | true | false | true | false |
 | `doctor` | true | false | true | false |
 | `refs_check` | true | false | true | false |
+| `cochange` | true | false | true | false |
 
-全部都不连网（`openWorldHint: false`）——图、文件系统与 `git` 都是本机的。
+全部都不连网（`openWorldHint: false`）——图、文件系统与 `git` 都是本机的。`cochange` 是只读的，因为它只执行 `git rev-parse` 与 `git log`（带 `GIT_OPTIONAL_LOCKS=0`），什么都不写；这是读它的实现确认的，不是从名字推断的。
 只有 `ingest_feedback` 不是幂等的：它套用的是置信度的**增量**，同一组参数调用两次
 会改变分数两次，不是一次。
 

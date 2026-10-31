@@ -89,7 +89,7 @@ the command/args/env are the same:
 
 ## Tools
 
-The table lists all twelve. **The stdio server (`egr-mcp`, `egr mcp`) is read-only and offers eight of them**: every
+The table lists all thirteen. **The stdio server (`egr-mcp`, `egr mcp`) is read-only and offers nine of them**: every
 tool except `index_code`, `index_docs`, `ingest_feedback` and `related`, which write to the graph and are marked
 *writable only* below. `tools/list` over stdio does not include those four (0.13.0-beta.4 listed them and refused
 each call); they exist on a server created on a writable connection, such as `createMcpServer(conn)` in an embedding.
@@ -108,6 +108,7 @@ Why, and the terminal command for each, is under "Tools not offered over stdio".
 | `blindspots` | — | Files that parsed partially or failed, from the parse-health manifest — where the graph may be missing nodes/edges. Use after a query reports `indexHealth.possiblyIncomplete` to find out WHAT is missing. `manifestPresent` distinguishes "nothing wrong" from "never measured". |
 | `signatures` | — | The same files grouped by root cause instead of listed individually — turns "584 files" into "1 problem". Use when `blindspots` returns a long list. |
 | `doctor` | — | Which languages are available and why any are not, what was compiled on this machine, which commands need network. Does not open the graph, so it answers when indexing itself is what is broken. |
+| `cochange` | `file`, `repo?`, `commits?`, `maxFilesPerCommit?`, `limit?` | Files that changed in the same commits as `file`, most often first, from the **local git history** (XSPEC-514 R2): "what else did we usually change with this file?" Reads `git`, not the graph. `commits` (default 200) is how many of the file's most recent non-merge commits to look at; a commit that changed more than `maxFilesPerCommit` (default 30) files is skipped, and the answer says how many were used and skipped. Merge commits are not counted and **renames are not followed**. `file` is relative to `repo` (a directory inside the git work tree; default: the server's working directory) or absolute; results are repository-root paths. Result `{ status: "ok", file, commitsExamined, commitsUsed, commitsSkippedLarge, commitsSkippedShallowBoundary, shallow, totalFiles, cochanged: [{ file, count }], … }`. When it cannot answer (not a git work tree, no commit touches the file, git failed or timed out, every commit skipped) the result is an error (`isError: true`) whose text carries `status: "undetermined"`, the reason and 無法判定 (cannot determine): **never an empty list**. See [CLI.md](./CLI.md). |
 | `refs_check` | `paths: string[]` | Check file-path/symbol references (backtick-quoted) inside Markdown files/directories against the graph and `git`. Each reference is `present` \| `moved` (+ new location) \| `missing` \| `unresolvable` (e.g. a reference into a repo this graph does not index — never reported as `missing`). Read-only; never modifies the graph or the files checked. See [CLI.md](./CLI.md) for the extraction rule. |
 
 Every tool returns a text content block of JSON; on failure it returns
@@ -179,9 +180,12 @@ its own note above and `readOnlyHint: false` below.
 | `signatures` | true | false | true | false |
 | `doctor` | true | false | true | false |
 | `refs_check` | true | false | true | false |
+| `cochange` | true | false | true | false |
 
 None of these talk to the network (`openWorldHint: false` throughout) — the
-graph, the filesystem and `git` are all local. `ingest_feedback` is the only
+graph, the filesystem and `git` are all local. `cochange` is read-only because it
+only runs `git rev-parse` and `git log` (with `GIT_OPTIONAL_LOCKS=0`) and writes
+nothing, which was checked in its implementation, not assumed from the name. `ingest_feedback` is the only
 non-idempotent write: it applies a confidence **delta**, so calling it twice
 with the same arguments changes the score twice, not once.
 

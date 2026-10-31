@@ -25,6 +25,7 @@ import { callResolutionHint, knowledgeNamingHint } from "./index-hints.js";
 import { READ_ONLY_COMMANDS } from "./read-only-commands.js";
 import { SKIP_DIRS } from "./walk.js";
 import { isLockContention } from "../graph-db/lease.js";
+import { coChange, formatCoChange, undeterminedMessage, DEFAULT_COCHANGE_COMMITS, DEFAULT_COCHANGE_MAX_FILES, DEFAULT_COCHANGE_LIMIT } from "../cochange/index.js";
 import { checkpointOrWarn } from "../graph-db/checkpoint.js";
 import type { GraphConnection } from "../graph-db/connection.js";
 
@@ -91,6 +92,21 @@ Commands:
                                   unresolvable (e.g. a reference into a repo
                                   this graph does not index). Read-only;
                                   never writes the graph or the files checked
+  cochange <file> [--limit N] [--commits N] [--max-files N] [--repo <dir>]
+                                  Files that changed together with <file> in
+                                  the local git history, most often first
+                                  (path relative to the current directory, or
+                                  --repo <dir>; results are repository-root
+                                  paths). Reads only git, never the graph, and
+                                  uses no model. Looks at the last --commits
+                                  (default 200) non-merge commits that touched
+                                  the file and skips a commit that changed more
+                                  than --max-files (default 30) files; merge
+                                  commits are not counted and renames are NOT
+                                  followed. No history, or not a git repository
+                                  = 無法判定 (exit 1), never an empty list. A
+                                  file name that starts with "-": egr cochange
+                                  -- -name.py  (options go before the "--")
   gc [--dry-run]                  Remove per-branch graphs for deleted branches
   blindspots                      Files that parsed partially or failed (from
                                   the parse-health manifest) — where the graph
@@ -170,6 +186,10 @@ Several roots in one graph: a file keeps its path relative to its root as its id
 Exit status: 0 on success; 1 on any error, including a lock held by another
 process and an input (symbol, spec id, node id, module path) the graph does not
 contain. "(none)" with exit 0 means: it is in the graph and has no results.
+"cochange" exits 1 with 無法判定 (cannot determine) when the directory is not a
+git work tree, no commit touches the file, or every commit that did was skipped
+as too large; "(none)" there means the file has usable history and nothing else
+ever changed with it.
 "refs check" also exits 1 when any reference is "missing" (the full report is
 still printed); "unresolvable" does not fail it.
 
@@ -249,6 +269,9 @@ async function main(): Promise<void> {
       "include-unclustered": { type: "boolean" },
       incremental: { type: "boolean" },
       "changed-from": { type: "string" },
+      commits: { type: "string" },
+      "max-files": { type: "string" },
+      repo: { type: "string" },
     },
   });
 
@@ -277,6 +300,32 @@ async function main(): Promise<void> {
       const verb = g.deleted ? "removed" : g.orphans.length ? "orphans (dry-run)" : "orphans";
       return `${verb} in ${g.dir}:\n${g.orphans.length ? g.orphans.map((o) => `  ${o}`).join("\n") : "  (none)"}`;
     });
+    return;
+  }
+
+  // cochange reads the git history, not a graph connection (XSPEC-514 R2). It must stay above `openGraph`:
+  // a pure-git question must not create or lock .engram/graph.db, and must work where no graph exists.
+  if (cmd === "cochange") {
+    if (!a1) throw new Error("cochange requires a <file> (a file name that starts with \"-\" goes after \"--\")");
+    const posInt = (flag: string, v: string | undefined, d: number): number => {
+      if (v === undefined) return d;
+      if (!/^[1-9][0-9]*$/.test(v)) throw new Error(`${flag} must be a positive integer (got "${v}")`);
+      return Number(v);
+    };
+    const r = coChange({
+      file: a1,
+      repo: values.repo,
+      commits: posInt("--commits", values.commits, DEFAULT_COCHANGE_COMMITS),
+      maxFilesPerCommit: posInt("--max-files", values["max-files"], DEFAULT_COCHANGE_MAX_FILES),
+      limit: posInt("--limit", values.limit, DEFAULT_COCHANGE_LIMIT),
+    });
+    if (r.status === "undetermined") {
+      // "Cannot determine" is not an empty result: stderr + exit 1 in both modes. Under --json stdout also carries
+      // the structured status, so a script that parses stdout sees `status: "undetermined"`, never `[]`.
+      if (values.json) process.stdout.write(JSON.stringify(r, null, 2) + "\n");
+      throw new Error(undeterminedMessage(r));
+    }
+    out(r, values.json, (d) => formatCoChange(d as typeof r));
     return;
   }
 

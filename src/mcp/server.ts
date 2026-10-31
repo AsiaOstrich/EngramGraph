@@ -8,9 +8,9 @@
  *
  * Tools: index_code, index_docs, call_chain, impact_analysis, ingest_feedback,
  * implementers, implemented_specs, related, blindspots, signatures, doctor,
- * refs_check.
+ * refs_check, cochange.
  *
- * ## A read-only server offers eight tools, not twelve (XSPEC-481 R3)
+ * ## A read-only server offers nine tools, not thirteen (XSPEC-481 R3)
  *
  * `index_code`, `index_docs`, `ingest_feedback` and `related` write to the graph
  * (the last one by installing the algo extension and building a projected
@@ -20,7 +20,8 @@
  * Now a read-only source (`GraphSource.readOnly`, which is what stdio uses) does
  * not offer them at all, and says in the server `instructions` which `egr`
  * command does each job. A writable source — a bare connection, tests,
- * embedding — still has all twelve.
+ * embedding — still has all thirteen (`cochange` reads git, not the graph, so
+ * both kinds of server have it).
  *
  * ## The graph is held per query, not per session (XSPEC-457 R1)
  *
@@ -68,6 +69,7 @@ import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js"
 import { applyFeedback, feedbackForEventType, CONFIDENCE_LABELS } from "../sage/index.js";
 import { related } from "../structural-memory/index.js";
 import { checkRefs } from "../cli/refs-check.js";
+import { coChange, undeterminedMessage } from "../cochange/index.js";
 
 const EGR_VERSION = (pkg as { version: string }).version;
 
@@ -492,6 +494,50 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     async ({ paths }) => {
       try {
         return ok(await source.use((conn) => checkRefs(conn, paths)));
+      } catch (e) {
+        return failFrom(e);
+      }
+    },
+  );
+
+  // --- Historical co-change (XSPEC-514 R2) ---
+  //
+  // Reads the LOCAL git history, never the graph: no `source.use`, so it works on a server whose graph is
+  // missing or busy, and it holds nothing. `readOnlyHint: true` was set by reading `coChange`, not its name:
+  // it runs `git rev-parse` and two `git log` calls (with GIT_OPTIONAL_LOCKS=0) and writes nothing anywhere.
+  // `openWorldHint: false`: git is read from the local disk, no network.
+
+  server.registerTool(
+    "cochange",
+    {
+      title: "Files that changed together (git history)",
+      description:
+        "Files that changed in the same commits as the given file, most frequent first, from the LOCAL git history " +
+        "(no model, no graph) — 'what else did we usually have to change with this file?'. Looks at the last `commits` " +
+        "(default 200) non-merge commits that touched the file and skips a commit that changed more than `maxFilesPerCommit` " +
+        "(default 30) files; the answer says how many were used and how many skipped. Merge commits are not counted and " +
+        "renames are NOT followed (a renamed file's earlier history is credited to its old name). `file` is relative to `repo` " +
+        "(a directory inside the git work tree; default: the server's working directory) or absolute; results are repository-root " +
+        "paths. If the answer carries `status: \"undetermined\"` (not a git work tree, no commit touches the file, git failed " +
+        "or timed out, every commit skipped as too large) the tool result is an error: that is 無法判定 (cannot determine), " +
+        "NOT an empty list.",
+      inputSchema: {
+        file: z.string().min(1),
+        repo: z.string().min(1).optional(),
+        commits: z.number().int().positive().optional(),
+        maxFilesPerCommit: z.number().int().positive().optional(),
+        limit: z.number().int().positive().optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ file, repo, commits, maxFilesPerCommit, limit }) => {
+      try {
+        const r = coChange({ file, repo, commits, maxFilesPerCommit, limit });
+        if (r.status === "undetermined") {
+          // The structured status AND the sentence, flagged as an error: an agent must not read this as "[]".
+          return { content: [{ type: "text" as const, text: JSON.stringify(r, null, 2) + "\n" + undeterminedMessage(r) }], isError: true };
+        }
+        return ok(r);
       } catch (e) {
         return failFrom(e);
       }

@@ -52,6 +52,10 @@ export type {
   CallChainResult,
 } from "./code-graph/index.js";
 
+// --- cochange (files that changed together in the local git history; XSPEC-514 R2) ---
+export { coChange, formatCoChange, undeterminedMessage } from "./cochange/index.js";
+export type { CoChangeOptions, CoChangeResult, CoChangeOk, CoChangeUndetermined, CoChangedFile } from "./cochange/index.js";
+
 // --- knowledge-graph (spec/decision markdown → Spec/Decision + IMPACTS) ---
 export {
   SpecDecisionKnowledgeSource,

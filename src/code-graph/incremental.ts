@@ -254,7 +254,7 @@ const GIT_LOCAL_ENV = [
   "GIT_COMMON_DIR",
 ];
 
-function cleanGitEnv(): NodeJS.ProcessEnv {
+export function cleanGitEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const k of GIT_LOCAL_ENV) delete env[k];
   return env;

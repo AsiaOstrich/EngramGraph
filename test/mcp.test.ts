@@ -50,6 +50,7 @@ describe("EngramGraph MCP server", () => {
     expect(names).toEqual([
       "blindspots",
       "call_chain",
+      "cochange",
       "doctor",
       "impact_analysis",
       "implemented_specs",

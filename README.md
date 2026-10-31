@@ -64,7 +64,7 @@ install is the usual reason a checked-in `.mcp.json` silently does nothing on
 someone else's laptop. `ENGRAM_DB` defaults to `./.engram/graph.db`, so it can
 usually be omitted.
 
-Codex / Cursor / Windsurf, all 8 tools, and an example flow:
+Codex / Cursor / Windsurf, all 9 tools, and an example flow:
 **[docs/MCP.md](./docs/MCP.md)**.
 
 > **Indexing is a terminal job, not an assistant one.** The stdio server is
@@ -266,6 +266,9 @@ egr callers myFunction --depth 2
 
 # 3. "Which decisions sit behind this spec?"
 egr impact SPEC-001
+
+# 4. "Which files did we usually change together with this one?" (reads git, not the graph)
+egr cochange src/model.ts --limit 5
 ```
 
 The graph DB lives at `ENGRAM_DB` (default `./.engram/graph.db`).
@@ -310,11 +313,12 @@ Or just `egr serve --port 3000`. API reference: **[docs/API.md](./docs/API.md)**
 
 EngramGraph ships an MCP server (stdio) so any MCP-capable assistant can use
 it as a code + knowledge graph. Zero LLM, deterministic, **no Docker**. It has
-12 tools in two sets, and **the stdio server (`egr-mcp`, `egr mcp`) is
-read-only: it lists the 8 that read** — the graph queries (`call_chain`,
+13 tools in two sets, and **the stdio server (`egr-mcp`, `egr mcp`) is
+read-only: it lists the 9 that read** — the graph queries (`call_chain`,
 `impact_analysis`, `implementers`, `implemented_specs`), diagnostics
-(`blindspots`, `signatures`, `doctor`) and a Markdown reference checker
-(`refs_check`, DEC-115 — see below). The other 4 write to the graph —
+(`blindspots`, `signatures`, `doctor`), a Markdown reference checker
+(`refs_check`, DEC-115 — see below) and a git-history query for files that
+changed together (`cochange`, XSPEC-514 — it reads git, not the graph). The other 4 write to the graph —
 `index_code`, `index_docs`, `ingest_feedback` and `related` (ranking builds a
 projected graph) — so `tools/list` over stdio does not include them, and the
 server's `instructions` name the terminal command for each: `egr index <dir>`,

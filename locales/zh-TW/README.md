@@ -60,7 +60,7 @@ claude mcp list   # egr … ✓ Connected
 
 若希望整個團隊都拿得到，改用 `--scope project`：它會寫出一份可以進版控的 `.mcp.json`，每個人首次使用時被提示核准一次。**設定內容要保持可攜**——把某台機器的 Node 絕對路徑寫死，正是一份進了版控的 `.mcp.json` 在別人電腦上靜靜失效的常見原因。`ENGRAM_DB` 預設是 `./.engram/graph.db`，通常可以整個省略。
 
-Codex／Cursor／Windsurf、8 個工具的完整清單與範例流程：**[docs/MCP.md](./docs/MCP.md)**。
+Codex／Cursor／Windsurf、9 個工具的完整清單與範例流程：**[docs/MCP.md](./docs/MCP.md)**。
 
 > **建索引是終端機的工作，不是助理的工作。** stdio server 是唯讀的，所以不提供會寫入的工具——`index_code`、`index_docs`、`ingest_feedback`、`related`（見下方「MCP」）。請用 `egr index ./src`（加 `--docs` 索引規格與決策）建索引；它在 server 執行期間也能跑，server 下一次查詢就看得到結果。
 
@@ -200,6 +200,9 @@ egr callers myFunction --depth 2
 
 # 3.「這個 spec 背後有哪些決策？」
 egr impact SPEC-001
+
+# 4.「以前通常還會跟這個檔案一起改哪些檔案？」（讀 git，不讀圖）
+egr cochange src/model.ts --limit 5
 ```
 
 圖譜資料庫位於 `ENGRAM_DB`（預設 `./.engram/graph.db`）。
@@ -242,9 +245,10 @@ const app = createServer({ connection: conn });   // Hono app；路由在 /graph
 ## MCP — 在程式助理中使用 EngramGraph
 
 EngramGraph 內附一個 MCP server（stdio），讓任何支援 MCP 的助理都能把它當成程式碼 + 知識圖譜使用。
-無 LLM、確定性、**免 Docker**。共有 12 個工具，分兩組，而且**stdio server（`egr-mcp`、`egr mcp`）是唯讀的，
-只列出會讀取的 8 個**——圖譜查詢（`call_chain`、`impact_analysis`、`implementers`、`implemented_specs`）、
-診斷（`blindspots`、`signatures`、`doctor`），以及一個 Markdown 引用查核員（`refs_check`，DEC-115，見下）。
+無 LLM、確定性、**免 Docker**。共有 13 個工具，分兩組，而且**stdio server（`egr-mcp`、`egr mcp`）是唯讀的，
+只列出會讀取的 9 個**——圖譜查詢（`call_chain`、`impact_analysis`、`implementers`、`implemented_specs`）、
+診斷（`blindspots`、`signatures`、`doctor`）、一個 Markdown 引用查核員（`refs_check`，DEC-115，見下），
+以及一個找出「一起改過的檔案」的 git 歷史查詢（`cochange`，XSPEC-514——它讀 git，不讀圖）。
 另外 4 個會寫入圖——`index_code`、`index_docs`、`ingest_feedback`、`related`（排名會建投影圖）——所以 stdio 的
 `tools/list` 不含它們，server 的 `instructions` 會寫明各自對應的終端機指令：`egr index <dir>`、
 `egr index <dir> --docs`、`egr feedback <type> <node-id>`、`egr related <seed-id>`。它們只存在於以可寫入連線建立的 server

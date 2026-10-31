@@ -134,7 +134,7 @@ describe("MCP diagnostics tools (XSPEC-373 B6)", () => {
       expect(res.content[0]!.text).toMatch(/not found/i);
       expect(instructions, `the instructions do not name the command for ${tool}`).toContain(cli);
     }
-    expect(offered).toHaveLength(8);
+    expect(offered).toHaveLength(9); // the eight that read the graph or its manifest, and `cochange` (XSPEC-514 R2), which reads git
   });
 
   it("doctor answers without a manifest, and without opening the graph", async () => {

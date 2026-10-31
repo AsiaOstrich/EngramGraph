@@ -438,6 +438,27 @@ egr refs check MEMORY.md
 egr refs check ./notes --json
 ```
 
+### `cochange <file> [--limit N] [--commits N] [--max-files N] [--repo <dir>] [--json]`
+
+Files that changed in the same commits as `<file>`, most often first, read from the **local git history** (XSPEC-514 R2). The call graph cannot see a file that has to change with another for a reason no call expresses (a test, a document, a schema, a sibling module); the history can. It reads only `git`: no model, no network, and **the graph is not opened**, so it works with no `.engram/graph.db` and while another process holds the graph.
+
+```bash
+egr cochange src/model.py --limit 5
+#  cochange(src/model.py): 41 commit(s) used of the last 44 non-merge commit(s) that touched it (limit 200); 3 skipped for changing more than 30 files
+#    17  src/schema.py
+#    12  tests/test_model.py
+#    ...
+egr cochange --json -- -odd-name.py      # a file name that starts with "-": options first, then "--", then the name
+```
+
+- **What is counted.** Of the last `--commits` (default 200) **non-merge** commits that touched the file, every commit that changed **more than `--max-files` (default 30) files** is skipped: a sweep says nothing about which files belong together. A commit of exactly 30 files is used; the count includes `<file>` itself. Each remaining commit adds one to every *other* file it changed. `--limit` (default 10) keeps the top of the ranking; ties are ordered by path. The three numbers are positive integers, anything else is an error.
+- **The denominators are part of the answer.** The first line says how many commits were used and how many were skipped for size; `--json` carries `commitsExamined`, `commitsUsed`, `commitsSkippedLarge`, `commitsSkippedShallowBoundary`, `maxCommits`, `maxFilesPerCommit`, `totalFiles` (before `--limit`) and `cochanged: [{ file, count }]`.
+- **Renames are not followed**, and merge commits are not counted (`renamesFollowed: false`, `mergesIncluded: false` in `--json`). A rename is a delete of the old path and an add of the new one, so the history before a rename is credited to the old name, not the new one. Following a rename would need a similarity guess, and a guess is not history. Asking about the new name starts its history at the rename.
+- **Paths.** `<file>` is relative to the current directory (or to `--repo <dir>`, a directory inside the work tree) or absolute; the results are paths relative to the repository root. A file name that starts with `-` goes after `--` (the options before it), is never read as an option by git, and a name with `*` or `[` is that file, not a pattern.
+- **A shallow clone** (`git clone --depth N`, the default of most CI checkouts) says `shallow: true` and prints a note: the history before its depth is absent, so counts are lower bounds. Its boundary commit, which git shows as if it had added every file, is left out and counted in `commitsSkippedShallowBoundary`.
+- **無法判定 (cannot determine) is exit 1, never an empty list.** The directory is not inside a git work tree; no commit reachable from `HEAD` touches the file (never committed, or a path that does not exist); the path is a directory or outside the repository; `git` is missing, fails, or does not finish within 60 s (it is killed); or every commit that touched the file was skipped (as too big, or as the shallow boundary). The message goes to stderr as `egr: cochange: 無法判定 (cannot determine) — <reason>`; with `--json`, stdout also carries `{ "status": "undetermined", "file", "reason" }`. `(none)` with exit `0` means the file has usable history and nothing else ever changed with it.
+- Measured, not promised: on 40 later commits of one repository, adding the two files this ranks first to the call graph's answer raised the F1 from 0.20 to 0.23 (experiment 3, facts F27; one repository, not yet a result of XSPEC-514 R4). It is a signal to read next to the call graph, not a replacement for it.
+
 ### `gc [--dry-run]`
 
 Garbage-collect per-branch graphs whose branch no longer exists. Inspects
@@ -546,4 +567,4 @@ an input the graph does not contain — a symbol (`callers`, `callees`), a spec 
 (`impact`, `implementers`), a node id (`feedback`, `related`) or a module path
 (`implemented-by`). Through 0.12.0 several of these printed a message and exited
 `0`; scripts that relied on that must now handle exit `1`. `(none)` with exit `0`
-always means "it is in the graph and has no results".
+always means "it is in the graph and has no results". `cochange` reads git, not the graph: it exits `1` with `無法判定 (cannot determine)` when the directory is not a git work tree, no commit touches the file, or every commit that did was skipped; its `(none)` means the file has usable history and nothing else ever changed with it.
