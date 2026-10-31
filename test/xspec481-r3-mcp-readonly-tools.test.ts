@@ -25,7 +25,7 @@ import { runEgr } from "./helpers/run-egr.js";
  * that "not a refusal" is not satisfied by an error of another kind.
  */
 
-const READ_ONLY_TOOLS = ["blindspots", "call_chain", "cochange", "doctor", "impact_analysis", "implemented_specs", "implementers", "refs_check", "signatures"];
+const READ_ONLY_TOOLS = ["blindspots", "call_chain", "cochange", "doctor", "impact_analysis", "implemented_specs", "implementers", "lint", "refs_check", "signatures"];
 const WRITING_TOOLS = ["index_code", "index_docs", "ingest_feedback", "related"];
 
 let built: BuiltEgr;
@@ -33,6 +33,7 @@ let work: string;
 let db: string;
 let note: string;
 let histRepo: string;
+let lintDir: string;
 
 /** A repository for `cochange` (XSPEC-514 R2), made without the user's git config or any git variable a hook exports. */
 function makeHistory(root: string): void {
@@ -64,6 +65,10 @@ beforeAll(() => {
   if (r.status !== 0) throw new Error(`fixture index failed: ${r.stderr}`);
   histRepo = join(work, "hist");
   makeHistory(work);
+  // `lint` (DEC-140) reads documents, not the graph: one superseded decision that nothing declares.
+  lintDir = join(work, "lintdocs");
+  mkdirSync(lintDir);
+  writeFileSync(join(lintDir, "DEC-9.md"), "---\nid: DEC-9\nstatus: Superseded\n---\n# DEC-9\nbody\n");
   note = join(work, "note.md");
   writeFileSync(note, "Calls `alpha()` in `a.ts`.\n");
 }, 120_000);
@@ -84,7 +89,7 @@ async function connect(args: string[]): Promise<Client> {
 type ToolResult = { isError?: boolean; content: Array<{ text: string }> };
 
 describe("XSPEC-481 R3: tools/list of the read-only stdio server", () => {
-  it("lists the nine tools that work and none of the four that cannot, over egr-mcp and over egr mcp [xspec481-r3-list]", async () => {
+  it("lists the ten tools that work and none of the four that cannot, over egr-mcp and over egr mcp [xspec481-r3-list]", async () => {
     for (const args of [[built.mcp], [built.cli, "mcp"]]) {
       const client = await connect(args);
       try {
@@ -106,6 +111,7 @@ describe("XSPEC-481 R3: tools/list of the read-only stdio server", () => {
       impact_analysis: { nodeId: "XSPEC-7" },
       implemented_specs: { moduleId: "a.ts" },
       implementers: { specId: "XSPEC-7" },
+      lint: { dir: lintDir },
       refs_check: { paths: [note] },
       signatures: {},
     };
@@ -120,6 +126,7 @@ describe("XSPEC-481 R3: tools/list of the read-only stdio server", () => {
         // Read back: the answer is about this graph, not an empty shell.
         if (name === "call_chain") expect(res.content[0]!.text).toContain("beta");
         if (name === "implementers") expect(res.content[0]!.text).toContain("a.ts");
+        if (name === "lint") expect(JSON.parse(res.content[0]!.text)).toMatchObject({ status: "findings", counts: { "superseded-without-declaration": 1 } });
         if (name === "cochange") expect(JSON.parse(res.content[0]!.text).cochanged).toEqual([{ file: "b.ts", count: 2, existsAtHead: true }]);
       }
     } finally {

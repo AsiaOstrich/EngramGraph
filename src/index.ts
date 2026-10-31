@@ -62,8 +62,14 @@ export {
   parseKnowledgeDoc,
   classifyRef,
   indexKnowledgeDocs,
+  lintKnowledgeDocs,
+  formatLint,
 } from "./knowledge-graph/index.js";
 export type {
+  LintReport,
+  LintFinding,
+  LintRule,
+  LintStatus,
   KnowledgeDoc,
   KnowledgeNodeKind,
   ImpactNode,

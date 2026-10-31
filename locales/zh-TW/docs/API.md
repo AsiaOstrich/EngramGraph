@@ -173,10 +173,10 @@ tree-sitter 將 `.ts` / `.tsx` / `.js` 解析為 `Function` / `Class` / `Module`
 ## mcp — Model Context Protocol
 
 - `createMcpServer(conn: GraphConnection | GraphSource): McpServer` — 註冊
-  [MCP.md](./MCP.md) 的工具：可寫入連線上 13 個（`index_code`、`index_docs`、
+  [MCP.md](./MCP.md) 的工具：可寫入連線上 14 個（`index_code`、`index_docs`、
   `call_chain`、`impact_analysis`、`ingest_feedback`、`implementers`、
   `implemented_specs`、`related`、`blindspots`、`signatures`、`doctor`、
-  `refs_check`、`cochange`），唯讀來源（如 stdio server）上 9 個（不含會寫入的四個：
+  `refs_check`、`cochange`、`lint`），唯讀來源（如 stdio server）上 10 個（不含會寫入的四個：
   `index_code`、`index_docs`、`ingest_feedback`、`related`）。
 
 ## embedded — 同行程用戶端

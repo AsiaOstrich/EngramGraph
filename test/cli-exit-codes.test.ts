@@ -337,6 +337,7 @@ describe("XSPEC-457 R2: the command table covers every command the CLI has", () 
       "blindspots", "signatures", // read the parse-health manifest; "no manifest yet" is a state, not an error
       "doctor", // reports the installation
       "cochange", // reads git, never the graph, so a locked graph cannot touch it; its own exit-1 "無法判定" cases are in xspec514-r2-cochange.test.ts
+      "lint", // reads documents, never the graph, so a locked graph cannot touch it; findings exit 0 by design and its exit-1 cases (no <dir>, not a directory) are in kg-consistency-lint.test.ts
       "mcp", "serve", // long-running servers
     ]);
     const unknown = [...found].filter((c) => !covered.has(c) && !exempt.has(c));

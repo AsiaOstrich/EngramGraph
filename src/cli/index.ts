@@ -14,12 +14,13 @@ import pkg from "../../package.json" with { type: "json" };
 import { openGraph, resolveDbPath, type GraphLocationOptions, type IsolationMode } from "../graph-db/open.js";
 import { createServer } from "../api/server.js";
 import { startMcpStdio } from "../mcp/serve-stdio.js";
-import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, shapeCommunities, type CommunitiesReport, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, cmdRefsCheck, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
+import { cmdIndex, cmdCallers, cmdCallees, cmdImplementers, cmdImplementedSpecs, cmdImpact, cmdFeedback, cmdTop, cmdGodNodes, cmdCommunities, shapeCommunities, type CommunitiesReport, cmdRelated, cmdGc, cmdBlindspots, cmdSignatures, cmdDoctor, cmdRefsCheck, cmdLint, type GcResult, type BlindspotsResult, type SignaturesResult, type DoctorResult } from "./run.js";
 import type { RefCheckResult } from "./refs-check.js";
 import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { readIndexHealth, definitionFiles, type IndexHealth } from "../code-graph/index.js";
 import { manifestPathForDb } from "../code-graph/parse-manifest.js";
+import { formatLint } from "../knowledge-graph/lint.js";
 import { unresolvedIdClusters, type DocIdConflict, type ReplacedDocument } from "../knowledge-graph/parser.js";
 import { callResolutionHint, knowledgeNamingHint } from "./index-hints.js";
 import { READ_ONLY_COMMANDS } from "./read-only-commands.js";
@@ -107,6 +108,22 @@ Commands:
                                   = 無法判定 (exit 1), never an empty list. A
                                   file name that starts with "-": egr cochange
                                   -- -name.py  (options go before the "--")
+  lint <dir> [--exclude <glob>]... Two ways the replacement relations of the spec/decision
+                                  documents under <dir> disagree with themselves
+                                  (the same documents "index --docs" reads): (1) a
+                                  document whose front-matter status says Superseded
+                                  (or Replaced) while no document declares
+                                  "supersedes: <its id>" in its front matter; (2) a
+                                  document with a live status that still cites,
+                                  through related/depends_on/impacts/impacted_by/
+                                  implements or a [[ref]], a decision that is
+                                  superseded. Reads the documents, never the graph,
+                                  writes nothing, uses no model, and does not block:
+                                  findings exit 0. A document with no readable
+                                  front-matter status is counted as 無法判定 (cannot
+                                  determine) - not judged, not a pass - and so is a
+                                  folder with no spec/decision document. --json adds
+                                  status: findings | undetermined | clean
   gc [--dry-run]                  Remove per-branch graphs for deleted branches
   blindspots                      Files that parsed partially or failed (from
                                   the parse-health manifest) — where the graph
@@ -190,6 +207,9 @@ contain. "(none)" with exit 0 means: it is in the graph and has no results.
 git work tree, no commit touches the file, or every commit that did was skipped
 as too large; "(none)" there means the file has usable history and nothing else
 ever changed with it.
+"lint" reads documents, not the graph, and does not block: a report with findings, or with
+documents it could not judge, still exits 0 (the report and --json "status" carry the verdict);
+exit 1 means the command itself failed (no <dir>, not a directory, unreadable files).
 "refs check" also exits 1 when any reference is "missing" (the full report is
 still printed); "unresolvable" does not fail it.
 
@@ -326,6 +346,16 @@ async function main(): Promise<void> {
       throw new Error(undeterminedMessage(r));
     }
     out(r, values.json, (d) => formatCoChange(d as typeof r));
+    return;
+  }
+
+  // lint reads the documents, not a graph connection (DEC-140). Like cochange it stays above `openGraph`: it must
+  // not create or lock .engram/graph.db, and it works where no graph exists. It does not block: a report with
+  // findings exits 0, so exit 1 (the error path below) always means the tool could not do its job.
+  if (cmd === "lint") {
+    if (!a1) throw new Error("lint requires a <dir>");
+    const r = await cmdLint({ dir: a1, exclude: values.exclude });
+    out(r, values.json, (d) => formatLint(d as typeof r, a1));
     return;
   }
 

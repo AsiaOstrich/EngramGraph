@@ -460,6 +460,28 @@ egr cochange --json -- -odd-name.py      # a file name that starts with "-": opt
 - **無法判定 (cannot determine) is exit 1, never an empty list.** The directory is not inside a git work tree; no commit reachable from `HEAD` touches the file (never committed, or a path that does not exist); the path is a directory or outside the repository; `git` is missing, fails, or does not finish within 60 s (it is killed); or every commit that touched the file was skipped (as too big, or as the shallow boundary). The message goes to stderr as `egr: cochange: 無法判定 (cannot determine) — <reason>`; with `--json`, stdout also carries `{ "status": "undetermined", "file", "reason" }`. `(none)` with exit `0` means the file has usable history and nothing else ever changed with it.
 - Measured, not promised: on 40 later commits of one repository, adding the two files this ranks first to the call graph's answer raised the F1 from 0.20 to 0.23 (experiment 3, facts F27; one repository, not yet a result of XSPEC-514 R4). It is a signal to read next to the call graph, not a replacement for it.
 
+### `lint <dir> [--exclude <glob>]... [--json]`
+
+Two ways the replacement relations of the spec/decision documents under `<dir>` disagree with themselves (DEC-140). It reads the same Markdown documents `egr index <dir> --docs` reads (same walk, same `--exclude` globs, same id rules) with the same parser, in memory: **no model, no network, the graph is not opened or written** (it works with no `.engram/graph.db` and while another process holds it), and **it reports, it does not block**.
+
+```bash
+egr lint docs/
+#  lint: 41 Markdown file(s) in docs/: 38 named spec/decision document(s), 3 without an id
+#  status read as superseded: superseded | replaced | 已取代 | 被取代 (front-matter `status` only)
+#    [live-cites-superseded] specs/XSPEC-12.md - XSPEC-12 has status "Draft" and still cites DEC-7 (IMPACTS), which is superseded: DEC-9 declares `supersedes: DEC-7`
+#    [superseded-without-declaration] decisions/DEC-3.md - DEC-3 has status "Superseded", but no document declares `supersedes: DEC-3` in its front matter, so the graph still treats it as live
+#  findings: 2 (1 superseded-without-declaration, 1 live-cites-superseded)
+#  無法判定 (cannot determine): 5 document(s) have no readable front-matter status; not judged, not counted as passing (e.g. ...; --json lists all)
+#  result: findings (reported, nothing is blocked; exit 0)
+egr lint docs/ --json --exclude "archive/**"
+```
+
+- **`superseded-without-declaration`.** A document whose front-matter `status` begins with `Superseded` or `Replaced` (or `已取代`／`被取代`; case-insensitive, at a word boundary, so `Superseded（DevAP 已退場）` counts and `supersededness` does not; `Deprecated` is **not** on the list, since a deprecated document need not have a successor) while **no document declares `supersedes: <its id>`** in its front matter. This compares *declarations*, not graph edges: between two specs there is no `SUPERSEDES` edge (Spec → Spec is always `RELATES`), so every superseded spec would be reported. A declaration by any document counts, for a decision and for a spec alike. A mention under `related`, `depends_on` or in the body is not a declaration.
+- **`live-cites-superseded`.** A document whose status is known and not superseded, which cites a decision as part of its basis (an `IMPACTS` edge from a Spec to a Decision, or a `DECISION_RELATES` edge from a Decision; the edge is the one `egr index --docs` would build for that reference) and that decision is superseded: a document among those scanned declares `supersedes` for it (a `SUPERSEDES` edge), or its own status says superseded. A decision's own `supersedes:` of another decision is a replacement, not a citation. A decision that no scanned document defines (only referenced) has no status to read and is superseded only by a declaration.
+- **A status it cannot read is not a pass.** `status` is the front-matter field and nothing else: a document without one, or with `unknown`, is not judged either way. It is counted as `無法判定 (cannot determine)` (`undeterminable` in `--json`, with the files), and **a report with any of them is never `clean`**. A folder in which no document resolves to a spec/decision id (an empty folder, or only READMEs) is `undetermined` too, with its denominator printed: zero findings over zero documents is not a verdict. Statuses written only in the body (for example a `> **狀態**: Superseded` line) are not read.
+- **`--json`.** `{ status: "findings" | "undetermined" | "clean", undeterminedReason?, scanned: { documents, named, unnamed, setAside }, supersededStatuses, findings: [{ rule, file, id, status, reason, cites?, edge?, supersededBecause? }], counts, undeterminable: { count, files } }`. `file` is relative to `<dir>`.
+- **Exit status.** `0` whenever the command did its job, including a report with findings and a report that could not judge some documents (the verdict is in the report and in `--json`'s `status`); `1` when it could not run: no `<dir>`, `<dir>` is not a directory, a file that cannot be read. So `1` always means the tool failed, never "found something". A repository that wants findings to fail a build tests `.status` of `--json`.
+
 ### `gc [--dry-run]`
 
 Garbage-collect per-branch graphs whose branch no longer exists. Inspects
@@ -568,4 +590,4 @@ an input the graph does not contain — a symbol (`callers`, `callees`), a spec 
 (`impact`, `implementers`), a node id (`feedback`, `related`) or a module path
 (`implemented-by`). Through 0.12.0 several of these printed a message and exited
 `0`; scripts that relied on that must now handle exit `1`. `(none)` with exit `0`
-always means "it is in the graph and has no results". `cochange` reads git, not the graph: it exits `1` with `無法判定 (cannot determine)` when the directory is not a git work tree, no commit touches the file, or every commit that did was skipped; its `(none)` means the file has usable history and nothing else ever changed with it.
+always means "it is in the graph and has no results". `cochange` reads git, not the graph: it exits `1` with `無法判定 (cannot determine)` when the directory is not a git work tree, no commit touches the file, or every commit that did was skipped; its `(none)` means the file has usable history and nothing else ever changed with it. `lint` reads documents, not the graph, and does not block: a report with findings, or with documents it could not judge, still exits `0` (the verdict is the report and `--json`'s `status`); `1` means it could not run.

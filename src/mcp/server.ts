@@ -8,9 +8,9 @@
  *
  * Tools: index_code, index_docs, call_chain, impact_analysis, ingest_feedback,
  * implementers, implemented_specs, related, blindspots, signatures, doctor,
- * refs_check, cochange.
+ * refs_check, cochange, lint.
  *
- * ## A read-only server offers nine tools, not thirteen (XSPEC-481 R3)
+ * ## A read-only server offers ten tools, not fourteen (XSPEC-481 R3)
  *
  * `index_code`, `index_docs`, `ingest_feedback` and `related` write to the graph
  * (the last one by installing the algo extension and building a projected
@@ -20,8 +20,8 @@
  * Now a read-only source (`GraphSource.readOnly`, which is what stdio uses) does
  * not offer them at all, and says in the server `instructions` which `egr`
  * command does each job. A writable source — a bare connection, tests,
- * embedding — still has all thirteen (`cochange` reads git, not the graph, so
- * both kinds of server have it).
+ * embedding — still has all fourteen (`cochange` reads git and `lint` reads
+ * documents, not the graph, so both kinds of server have them).
  *
  * ## The graph is held per query, not per session (XSPEC-457 R1)
  *
@@ -62,7 +62,7 @@ import {
   requireFunction,
   requireSpec,
 } from "../code-graph/index.js";
-import { cmdBlindspots, cmdSignatures, cmdDoctor } from "../cli/run.js";
+import { cmdBlindspots, cmdSignatures, cmdDoctor, cmdLint } from "../cli/run.js";
 import { existsSync } from "node:fs";
 import { MCP_INDEX_ROOT, readManifest, upsertRun, writeManifest } from "../code-graph/parse-manifest.js";
 import { indexKnowledgeDocs, impactAnalysis } from "../knowledge-graph/index.js";
@@ -538,6 +538,41 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
           return { content: [{ type: "text" as const, text: JSON.stringify(r, null, 2) + "\n" + undeterminedMessage(r) }], isError: true };
         }
         return ok(r);
+      } catch (e) {
+        return failFrom(e);
+      }
+    },
+  );
+
+  // --- Replacement-relation consistency (DEC-140) ---
+  //
+  // Reads the Markdown documents under `dir` (the ones `egr index --docs` would read), never the graph: no
+  // `source.use`, so it works on a server whose graph is missing or busy. `readOnlyHint: true` was set by reading
+  // `cmdLint`, not its name: it walks `dir`, parses in memory and writes nothing anywhere. `openWorldHint: false`:
+  // no network, no model.
+
+  server.registerTool(
+    "lint",
+    {
+      title: "Replacement-relation consistency of spec/decision documents",
+      description:
+        "Two ways the replacement relations of the spec/decision Markdown documents under `dir` disagree with themselves " +
+        "(no model, no graph): (1) `superseded-without-declaration` - a document whose front-matter `status` says Superseded " +
+        "(or Replaced) while no document declares `supersedes: <its id>` in its front matter; (2) `live-cites-superseded` - " +
+        "a document with a live status that still cites a superseded decision (through related/depends_on/impacts/" +
+        "impacted_by/implements or a [[ref]]). Reports and does not block. A document with no readable front-matter " +
+        "status is counted under `undeterminable` (無法判定): it is not judged and not a pass, and a result with any, or " +
+        "with no spec/decision document at all, has `status: \"undetermined\"`, never `clean`. `status` is " +
+        "`findings` | `undetermined` | `clean`. `dir` is a directory; `exclude` takes the same globs as `egr index --exclude`.",
+      inputSchema: {
+        dir: z.string().min(1),
+        exclude: z.array(z.string().min(1)).optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ dir, exclude }) => {
+      try {
+        return ok(await cmdLint({ dir, exclude }));
       } catch (e) {
         return failFrom(e);
       }

@@ -44,6 +44,11 @@ export interface ParsedKnowledgeDoc {
   /** Where the document was read from, when the caller said ({@link KnowledgeDoc.source}); stored on the node. */
   source?: string;
   title: string;
+  /**
+   * The front-matter `status`, verbatim, or `"unknown"` when the document has none (the same
+   * value a Spec node stores). Kept here, not on the Decision node: `egr lint` reads it for both kinds.
+   */
+  status: string;
   /** Classified outbound references (self-references removed). */
   refs: KnowledgeRef[];
   node: GraphNode;
@@ -216,6 +221,7 @@ export function parseKnowledgeDoc(doc: KnowledgeDoc): ParsedKnowledgeDoc | null 
     path: doc.fallbackId ?? "<unnamed document>",
     ...(doc.source !== undefined ? { source: doc.source } : {}),
     title,
+    status: fields.status ?? "unknown",
     refs,
     node: makeNode(kind, id, title, fields, doc.source),
   };
@@ -293,17 +299,7 @@ export class SpecDecisionKnowledgeSource {
       for (const ref of p.refs) {
         ensureNode(ref.kind, ref.id);
 
-        if (p.kind === "Decision" && ref.kind === "Spec") {
-          edges.push(impacts(p.id, ref.id));
-        } else if (p.kind === "Spec" && ref.kind === "Decision") {
-          edges.push(impacts(ref.id, p.id));
-        } else if (p.kind === "Decision" && ref.kind === "Decision") {
-          // Replacement is declared, not inferred from a mention (issue #19).
-          edges.push(ref.via.includes("supersedes") ? supersedes(p.id, ref.id) : decisionRelates(p.id, ref.id));
-        } else {
-          // Spec → Spec: doc↔doc upstream/downstream (related / depends_on).
-          edges.push(relates(p.id, ref.id));
-        }
+        edges.push(edgeForRef(p, ref));
       }
     }
 
@@ -343,6 +339,21 @@ export class SpecDecisionKnowledgeSource {
     }
     return owners;
   }
+}
+
+/**
+ * The edge one outbound reference of a document becomes. The single place that
+ * decides it: `ingest` writes it and `egr lint` asks it, so the two cannot drift.
+ */
+export function edgeForRef(p: Pick<ParsedKnowledgeDoc, "id" | "kind">, ref: KnowledgeRef): GraphEdge {
+  if (p.kind === "Decision" && ref.kind === "Spec") return impacts(p.id, ref.id);
+  if (p.kind === "Spec" && ref.kind === "Decision") return impacts(ref.id, p.id);
+  if (p.kind === "Decision" && ref.kind === "Decision") {
+    // Replacement is declared, not inferred from a mention (issue #19).
+    return ref.via.includes("supersedes") ? supersedes(p.id, ref.id) : decisionRelates(p.id, ref.id);
+  }
+  // Spec → Spec: doc↔doc upstream/downstream (related / depends_on).
+  return relates(p.id, ref.id);
 }
 
 function impacts(decisionId: string, specId: string): GraphEdge {

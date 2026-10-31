@@ -5,7 +5,7 @@
  * the entry point handles I/O, formatting and process lifecycle.
  */
 
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import pkg from "../../package.json" with { type: "json" };
@@ -35,7 +35,7 @@ import {
 } from "../code-graph/index.js";
 import { readScipIndex } from "../code-graph/providers/scip/scip-reader.js";
 import { ingestScipIndex, type ScipIngestStats, type ScipSourceFile } from "../code-graph/providers/scip/scip-ingest.js";
-import { indexKnowledgeDocs, impactAnalysis, type KnowledgeIndexResult } from "../knowledge-graph/index.js";
+import { indexKnowledgeDocs, impactAnalysis, lintKnowledgeDocs, type KnowledgeIndexResult, type KnowledgeDoc, type LintReport } from "../knowledge-graph/index.js";
 import { applyFeedback, feedbackForEventType, topByConfidence, type ConfidenceLabel } from "../sage/index.js";
 import { godNodes, communities, related, type GodNode, type CommunityMember, type RelatedNode } from "../structural-memory/index.js";
 import {
@@ -66,7 +66,7 @@ import {
 } from "../code-graph/incremental.js";
 import { assignIds, type IdAssignment } from "../code-graph/root-ids.js";
 import { walkFiles, summarizeUnindexed, type ExcludedByPattern, type UnindexedSummary } from "./walk.js";
-import { compileExcludes } from "./exclude.js";
+import { compileExcludes, type ExcludeMatcher } from "./exclude.js";
 import { msysPathConversionHint } from "./index-hints.js";
 import { canonicalFilePath, toPosixPath } from "../code-graph/path-utils.js";
 import { checkRefs, type RefCheckResult } from "./refs-check.js";
@@ -513,6 +513,37 @@ async function indexCodeIncrementally(
 }
 
 /**
+ * The Markdown documents `egr index <dir> --docs` feeds the knowledge parser, in the shape it takes.
+ * One function for `index --docs` and `lint`, so the two cannot disagree about which files are documents.
+ *
+ * `source` (XSPEC-481 R4): the absolute path, so a later run over another directory can tell
+ * that the id it is about to overwrite was written from a different file. `fallbackId` stays
+ * relative — it names the document for id resolution and for the R2 conflict lines.
+ */
+export function collectKnowledgeDocs(
+  dir: string,
+  exclude?: ExcludeMatcher,
+): { docs: KnowledgeDoc[]; files: Array<{ path: string; source: string }> } {
+  const root = resolve(dir);
+  const files = walkFiles(dir, [".md"], { exclude }).files;
+  return {
+    files,
+    docs: files.map((f) => ({ content: f.source, fallbackId: f.path, source: canonicalFilePath(join(root, f.path)) })),
+  };
+}
+
+/**
+ * `egr lint <dir> [--exclude <glob>]...` — replacement-relation consistency of the documents under `<dir>`
+ * (DEC-140). Reads the documents the way `index --docs` does; never opens the graph, never writes, no model.
+ */
+export async function cmdLint(opts: { dir: string; exclude?: string[] }): Promise<LintReport> {
+  const st = statSync(opts.dir, { throwIfNoEntry: false });
+  if (!st?.isDirectory()) throw new Error(`lint: ${opts.dir} is not a directory`);
+  const exclude = opts.exclude?.length ? compileExcludes(opts.exclude) : undefined;
+  return lintKnowledgeDocs(collectKnowledgeDocs(opts.dir, exclude).docs);
+}
+
+/**
  * `egr index <dir> [--docs] [--clean] [--scip <path>]` — index code (always)
  * + knowledge docs (--docs) + an external SCIP index overlay (--scip).
  *
@@ -662,11 +693,7 @@ export async function cmdIndex(
     };
   }
   if (opts.docs) {
-    const docFiles = walkFiles(opts.dir, [".md"], { exclude }).files;
-    // `source` (XSPEC-481 R4): the absolute path, so a later run over another directory can tell
-    // that the id it is about to overwrite was written from a different file. `fallbackId` stays
-    // relative — it names the document for id resolution and for the R2 conflict lines.
-    const docs = docFiles.map((f) => ({ content: f.source, fallbackId: f.path, source: canonicalFilePath(join(root, f.path)) }));
+    const { docs, files: docFiles } = collectKnowledgeDocs(opts.dir, exclude);
     result.knowledge = await indexKnowledgeDocs(conn, docs);
     // XSPEC-457 R7: the code walk saw every `.md` as "not covered by any
     // supported language", and with `--docs` the same files went into the graph
