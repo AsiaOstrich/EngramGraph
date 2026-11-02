@@ -9,4 +9,17 @@ npm run typecheck
 npm test
 
 # UDS Standard Check
-npx uds check
+# Runs the UDS CLI installed in this project (node_modules/.bin) or on PATH.
+# It never asks npm to fetch anything: the short name "uds" on the npm registry
+# belongs to an unrelated package, and running that short name through npx would download it.
+(
+  PATH="$PWD/node_modules/.bin:$PATH"
+  if command -v universal-dev-standards >/dev/null 2>&1; then
+    universal-dev-standards check
+    exit $?
+  fi
+  echo "[UDS] Pre-commit check cannot run: the UDS CLI (universal-dev-standards) is not installed." >&2
+  echo "[UDS] Install it:  npm install -g universal-dev-standards" >&2
+  exit 1
+) || exit $?
+# End UDS Standard Check
