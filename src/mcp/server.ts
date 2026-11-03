@@ -70,6 +70,7 @@ import { applyFeedback, feedbackForEventType, CONFIDENCE_LABELS } from "../sage/
 import { related } from "../structural-memory/index.js";
 import { checkRefs } from "../cli/refs-check.js";
 import { coChange, undeterminedMessage } from "../cochange/index.js";
+import { checkServerVersion } from "./installed-version.js";
 
 const EGR_VERSION = (pkg as { version: string }).version;
 
@@ -459,7 +460,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     {
       title: "What this installation can do on this machine",
       description:
-        "Which languages are available and why any are not, what had to be compiled here, and which commands need network access. Answers WITHOUT opening the graph, so it still works when indexing is what is broken.",
+        "Which languages are available and why any are not, what had to be compiled here, and which commands need network access. Also says whether this running server is the version that is installed (`server`): after an upgrade, a server that was started earlier keeps serving the old version until its MCP client restarts it. Answers WITHOUT opening the graph, so it still works when indexing is what is broken.",
       inputSchema: {},
       // cmdDoctor (run.ts) only inspects local module resolution/platform
       // info; it REPORTS which OTHER commands need network, it does not
@@ -469,7 +470,10 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     },
     async () => {
       try {
-        return ok(cmdDoctor(source.path));
+        // `server` (issue #18): the version this process was started with against the one
+        // installed now, read from disk on every call. cmdDoctor describes the installation and
+        // is shared with the CLI, where the process is always the installed version.
+        return ok({ ...cmdDoctor(source.path), server: checkServerVersion(EGR_VERSION) });
       } catch (e) {
         return failFrom(e);
       }
