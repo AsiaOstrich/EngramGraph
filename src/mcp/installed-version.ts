@@ -97,7 +97,7 @@ export function checkServerVersion(
       message:
         `cannot determine whether this MCP server is current: it is running version ${runningVersion}, ` +
         `and the installed version could not be read (${installed.problem}). ` +
-        "Compare `egr --version` with the running version above; if they differ, restart the MCP client (for example Claude Code).",
+        "Compare `egr --version` with the running version above (if the client starts the same egr-mcp that is on your PATH); if they differ, restart the MCP client (for example Claude Code).",
     };
   }
   if (installed.version === runningVersion) {
