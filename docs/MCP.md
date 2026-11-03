@@ -68,16 +68,24 @@ What to do:
    ask the assistant to run the `doctor` tool and read its **`server`** field. The
    server compares the version it was started with (`runningVersion`, also
    `egrVersion` and the `serverInfo.version` of its `initialize` answer) with the
-   `package.json` that is installed on disk *at the moment you ask*
-   (`installedVersion`), and `status` says which case it is:
+   `package.json` of the package this server was started from, read from disk
+   *at the moment you ask* (`installedVersion`), and `status` says which case it is.
+   With a global install that is the package `npm i -g` replaces. With
+   `npx egr-mcp` in a project that has its own `node_modules/engramgraph`, or with
+   `npm link`, it is that copy, not the global one: upgrading the global package
+   then changes nothing this server reads.
+
    - `"current"`: the same version.
    - `"stale"`: they differ. `message` says so, for example *this MCP server is
      still running version 0.14.0, but version 0.14.1 is installed … restart the
      MCP client (for example Claude Code)*. This is the server that was started
-     before the upgrade: restart the client.
+     before the package changed (an upgrade or a downgrade): restart the client.
+     If it is still `"stale"` after the restart, the package at that path was not
+     rebuilt or reinstalled (common with `npm link`).
    - `"unknown"`: the installed version could not be read (the `message` starts
      with `cannot determine` and says why, and `installedVersion` is `null`). It
-     is **not** a pass: compare `egr --version` with `runningVersion` yourself.
+     is **not** a pass: compare `egr --version` with `runningVersion` yourself,
+     provided the client starts the same `egr-mcp` that is on your `PATH`.
 
    A server never reports `"current"` because it could not look. `egr doctor` in
    a terminal has no `server` field: it is a fresh process each time, so it is
