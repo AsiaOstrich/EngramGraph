@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`egr lint` reads a plain status table row** ([#24](https://github.com/AsiaOstrich/EngramGraph/issues/24)). A spec template that writes the status as a "field | value" row, `| 狀態 | Approved |` or `| Status | Approved |` (also `状态`), counted as `無法判定` and made `egr lint` exit 1, because only the bold `| **狀態** | X |` was read. A table row whose **first cell is exactly** `狀態`, `状态` or `Status` is now the status, under the same rule as before: the first match in the opening section (before the first `## `), nothing in a fenced code block. Nothing else is looser: `狀態: Superseded` inside a sentence is still not a status, and neither is a cell that only contains the word (`| 狀態說明 | X |`, `| 專案狀態 | X |`). A plain row that is the **header** of its table (the next line is the `|---|---|` separator, as in `| Status | Meaning |`) names a column, not a value, and is skipped; such a document is still `無法判定`, which is loud, rather than read as live with the status "Meaning". The shape is read by `lint` only: `egr index` and the graph still store the front-matter `status`.
+
 ## [0.15.0-beta.1] - 2026-11-03
 
 *Preview published to the `next` dist-tag for Windows and macOS verification. It adds `egr cochange`, `egr lint`, `--file` for shared function names and the MCP `doctor` version check below, changes how a decision that only mentions another is read, and fixes writes that stayed only in `graph.db.wal`. A minor version because of the new commands and tools.*
