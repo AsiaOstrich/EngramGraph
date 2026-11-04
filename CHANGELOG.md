@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-04
+
+> **Stable Release**: the same content as 0.15.0-beta.2 below, which passed the Windows release verification (run 41790628640), the cross-platform compatibility check (run 41790397407), a Windows smoke test on a real machine and a macOS check from the npm install. Adds `egr cochange`, `egr lint`, `--file` for shared function names and the MCP `doctor` version check, stops reading a mere mention of another decision as a replacement, keeps the graph out of the `.wal` alone, says when one node stands for several same-file overloads, and reads a plain status table row; see 0.15.0-beta.1 and beta.2 for the details.
+
 ## [0.15.0-beta.2] - 2026-11-04
 
 *Preview published to the `next` dist-tag for Windows and macOS verification. Two fixes on top of 0.15.0-beta.1: same-file overloads are reported as several definitions, and `lint` reads a plain status row.*
