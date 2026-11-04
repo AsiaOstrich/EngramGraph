@@ -1,8 +1,8 @@
 ---
 source: docs/MCP.md
-source_version: 0.7.0
-translation_version: 0.7.0
-last_synced: 2026-07-16
+source_version: 0.15.0-beta.1
+translation_version: 0.15.0-beta.1
+last_synced: 2026-11-04
 status: complete
 ---
 
@@ -49,6 +49,46 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
 上方 `npx egr-mcp` 的写法**尚未**在原生 Windows 上验证。若在那里连不上，
 请改用全局安装与上面这条命令。
 
+**Windows：`egr-mcp` 运行中升级。** Windows 不会删除正被运行中进程加载的原生模块，而
+`egr-mcp` 会加载 `ryugraph\ryujs.node`。所以在 Claude Code（或任何 MCP 客户端）开着
+`egr-mcp` 的时候运行 `npm i -g engramgraph@<version>`，仍会报告成功，`egr --version`
+也会打印出新版本，但有两件事是错的（macOS 与 Linux 可以删除已打开的文件，所以那里看不到
+这两个问题）：
+
+1. npm 无法删除旧的包目录。它会打印 `npm warn cleanup
+   Failed to remove some directories … EPERM … ryujs.node`，并留下一份改名后的副本
+   `%APPDATA%\npm\node_modules\.engramgraph-<random>`。
+2. 已经在运行的 `egr-mcp` 会继续提供**旧**版本，直到它的客户端重新启动它。没有任何东西会告诉你。
+
+该怎么做：
+
+1. **升级前先关闭 Claude Code（或 MCP 客户端）**，这样就不会留下任何 `egr-mcp` 进程。
+   残留的那个会在任务管理器里显示为一个 `node.exe`，其命令行结尾是
+   `…\node_modules\engramgraph\dist\mcp\stdio.js`。
+2. 升级，然后**删除所有残留的 `%APPDATA%\npm\node_modules\.engramgraph-*` 目录**。
+   那是旧包改名后的副本，没有任何东西在用它。（若删除被拒绝，说明还有 `egr-mcp`
+   在运行：先把它关掉。）
+3. 重新启动客户端。要确认它启动的 server 是新的，请让助手运行 `doctor` 工具，并读它的
+   **`server`** 字段。server 会把自己启动时的版本（`runningVersion`，另有 `egrVersion` 与其
+   `initialize` 响应中的 `serverInfo.version`）与“此 server 启动所在的包”的
+   `package.json` 比对——后者是在你询问的*当下*才从磁盘读取的（`installedVersion`），
+   由 `status` 说明属于哪一种情况。全局安装时，那就是 `npm i -g` 会替换的包。
+   若在自己有 `node_modules/engramgraph` 的项目里用 `npx egr-mcp`，或用 `npm link`，
+   读的则是那一份，不是全局那份：升级全局包不会改变这个 server 读到的任何东西。
+
+   - `"current"`：版本相同。
+   - `"stale"`：两者不同。`message` 会说明，例如 *this MCP server is
+     still running version 0.14.0, but version 0.14.1 is installed … restart the
+     MCP client (for example Claude Code)*。这是在包变更（升级或降级）之前就启动的
+     server：重新启动客户端。若重启后仍是 `"stale"`，说明该路径下的包没有重新构建或
+     重新安装（`npm link` 时很常见）。
+   - `"unknown"`：读不到已安装的版本（`message` 以 `cannot determine` 开头并说明原因，
+     `installedVersion` 为 `null`）。这**不是**通过：请自己拿 `egr --version` 与
+     `runningVersion` 比对，前提是客户端启动的就是你 `PATH` 上的那个 `egr-mcp`。
+
+   server 绝不会因为没能去查看就报告 `"current"`。终端里的 `egr doctor` 没有 `server`
+   字段：它每次都是全新的进程，所以永远就是已安装的版本。
+
 ### Codex / Cursor / Windsurf（及其他 MCP 客户端）
 
 在客户端的 MCP 配置中加入一个 stdio server。各客户端格式略有不同，但
@@ -76,16 +116,16 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对�
 | 工具 | 输入 | 返回 |
 |------|------|------|
 | `index_code` *(仅可写入模式)* | `files: { path, source }[]` | 将源代码索引进代码图谱（跨文件 `CALLS`）。返回 files/functions/classes/calls（+ ambiguous/unresolved）计数。 |
-| `index_docs` *(仅可写入模式)* | `docs: { content, fallbackId? }[]` | 将带 front-matter 的 markdown 索引进知识图谱。返回 specs/decisions/impacts/supersedes/relates/decisionRelates 计数。 |
+| `index_docs` *(仅可写入模式)* | `docs: { content, fallbackId? }[]` | 将带 front-matter 的 markdown 索引进知识图谱。返回 specs/decisions/impacts/supersedes/relates/decisionRelates 计数，另有 `conflicts`：每个被不止一份文档声明的 id，连同保留的那份文档与被搁置的那些文档。 |
 | `call_chain` | `symbol`、`direction?`（`callers`\|`callees`\|`both`）、`depth?`、`file?` | 谁调用某函数符号 / 被它调用。“改 X 会坏掉什么？”多个函数共用同一个名字时会回答而不是拒答：`definitions` 列出每一个定义（`{ id, file, startLine }`），`mergedDefinitions` 说明答案合并了几个，所以 `mergedDefinitions > 1` 表示不同函数的调用者（与被调用者）在同一份清单里。`file`（路径，或恰好对上一个定义所在文件的尾段）只问该文件里的定义，调用者与被调用者都适用；结果会带 `file`（存储时的写法）与该文件的 `mergedDefinitions`。`file` 里没有这个符号的定义、或尾段对上多个文件，是错误结果（`isError: true`），并列出真正定义它的文件：**绝不是 `callers: []`**。字段只增不减：只有一个定义的名字，返回和以前相同，另加 `definitions`（一项）与 `mergedDefinitions: 1`。见 [CLI.md](./CLI.md)。 |
 | `impact_analysis` | `nodeId`、`maxHops?` | 某 spec 影响链中的决策（`IMPACTS` + 多跳 `SUPERSEDES`）。 |
 | `ingest_feedback` *(仅可写入模式)* | `nodeId`、`type`、`nodeLabel?`（`Function`\|`Spec`\|`Decision`\|`Doc`）、`weight?` | 按反馈事件（`test_fail`/`test_pass`/`human_fix`）演化节点的 SAGE 置信度。 |
 | `implementers` | `specId` | 声明 `// implements <specId>` 的文件及其定义的函数。「哪些代码实现了这个 spec？」读取 `IMPLEMENTS(Module→Spec)` + `DEFINES`。 |
 | `implemented_specs` | `moduleId` | 一个文件声明自己实现了哪些 spec。「这段代码受哪个 spec 规范？」`moduleId` 是该文件被索引时的路径。读取 `IMPLEMENTS(Module→Spec)`。 |
-| `related` *(仅可写入模式)* | `seedId`、`depth?`、`limit?` | 从某个种子 id 出发、结构上重要的节点（对所有边类型跑 seeded PageRank，横跨 `Function`/`Spec`/`Module`/`Decision`）。「有什么跟 X 相关？」 |
+| `related` *(仅可写入模式)* | `seedId`、`depth?`、`limit?` | 从某个种子 id 出发、结构上重要的节点（对所有边类型跑 seeded PageRank，横跨 `Function`/`Spec`/`Module`/`Decision`）。「有什么跟 X 相关？」**通过 stdio 不提供**——见下方。 |
 | `blindspots` | — | 解析不完全或失败的文件（来自 parse-health manifest）——图可能缺少节点／边的地方。当查询报告 `indexHealth.possiblyIncomplete` 时用它查出**缺的是什么**。`manifestPresent` 用来区分「没有问题」与「从未测量过」。 |
 | `signatures` | — | 同一批文件改以**根本原因**分组而非逐一列出——把「584 个文件」变成「1 个问题」。当 `blindspots` 返回很长的列表时使用。 |
-| `doctor` | — | 哪些语言可用、不可用的原因、这台机器上有哪些是自行编译的、哪些命令需要网络。**不打开图**，所以在「索引本身坏掉」时仍然回答得出来。 |
+| `doctor` | — | 哪些语言可用、不可用的原因、这台机器上有哪些是自行编译的、哪些命令需要网络。另有 `server: { runningVersion, installedVersion, status: "current" \| "stale" \| "unknown", message }`：这个运行中的 server 是否就是现在磁盘上已安装的版本（升级之前就启动的 server 是 `"stale"`；见*Windows：`egr-mcp` 运行中升级*）。**不打开图**，所以在「索引本身坏掉」时仍然回答得出来。 |
 | `cochange` | `file`、`repo?`、`commits?`、`maxFilesPerCommit?`、`limit?` | 从**本机 git 历史**找出与 `file` 出现在同一批提交里的文件，次数多的在前（XSPEC-514 R2）：“这个文件以前通常还会一起改哪些文件？”读的是 `git`，不是图。`commits`（默认 200）是看该文件最近几个非合并提交；改动超过 `maxFilesPerCommit`（默认 30）个文件的提交会被跳过，答案会写明用了几个、跳过几个。不算合并提交，**不追踪重命名**。`file` 相对于 `repo`（git 工作树内的一个目录；默认为 server 的工作目录）或使用绝对路径；结果是相对于仓库根目录的路径。`existsAtHead` 表示每个路径是否还在 `HEAD` 的树里（被删除的文件与重命名前的旧路径为 `false`；`null` = git 读不出树，无法判定；绝不因此过滤文件）。结果为 `{ status: "ok", file, commitsExamined, commitsUsed, commitsSkippedLarge, commitsSkippedShallowBoundary, shallow, totalFiles, cochanged: [{ file, count, existsAtHead }], … }`。无法回答时（不在 git 工作树内、没有提交碰过该文件、git 失败或超时、每个提交都被跳过）结果是错误（`isError: true`），文本带有 `status: "undetermined"`、原因与“无法判定 (cannot determine)”：**绝不回空列表**。见 [CLI.md](./CLI.md)。 |
 | `lint` | `dir`、`exclude?: string[]` | 检查 `dir` 下规格／决策 Markdown 文档的取代关系有没有自相矛盾（DEC-140）：`superseded-without-declaration`（状态写 Superseded 或 Replaced，却没有任何文档在 front matter 声明 `supersedes: <它的 id>`）与 `live-cites-superseded`（状态有效的文档仍通过 `IMPACTS` 或 `DECISION_RELATES` 引用已被取代的决策）。读的是 `egr index <dir> --docs` 会读的那批文档，**绝不打开图**；不用模型、不写入。状态是 front matter 的 `status`，没有时读第一个 `## ` 之前的第一行状态行（例如 `> **狀態**: Draft`）；每条发现写明是哪一个（`statusSource`）。每份文档都判得出时，即使有发现也是一般结果。没有状态的文档**不判、也不算通过**：计入 `undeterminable`（无法判定）；只要有任何一份判不出、或根本没有规格／决策文档，结果就是**错误结果**（`isError: true`，文本是报告加上“无法判定”那句），不论有没有发现，与 `cochange` 相同；绝不是干净的答案。结果为 `{ status: "findings" \| "undetermined" \| "clean", scanned, supersededStatuses, findings: [{ rule, file, id, status, statusSource, reason, cites?, edge?, supersededBecause? }], counts, undeterminable: { count, files } }`。`exclude` 与 `egr index --exclude` 用同样的 glob。`dir` 读不到或不是目录时结果是没有报告的错误。见 [CLI.md](./CLI.md)。 |
 | `refs_check` | `paths: string[]` | 检查 Markdown 文件／目录中（反引号包住的）文件路径与符号引用，对照图与 `git` 是否仍然正确。每个引用回报 `present`（仍存在）｜`moved`（附新位置）｜`missing`（找不到）｜`unresolvable`（信息不足，例如引用的是这个图没有索引的另一个 repo——绝不回报成 `missing`）。只读，不会修改图或被检查的文件。抽取规则见 [CLI.md](./CLI.md)。 |
@@ -132,7 +172,7 @@ server 会在下一次查询时看到结果——不需要重启。在第一次 
 每个工具都声明了 MCP 规格的 `readOnlyHint`／`destructiveHint`／`idempotentHint`／
 `openWorldHint`——这些是提示，不是保证，但完全不声明就等于什么线索都没给客户端。
 每一格的值都是**读过该工具的实现**才定的，不是照名字猜的：`related` 读起来像查询，
-但排名前必须先安装算法扩展、建立投影图，两者都是写入，所以它的 `readOnly` 是 false。
+其实不是只读——见上方它自己的说明，以及下表的 `readOnlyHint: false`。
 
 | 工具 | readOnly | destructive | idempotent | openWorld |
 |------|:--:|:--:|:--:|:--:|
@@ -155,6 +195,9 @@ server 会在下一次查询时看到结果——不需要重启。在第一次 
 只有 `ingest_feedback` 不是幂等的：它套用的是置信度的**增量**，同一组参数调用两次
 会改变分数两次，不是一次。
 
+`related` 是出人意料的那个：从调用者的角度看，它是在*读*。但排名前必须先安装算法扩展（algo extension）
+并构建投影图，两者都是写入。把它列在这里而不是移除，是因为这项能力是真的；只是这种传输方式提供不了它。
+
 ## 助手流程示例
 
 1. **索引** repo：在终端运行 `egr index ./src --docs`（以可写入模式嵌入的 server 也可改由 `index_code`、
@@ -163,8 +206,9 @@ server 会在下一次查询时看到结果——不需要重启。在第一次 
    调用 `call_chain`，返回调用者。
 3. **问“SPEC-001 背后有哪些决策？”** → 以 `{ nodeId: "SPEC-001" }` 调用
    `impact_analysis`，返回如 `[ADR-001, ADR-002]`。
-4. **记录结果**：某函数测试失败后，以 `{ nodeId, type: "test_fail" }` 调用
-   `ingest_feedback` 降低该节点置信度，使下次的排名查询优先浮现被更多次强化的节点。
+4. **记录结果**：某函数测试失败后，在终端运行
+   `egr feedback test_fail <node-id>`（或在可写入的 server 上以 `{ nodeId, type: "test_fail" }` 调用
+   `ingest_feedback`）降低该节点置信度，使下次的排名查询优先浮现被更多次强化的节点。
 
 ## 备注
 

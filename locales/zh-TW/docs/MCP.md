@@ -1,8 +1,8 @@
 ---
 source: docs/MCP.md
-source_version: 0.7.0
-translation_version: 0.7.0
-last_synced: 2026-07-16
+source_version: 0.15.0-beta.1
+translation_version: 0.15.0-beta.1
+last_synced: 2026-11-04
 status: complete
 ---
 
@@ -49,6 +49,46 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
 上方 `npx egr-mcp` 的寫法**尚未**在原生 Windows 上驗證。若在那裡連不上，
 請改用全域安裝與上面這道指令。
 
+**Windows：`egr-mcp` 執行中升級。** Windows 不會刪除正被執行中行程載入的原生模組，而
+`egr-mcp` 會載入 `ryugraph\ryujs.node`。所以在 Claude Code（或任何 MCP 用戶端）開著
+`egr-mcp` 的時候執行 `npm i -g engramgraph@<version>`，仍會回報成功，`egr --version`
+也會印出新版本，但有兩件事是錯的（macOS 與 Linux 可以刪除開啟中的檔案，所以那裡看不到
+這兩個問題）：
+
+1. npm 無法移除舊的套件目錄。它會印出 `npm warn cleanup
+   Failed to remove some directories … EPERM … ryujs.node`，並留下一份改名後的副本
+   `%APPDATA%\npm\node_modules\.engramgraph-<random>`。
+2. 已經在跑的 `egr-mcp` 會繼續提供**舊**版本，直到它的用戶端重新啟動它。沒有任何東西會告訴你。
+
+該怎麼做：
+
+1. **升級前先關閉 Claude Code（或 MCP 用戶端）**，這樣就不會留下任何 `egr-mcp` 行程。
+   殘留的那個會在工作管理員裡顯示為一個 `node.exe`，其命令列結尾是
+   `…\node_modules\engramgraph\dist\mcp\stdio.js`。
+2. 升級，然後**刪除所有殘留的 `%APPDATA%\npm\node_modules\.engramgraph-*` 目錄**。
+   那是舊套件改名後的副本，沒有任何東西在用它。（若刪除被拒絕，表示還有 `egr-mcp`
+   在執行：先把它關掉。）
+3. 重新啟動用戶端。要確認它啟動的 server 是新的，請助理執行 `doctor` 工具，並讀它的
+   **`server`** 欄位。server 會把自己啟動時的版本（`runningVersion`，另有 `egrVersion` 與其
+   `initialize` 回應中的 `serverInfo.version`）與「此 server 啟動所在的套件」的
+   `package.json` 比對——後者是在你詢問的*當下*才從磁碟讀取的（`installedVersion`），
+   由 `status` 說明屬於哪一種情況。全域安裝時，那就是 `npm i -g` 會取代的套件。
+   若在自己有 `node_modules/engramgraph` 的專案裡用 `npx egr-mcp`，或用 `npm link`，
+   讀的則是那一份，不是全域那份：升級全域套件不會改變這個 server 讀到的任何東西。
+
+   - `"current"`：版本相同。
+   - `"stale"`：兩者不同。`message` 會說明，例如 *this MCP server is
+     still running version 0.14.0, but version 0.14.1 is installed … restart the
+     MCP client (for example Claude Code)*。這是在套件變更（升級或降級）之前就啟動的
+     server：重新啟動用戶端。若重啟後仍是 `"stale"`，表示該路徑下的套件沒有重新建置或
+     重新安裝（`npm link` 時很常見）。
+   - `"unknown"`：讀不到已安裝的版本（`message` 以 `cannot determine` 開頭並說明原因，
+     `installedVersion` 為 `null`）。這**不是**通過：請自己拿 `egr --version` 與
+     `runningVersion` 比對，前提是用戶端啟動的就是你 `PATH` 上的那個 `egr-mcp`。
+
+   server 絕不會因為沒能去查看就回報 `"current"`。終端機裡的 `egr doctor` 沒有 `server`
+   欄位：它每次都是全新的行程，所以永遠就是已安裝的版本。
+
 ### Codex / Cursor / Windsurf（及其他 MCP 用戶端）
 
 在用戶端的 MCP 設定中加入一個 stdio server。各用戶端格式略有不同，但
@@ -76,16 +116,16 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因與各自對�
 | 工具 | 輸入 | 回傳 |
 |------|------|------|
 | `index_code` *(僅可寫入模式)* | `files: { path, source }[]` | 將原始碼索引進程式碼圖譜（跨檔 `CALLS`）。回傳 files/functions/classes/calls（+ ambiguous/unresolved）計數。 |
-| `index_docs` *(僅可寫入模式)* | `docs: { content, fallbackId? }[]` | 將帶 front-matter 的 markdown 索引進知識圖譜。回傳 specs/decisions/impacts/supersedes/relates/decisionRelates 計數。 |
+| `index_docs` *(僅可寫入模式)* | `docs: { content, fallbackId? }[]` | 將帶 front-matter 的 markdown 索引進知識圖譜。回傳 specs/decisions/impacts/supersedes/relates/decisionRelates 計數，另有 `conflicts`：每個被不只一份文件宣稱的 id，連同保留的那份文件與被擱置的那些文件。 |
 | `call_chain` | `symbol`、`direction?`（`callers`\|`callees`\|`both`）、`depth?`、`file?` | 誰呼叫某函式符號 / 被它呼叫。「改 X 會壞掉什麼？」多個函式共用同一個名字時會回答而不是拒答：`definitions` 列出每一個定義（`{ id, file, startLine }`），`mergedDefinitions` 說明答案合併了幾個，所以 `mergedDefinitions > 1` 代表不同函式的呼叫者（與被呼叫者）在同一份清單裡。`file`（路徑，或剛好對到一個定義所在檔案的尾段）只問該檔案裡的定義，呼叫者與被呼叫者都適用；結果會帶 `file`（儲存時的寫法）與該檔案的 `mergedDefinitions`。`file` 裡沒有這個符號的定義、或尾段對到多個檔案，是錯誤結果（`isError: true`），並列出真正定義它的檔案：**絕不是 `callers: []`**。欄位只增不減：只有一個定義的名字，回傳和以前相同，另加 `definitions`（一筆）與 `mergedDefinitions: 1`。見 [CLI.md](./CLI.md)。 |
 | `impact_analysis` | `nodeId`、`maxHops?` | 某 spec 影響鏈中的決策（`IMPACTS` + 多跳 `SUPERSEDES`）。 |
 | `ingest_feedback` *(僅可寫入模式)* | `nodeId`、`type`、`nodeLabel?`（`Function`\|`Spec`\|`Decision`\|`Doc`）、`weight?` | 依回饋事件（`test_fail`/`test_pass`/`human_fix`）演化節點的 SAGE 信心度。 |
 | `implementers` | `specId` | 宣告 `// implements <specId>` 的檔案及其定義的函式。「哪些程式碼實作了這個 spec？」讀取 `IMPLEMENTS(Module→Spec)` + `DEFINES`。 |
 | `implemented_specs` | `moduleId` | 一個檔案宣告自己實作了哪些 spec。「這段程式碼受哪個 spec 規範？」`moduleId` 是該檔案被索引時的路徑。讀取 `IMPLEMENTS(Module→Spec)`。 |
-| `related` *(僅可寫入模式)* | `seedId`、`depth?`、`limit?` | 從某個種子 id 出發、結構上重要的節點（對所有邊型跑 seeded PageRank，橫跨 `Function`/`Spec`/`Module`/`Decision`）。「有什麼跟 X 相關？」 |
+| `related` *(僅可寫入模式)* | `seedId`、`depth?`、`limit?` | 從某個種子 id 出發、結構上重要的節點（對所有邊型跑 seeded PageRank，橫跨 `Function`/`Spec`/`Module`/`Decision`）。「有什麼跟 X 相關？」**透過 stdio 不提供**——見下方。 |
 | `blindspots` | — | 解析不完全或失敗的檔案（來自 parse-health manifest）——圖可能缺少節點／邊的地方。當查詢回報 `indexHealth.possiblyIncomplete` 時用它查出**缺的是什麼**。`manifestPresent` 用來區分「沒有問題」與「從未量測過」。 |
 | `signatures` | — | 同一批檔案改以**根本原因**分組而非逐一列出——把「584 個檔案」變成「1 個問題」。當 `blindspots` 回傳很長的清單時使用。 |
-| `doctor` | — | 哪些語言可用、不可用的原因、這台機器上有哪些是自行編譯的、哪些指令需要網路。**不開啟圖**，所以在「索引本身壞掉」時仍然回答得出來。 |
+| `doctor` | — | 哪些語言可用、不可用的原因、這台機器上有哪些是自行編譯的、哪些指令需要網路。另有 `server: { runningVersion, installedVersion, status: "current" \| "stale" \| "unknown", message }`：這個執行中的 server 是否就是現在磁碟上已安裝的版本（升級之前就啟動的 server 是 `"stale"`；見*Windows：`egr-mcp` 執行中升級*）。**不開啟圖**，所以在「索引本身壞掉」時仍然回答得出來。 |
 | `cochange` | `file`、`repo?`、`commits?`、`maxFilesPerCommit?`、`limit?` | 從**本機 git 歷史**找出與 `file` 出現在同一批提交裡的檔案，次數多的在前（XSPEC-514 R2）：「這個檔案以前通常還會一起改哪些檔案？」讀的是 `git`，不是圖。`commits`（預設 200）是看該檔最近幾個非合併提交；改動超過 `maxFilesPerCommit`（預設 30）個檔案的提交會被略過，答案會寫明用了幾個、略過幾個。不算合併提交，**不追重新命名**。`file` 相對於 `repo`（git 工作樹內的一個目錄；預設為 server 的工作目錄）或用絕對路徑；結果是相對於 repo 根目錄的路徑。`existsAtHead` 表示每個路徑是否還在 `HEAD` 的樹裡（被刪掉的檔案與重新命名前的舊路徑為 `false`；`null` = git 讀不出樹，無法判定；絕不因此過濾檔案）。結果為 `{ status: "ok", file, commitsExamined, commitsUsed, commitsSkippedLarge, commitsSkippedShallowBoundary, shallow, totalFiles, cochanged: [{ file, count, existsAtHead }], … }`。無法回答時（不在 git 工作樹內、沒有提交碰過該檔、git 失敗或逾時、每個提交都被略過）結果是錯誤（`isError: true`），文字帶有 `status: "undetermined"`、原因與「無法判定 (cannot determine)」：**絕不回空清單**。見 [CLI.md](./CLI.md)。 |
 | `lint` | `dir`、`exclude?: string[]` | 檢查 `dir` 底下規格／決策 Markdown 文件的取代關係有沒有自相矛盾（DEC-140）：`superseded-without-declaration`（狀態寫 Superseded 或 Replaced，卻沒有任何文件在 front matter 宣告 `supersedes: <它的 id>`）與 `live-cites-superseded`（狀態有效的文件仍透過 `IMPACTS` 或 `DECISION_RELATES` 引用已被取代的決策）。讀的是 `egr index <dir> --docs` 會讀的那批文件，**絕不開圖**；不用模型、不寫入。狀態是 front matter 的 `status`，沒有時讀第一個 `## ` 之前的第一行狀態行（例如 `> **狀態**: Draft`）；每筆發現寫明是哪一個（`statusSource`）。每份文件都判得出時，即使有發現也是一般結果。沒有狀態的文件**不判、也不算通過**：計入 `undeterminable`（無法判定）；只要有任何一份判不出、或根本沒有規格／決策文件，結果就是**錯誤結果**（`isError: true`，文字是報告加上「無法判定」那句），不論有沒有發現，與 `cochange` 相同；絕不是乾淨的答案。結果為 `{ status: "findings" \| "undetermined" \| "clean", scanned, supersededStatuses, findings: [{ rule, file, id, status, statusSource, reason, cites?, edge?, supersededBecause? }], counts, undeterminable: { count, files } }`。`exclude` 與 `egr index --exclude` 用同樣的 glob。`dir` 讀不到或不是目錄時結果是沒有報告的錯誤。見 [CLI.md](./CLI.md)。 |
 | `refs_check` | `paths: string[]` | 檢查 Markdown 檔案／目錄中（反引號包住的）檔案路徑與符號引用，對照圖與 `git` 是否仍然正確。每個引用回報 `present`（仍存在）｜`moved`（附新位置）｜`missing`（找不到）｜`unresolvable`（資訊不足，例如引用的是這個圖沒有索引的另一個 repo——絕不回報成 `missing`）。唯讀，不會修改圖或被檢查的檔案。抽取規則見 [CLI.md](./CLI.md)。 |
@@ -132,7 +172,7 @@ server 會在下一次查詢時看到結果——不需要重新啟動。在第�
 每個工具都宣告了 MCP 規格的 `readOnlyHint`／`destructiveHint`／`idempotentHint`／
 `openWorldHint`——這些是提示，不是保證，但完全不宣告就等於什麼線索都沒給用戶端。
 每一格的值都是**讀過該工具的實作**才定的，不是照名字猜的：`related` 讀起來像查詢，
-但排名前必須先安裝算法擴充、建立投影圖，兩者都是寫入，所以它的 `readOnly` 是 false。
+其實不是唯讀——見上方它自己的說明，以及下表的 `readOnlyHint: false`。
 
 | 工具 | readOnly | destructive | idempotent | openWorld |
 |------|:--:|:--:|:--:|:--:|
@@ -155,6 +195,9 @@ server 會在下一次查詢時看到結果——不需要重新啟動。在第�
 只有 `ingest_feedback` 不是冪等的：它套用的是信心度的**增量**，同一組參數呼叫兩次
 會改變分數兩次，不是一次。
 
+`related` 是出人意料的那個：從呼叫者的角度看，它是在*讀*。但排名前必須先安裝算法擴充（algo extension）
+並建立投影圖，兩者都是寫入。把它列在這裡而不是移除，是因為這項能力是真的；只是這種傳輸方式提供不了它。
+
 ## 助理流程範例
 
 1. **索引** repo：在終端機執行 `egr index ./src --docs`（以可寫入模式嵌入的 server 也可改由 `index_code`、
@@ -163,8 +206,9 @@ server 會在下一次查詢時看到結果——不需要重新啟動。在第�
    呼叫 `call_chain`，回傳呼叫者。
 3. **問「SPEC-001 背後有哪些決策？」** → 以 `{ nodeId: "SPEC-001" }` 呼叫
    `impact_analysis`，回傳如 `[ADR-001, ADR-002]`。
-4. **記錄結果**：某函式測試失敗後，以 `{ nodeId, type: "test_fail" }` 呼叫
-   `ingest_feedback` 降低該節點信心度，使下次的排名查詢優先浮現被更多次強化的節點。
+4. **記錄結果**：某函式測試失敗後，在終端機執行
+   `egr feedback test_fail <node-id>`（或在可寫入的 server 上以 `{ nodeId, type: "test_fail" }` 呼叫
+   `ingest_feedback`）降低該節點信心度，使下次的排名查詢優先浮現被更多次強化的節點。
 
 ## 備註
 
