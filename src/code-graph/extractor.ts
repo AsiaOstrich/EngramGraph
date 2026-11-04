@@ -456,6 +456,11 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
   // function, affecting every language on the engine, not just C#'s query
   // file).
   //
+  // Issue #23 step 1: the ids are still shared, but the row no longer hides it —
+  // every same-id definition's start line is written to `definition_lines` (see
+  // below), so `callers` / `call_chain` report N definitions instead of 1.
+  // Giving each overload its own node stays the open step 2.
+  //
   // Go (XSPEC-333 R2c) has a related but *worse* collision: this engine's
   // scope-qualification is built entirely from byte-range containment (a
   // definition D is "inside" class C iff C's range contains D's), but a Go
@@ -488,7 +493,21 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     });
   }
 
+  // Same-id definitions (overloads, redefinitions): the graph keeps ONE row per id, and which line survives
+  // is whichever node is written last. Record every line on the row, so a query can say how many definitions
+  // the id stands for (issue #23). The node list is unchanged (still one node per definition, same ids); each of
+  // them carries the same full list, so the row is right whichever one the writer applies last. A single
+  // definition writes NULL, which also clears a list left by an earlier index of the file when an overload is
+  // removed.
+  const linesById = new Map<string, number[]>();
   for (const fn of functions) {
+    const lines = linesById.get(fn.id) ?? [];
+    lines.push(fn.startLine);
+    linesById.set(fn.id, lines);
+  }
+
+  for (const fn of functions) {
+    const lines = linesById.get(fn.id) ?? [];
     nodes.push({
       label: "Function",
       id: fn.id,
@@ -498,6 +517,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
         start_line: fn.startLine,
         confidence: 1,
         provider: PROVIDER,
+        definition_lines: lines.length > 1 ? JSON.stringify(lines) : null,
       },
     });
     defines.push({

@@ -46,7 +46,7 @@ Persist a provider-agnostic `{ nodes, edges }` fragment.
 ### Schema (DDL)
 
 ```
-NODE Function(id, name, file, start_line, confidence, provider)   PK id
+NODE Function(id, name, file, start_line, confidence, provider, definition_lines)   PK id
 NODE Class(id, name, file, provider)                              PK id
 NODE Module(id, path)                                             PK id
 NODE Spec(id, title, status, confidence, origin, path)            PK id
@@ -105,7 +105,10 @@ path extension when omitted.
 mergedDefinitions, file? }` — `definitions` is every function of that name,
 `{ id, file, startLine }`; `mergedDefinitions` is how many the answer combines
 (more than 1 means the callers of different functions share one list); `file` is
-set when the answer was narrowed. The REST route `POST /graph/call-chain` returns
+set when the answer was narrowed. Definitions that share a node id (two overloads of one class,
+a redefinition) are one row in the graph and several entries here: the same `id`, a different
+`startLine` each, read from `Function.definition_lines` (a graph indexed before that column
+existed reports one definition until it is indexed again). The REST route `POST /graph/call-chain` returns
 the same fields and does not take `file`.
 
 ## knowledge-graph — spec/decision markdown → graph

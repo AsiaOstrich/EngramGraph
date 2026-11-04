@@ -212,7 +212,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       description:
         "Who calls / is called by a function symbol — 'what breaks if I change X?'. direction: callers | callees | both. " +
         "A name several functions share is answered, not refused: the result lists every definition (`definitions`, with file and line) " +
-        "and `mergedDefinitions` says how many the answer combines — more than 1 means the callers of different functions are in one list. " +
+        "and `mergedDefinitions` says how many the answer combines — more than 1 means the callers of different functions are in one list (overloads of one class appear as several entries with the same id and different lines). " +
         "Pass `file` (a path, or its trailing part if unique) to ask about the definition(s) in that file only; a file with no such definition is an error, not an empty list.",
       inputSchema: {
         symbol: z.string(),

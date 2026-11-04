@@ -17,6 +17,12 @@ export interface FunctionNode {
   name: string;
   file: string;
   start_line: number;
+  /**
+   * JSON array of the 1-based start lines of every definition that shares this id, e.g. `"[47,119]"`
+   * (issue #23: two overloads of one class have the same id, so the node is one row and `start_line`
+   * is the last of them). `null` = one definition, or a row written before this column existed.
+   */
+  definition_lines?: string | null;
   /** SAGE confidence score in [0, 1]; defaults to 1.0 on creation. */
   confidence: number;
   /**
@@ -95,7 +101,8 @@ export type RelLabel =
 export interface GraphNode {
   label: NodeLabel;
   id: string;
-  properties: Record<string, string | number>;
+  /** `null` writes SQL NULL: a property a later write must be able to clear (`Function.definition_lines`). */
+  properties: Record<string, string | number | null>;
 }
 
 export interface GraphEdge {

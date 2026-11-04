@@ -20,7 +20,12 @@ export const NODE_TABLE_DDL: readonly string[] = [
   // rows have no provider column value until re-indexed post-migration; the
   // extractor always stamps a literal default so freshly-written rows are
   // never ambiguous. See writer.ts for how this feeds the overwrite policy.
-  `CREATE NODE TABLE Function(id STRING, name STRING, file STRING, start_line INT64, confidence DOUBLE, provider STRING, PRIMARY KEY(id))`,
+  // `definition_lines` (issue #23): the start lines of ALL definitions that share this id, as a JSON array
+  // (`"[47,119]"`), written only when there are two or more. Two overloads (C#, Java, Kotlin, C++, Swift), a
+  // Python redefinition or two Go methods named alike get the same `<file>#<Class>.<name>` id and are one row;
+  // `start_line` keeps the last of them, as it always did, and this column is the only place the others survive.
+  // NULL = one definition, or a row from before the column existed (it reads back as the single `start_line`).
+  `CREATE NODE TABLE Function(id STRING, name STRING, file STRING, start_line INT64, confidence DOUBLE, provider STRING, definition_lines STRING, PRIMARY KEY(id))`,
   `CREATE NODE TABLE Class(id STRING, name STRING, file STRING, provider STRING, PRIMARY KEY(id))`,
   `CREATE NODE TABLE Module(id STRING, path STRING, PRIMARY KEY(id))`,
   // `path` (XSPEC-481 R4): where the document that declared this node was read from — the absolute path `egr index

@@ -304,8 +304,14 @@ that way). The answer then says it is one of several
 **A file that holds no definition of the symbol is an error** — exit `1`, naming
 the files that do define it — and so is a trailing part that fits several files;
 neither is ever printed as `(none)`. A file that defines the name more than once
-(two classes with a `paint` method) cannot be split by `--file`; the answer says
-so instead of pretending to have chosen one.
+(two classes with a `paint` method, or **two overloads of one class**: `validate(A)` and
+`validate(B)` in one C# file have the same node id, so they are one node in the graph) cannot
+be split by `--file`; the answer says so instead of pretending to have chosen one. The
+overloads' lines are recorded when the file is indexed (`Function.definition_lines`; an older
+graph gets the column the next time a command that writes opens it, and reports the overloads
+after the file is indexed again). The same holds for every language whose two definitions get
+one id: C#, Java, Kotlin, C++, Swift, Go (methods of two types with one name), and a Python or
+Ruby redefinition. Giving each overload its own node is not done yet.
 
 `--json` is the bare array it always was, for every answer: scripts parse it, and
 an array cannot say anything about itself. When the answer combines several

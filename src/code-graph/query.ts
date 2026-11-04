@@ -124,19 +124,64 @@ export async function callees(
   return toNodes(rows);
 }
 
-/** Every Function node named `name`, ordered by file and line (XSPEC-514 R1). */
+/**
+ * Every definition of a function named `name`, ordered by file and line (XSPEC-514 R1).
+ *
+ * One Function row can stand for several definitions: two overloads of a class, a redefinition, two Go methods
+ * of one name have the same id, and the graph keeps a single row for an id (issue #23). The row's
+ * `definition_lines` says how many and where, and each one is returned as its own entry: the same `id`, a
+ * different `startLine`. So `definitions` can hold an id more than once, and `mergedDefinitions` counts
+ * definitions, not rows.
+ *
+ * `definition_lines` is a column of graphs indexed since it was added. A graph opened read-only is not
+ * migrated (a query must not write), so on an older graph the column is not there and Kuzu refuses the
+ * property; that one refusal is answered by reading without it (every row is then one definition, as before
+ * the column). Any other error is the caller's.
+ */
 export async function functionDefinitions(conn: GraphConnection, name: string): Promise<FunctionDefinition[]> {
-  const rows = await conn.query(
-    `MATCH (f:Function {name: $name})
-     RETURN f.id AS id, f.file AS file, f.start_line AS line
-     ORDER BY file, line, id`,
-    { name },
-  );
-  return rows.map((r) => ({
-    id: String(r.id),
-    file: String(r.file),
-    startLine: r.line == null ? null : Number(r.line),
-  }));
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = await conn.query(
+      `MATCH (f:Function {name: $name})
+       RETURN f.id AS id, f.file AS file, f.start_line AS line, f.definition_lines AS lines
+       ORDER BY file, line, id`,
+      { name },
+    );
+  } catch (err) {
+    if (!/Cannot find property definition_lines/.test(err instanceof Error ? err.message : String(err))) throw err;
+    rows = await conn.query(
+      `MATCH (f:Function {name: $name})
+       RETURN f.id AS id, f.file AS file, f.start_line AS line
+       ORDER BY file, line, id`,
+      { name },
+    );
+  }
+  const out: FunctionDefinition[] = [];
+  for (const r of rows) {
+    const id = String(r.id);
+    const file = String(r.file);
+    const lines = parseDefinitionLines(r.lines);
+    if (lines.length > 1) {
+      for (const startLine of lines) out.push({ id, file, startLine });
+    } else {
+      out.push({ id, file, startLine: r.line == null ? null : Number(r.line) });
+    }
+  }
+  // rows are ordered by their stored (last) line; the expanded lines of an overloaded row can interleave with the next row
+  const order = (d: FunctionDefinition) => d.startLine ?? Number.MAX_SAFE_INTEGER;
+  return out.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : order(a) - order(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+}
+
+/** The lines in a `definition_lines` value (`"[47,119]"`), sorted; `[]` for NULL or anything that is not a list of numbers. */
+function parseDefinitionLines(value: unknown): number[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || !parsed.every((n) => typeof n === "number" && Number.isFinite(n))) return [];
+    return [...(parsed as number[])].sort((a, b) => a - b);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -225,9 +270,14 @@ export function describeDefinitionScope(scope: DefinitionScope, symbol: string):
     return others > 0 ? `narrowed to the definition at ${where(mine[0]!)} (1 of ${definitions.length} definitions of "${symbol}").` : "";
   }
   if (mergedDefinitions > 1) {
+    // Overloads share an id, so they can sit in ONE file; `--file` picks a file, not a line, and cannot split them.
+    const sharedFile = definitions.length > new Set(definitions.map((d) => d.file)).size;
+    const narrow = sharedFile
+      ? `Narrow it with --file <path>; definitions that share a file cannot be told apart.`
+      : `Narrow it to one with --file <path>.`;
     return (
       `⚠ merged: "${symbol}" is defined ${mergedDefinitions} times (${definitions.map(where).join(", ")}); ` +
-      `this answer combines all ${mergedDefinitions}. Narrow it to one with --file <path>.`
+      `this answer combines all ${mergedDefinitions}. ${narrow}`
     );
   }
   return "";
