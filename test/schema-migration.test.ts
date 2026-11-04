@@ -122,7 +122,7 @@ describe("parseDeclaredColumns", () => {
     const byTable = Object.fromEntries(
       [...NODE_TABLE_DDL, ...REL_TABLE_DDL].map(parseDeclaredColumns).map((d) => [d.table, d.columns.map((c) => c.name)]),
     );
-    expect(byTable.Function).toEqual(["id", "name", "file", "start_line", "confidence", "provider"]);
+    expect(byTable.Function).toEqual(["id", "name", "file", "start_line", "confidence", "provider", "definition_lines"]);
     expect(byTable.Class).toEqual(["id", "name", "file", "provider"]);
     expect(byTable.CALLS).toEqual(["call_count", "confidence", "provider"]);
   });
@@ -268,11 +268,13 @@ describe("migrateSchemaColumns — end-to-end against a simulated pre-migration 
     expect(pending).toEqual(
       expect.arrayContaining([
         { table: "Function", column: "provider", type: "STRING" },
+        // issue #23: the column that records every start line of a same-id definition
+        { table: "Function", column: "definition_lines", type: "STRING" },
         { table: "CALLS", column: "confidence", type: "DOUBLE" },
         { table: "CALLS", column: "provider", type: "STRING" },
       ]),
     );
-    expect(pending).toHaveLength(3);
+    expect(pending).toHaveLength(4);
   });
 
   it("reports zero pending migrations against a freshly-created current-schema DB", async () => {

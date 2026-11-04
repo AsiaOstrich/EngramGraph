@@ -52,7 +52,7 @@ import { /* ... */ } from "engramgraph";
 ### Schema（DDL）
 
 ```
-NODE Function(id, name, file, start_line, confidence, provider)   PK id
+NODE Function(id, name, file, start_line, confidence, provider, definition_lines)   PK id
 NODE Class(id, name, file, provider)                              PK id
 NODE Module(id, path)                                             PK id
 NODE Spec(id, title, status, confidence, origin, path)            PK id
@@ -104,7 +104,7 @@ tree-sitter 將 `.ts` / `.tsx` / `.js` 解析為 `Function` / `Class` / `Module`
 `CallNode = { id, name, file }`。`CallDirection = "callers" | "callees" | "both"`。
 `CallChainResult = { symbol, direction, depth, callers, callees, definitions, mergedDefinitions, file? }`
 ——`definitions` 是該名字的每個函式（`{ id, file, startLine }`）；`mergedDefinitions` 是答案合併了幾個
-（大於 1 代表不同函式的呼叫者在同一份清單裡）；`file` 在答案已收窄時才有。REST 路由
+（大於 1 代表不同函式的呼叫者在同一份清單裡）；`file` 在答案已收窄時才有。共用同一個節點 id 的定義（同一個類別的兩個多載、重複定義）在圖裡是一列、在這裡是數個項目：`id` 相同、各有自己的 `startLine`，來自 `Function.definition_lines`（在這個欄位出現之前建的圖，重新索引前只會回報一個定義）。REST 路由
 `POST /graph/call-chain` 回傳相同欄位，目前不接受 `file`。
 
 ## knowledge-graph — spec/decision markdown → 圖譜
