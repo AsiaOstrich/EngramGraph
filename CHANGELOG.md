@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`doctor` now says the next upgrade *can* fail with EBUSY while an `egr-mcp` still holds the leftover open, instead of saying it always fails**, matching the `preinstall` warning. The Windows retest of 0.15.1-beta.1 had a leftover in place and an upgrade that still succeeded, because nothing in the leftover was locked any more.
+
 ## [0.15.1-beta.1] - 2026-11-05
 
 *Preview published to the `next` dist-tag for Windows verification. One change on top of 0.15.0: `doctor` and the docs tell you to delete a `.engramgraph-*` leftover before the next Windows global upgrade.*

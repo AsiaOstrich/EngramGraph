@@ -122,7 +122,7 @@ function leftoverSentence(names: string[], packageDir: string): string {
   const parent = dirname(packageDir);
   return (
     ` A previous upgrade left ${names.join(", ")} next to the installed package, in ${parent}. ` +
-    "npm moves the installed copy there while it upgrades and deletes it at the end; on Windows it cannot while an egr-mcp holds a file in it open, and the next upgrade then fails with EBUSY. " +
+    "npm moves the installed copy there while it upgrades and deletes it at the end; on Windows it cannot while an egr-mcp holds a file in it open, and while it does, the next upgrade can fail with EBUSY. " +
     "Close every MCP client that runs egr-mcp (for example Claude Code), delete " +
     `${names.map((n) => join(parent, n)).join(", ")}, and only then upgrade again.`
   );
