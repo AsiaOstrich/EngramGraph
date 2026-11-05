@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-11-05
+
+> **Stable Release**: the same content as 0.15.1-beta.2 below, which passed the Windows release verification (run 42047644318), the cross-platform compatibility check (run 42046998796) and a macOS check from the npm install (index, `callers`, and the MCP `doctor` reporting a leftover). The Windows behaviour of the leftover check was verified on a real machine with 0.15.1-beta.1, which differs from beta.2 only in one sentence of the `doctor` message.
+
 ## [0.15.1-beta.2] - 2026-11-05
 
 *Preview on the `next` dist-tag. One wording fix on top of 0.15.1-beta.1, from its Windows retest: `doctor` says the next upgrade can fail with EBUSY while an `egr-mcp` holds the leftover open.*
