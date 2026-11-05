@@ -57,7 +57,7 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
 
 1. npm 無法移除舊的套件目錄。它會印出 `npm warn cleanup
    Failed to remove some directories … EPERM … ryujs.node`，並留下一份改名後的副本
-   `%APPDATA%\npm\node_modules\.engramgraph-<random>`。這個名稱**每次升級都相同**
+   `%APPDATA%\npm\node_modules\.engramgraph-<hash>`。這個名稱**每次升級都相同**
    （npm 由套件路徑算出）。
 2. 已經在跑的 `egr-mcp` 會繼續提供**舊**版本，直到它的用戶端重新啟動它。沒有任何東西會告訴你。
 
@@ -72,11 +72,12 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
    殘留的是舊套件改名後的副本，沒有東西在用它，但舊的 `egr-mcp` 開著的 `ryujs.node`
    還在裡面；而下一次升級一開始，npm 就要把已安裝的套件改名成同一個名稱。殘留還在
    的話，下一次 `npm i -g engramgraph@<version>` 會失敗，報
-   `EBUSY: resource busy or locked, copyfile …`，儘管你什麼都沒改。npm 會回滾，但回滾
+   `EBUSY: resource busy or locked, copyfile …`，儘管你什麼都沒改。npm 會還原，但還原後
    可能讓套件一半是舊的、一半是新的（JavaScript 檔來自一個版本、`ryujs.node` 來自另一個）；
    有一次同時開著三個 `egr-mcp` 的實測，留下了無法啟動的安裝（`ERR_MODULE_NOT_FOUND`）。
-   若刪除被拒絕，表示還有 `egr-mcp` 在執行：先把它關掉。
-4. 確認重新啟動的用戶端啟動的是新 server。要確認它啟動的 server 是新的，請助理執行 `doctor` 工具，並讀它的
+   若刪除被拒絕，表示還有 `egr-mcp` 在執行：先把它關掉。PowerShell 指令：
+   `Remove-Item -Recurse -Force "$(npm root -g)\.engramgraph-*"`（`npm root -g` 在自訂 prefix 時也找得到；`doctor` 會印出絕對路徑）。
+4. 確認重新啟動的用戶端啟動的是新 server：請助理執行 `doctor` 工具，並讀它的
    **`server`** 欄位。server 會把自己啟動時的版本（`runningVersion`，另有 `egrVersion` 與其
    `initialize` 回應中的 `serverInfo.version`）與「此 server 啟動所在的套件」的
    `package.json` 比對——後者是在你詢問的*當下*才從磁碟讀取的（`installedVersion`），
@@ -94,11 +95,11 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
      `installedVersion` 為 `null`）。這**不是**通過：請自己拿 `egr --version` 與
      `runningVersion` 比對，前提是用戶端啟動的就是你 `PATH` 上的那個 `egr-mcp`。
 
-   `server.upgradeLeftovers` 列出已安裝套件旁所有的 `.engramgraph-*` 目錄（沒有時為空陣列）。
+   `server.upgradeLeftovers` 列出已安裝套件旁所有的 `.engramgraph-*` 目錄（沒有時為空陣列；找不到已安裝套件或目錄讀不到時也是空陣列，所以空陣列不保證沒有殘留）。
    不是空的時候，不論 `status` 是什麼，`message` 都會多一句：先關閉用戶端、刪除這些目錄、
    然後才再升級——「`"current"` 但有殘留」正是下一次升級會失敗的狀態。在殘留旁邊全新執行
-   `npm i -g` 時，`preinstall` 會印出同樣的建議，但 npm 預設隱藏生命週期腳本的輸出，所以
-   要信賴的是 `doctor`。`preinstall` 本身擋不住那次會失敗的升級：npm 在把套件改名到殘留
+   `npm i -g` 時，`preinstall` 可能印出同樣的建議（只限已沒有 `package.json` 的殘留，且 npm 有顯示腳本輸出時），但 npm 預設隱藏生命週期腳本的輸出，所以
+   該看的是 `doctor`。`preinstall` 本身擋不住那次會失敗的升級：npm 在把套件改名到殘留
    目錄上時就已經失敗，新版本的 `preinstall` 根本還沒有機會執行。
 
    server 絕不會因為沒能去查看就回報 `"current"`。終端機裡的 `egr doctor` 沒有 `server`

@@ -57,7 +57,7 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
 
 1. npm 无法删除旧的包目录。它会打印 `npm warn cleanup
    Failed to remove some directories … EPERM … ryujs.node`，并留下一份改名后的副本
-   `%APPDATA%\npm\node_modules\.engramgraph-<random>`。这个名称**每次升级都相同**
+   `%APPDATA%\npm\node_modules\.engramgraph-<hash>`。这个名称**每次升级都相同**
    （npm 由包路径算出）。
 2. 已经在运行的 `egr-mcp` 会继续提供**旧**版本，直到它的客户端重新启动它。没有任何东西会告诉你。
 
@@ -75,8 +75,9 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
    `EBUSY: resource busy or locked, copyfile …`，尽管你什么都没改。npm 会回滚，但回滚
    可能让包一半是旧的、一半是新的（JavaScript 文件来自一个版本、`ryujs.node` 来自另一个）；
    有一次同时开着三个 `egr-mcp` 的实测，留下了无法启动的安装（`ERR_MODULE_NOT_FOUND`）。
-   若删除被拒绝，说明还有 `egr-mcp` 在运行：先把它关掉。
-4. 确认重新启动的客户端启动的是新 server。要确认它启动的 server 是新的，请让助手运行 `doctor` 工具，并读它的
+   若删除被拒绝，说明还有 `egr-mcp` 在运行：先把它关掉。PowerShell 命令：
+   `Remove-Item -Recurse -Force "$(npm root -g)\.engramgraph-*"`（`npm root -g` 在自定义 prefix 时也找得到；`doctor` 会打印绝对路径）。
+4. 确认重新启动的客户端启动的是新 server：请让助手运行 `doctor` 工具，并读它的
    **`server`** 字段。server 会把自己启动时的版本（`runningVersion`，另有 `egrVersion` 与其
    `initialize` 响应中的 `serverInfo.version`）与“此 server 启动所在的包”的
    `package.json` 比对——后者是在你询问的*当下*才从磁盘读取的（`installedVersion`），
@@ -94,11 +95,11 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
      `installedVersion` 为 `null`）。这**不是**通过：请自己拿 `egr --version` 与
      `runningVersion` 比对，前提是客户端启动的就是你 `PATH` 上的那个 `egr-mcp`。
 
-   `server.upgradeLeftovers` 列出已安装包旁所有的 `.engramgraph-*` 目录（没有时为空数组）。
+   `server.upgradeLeftovers` 列出已安装包旁所有的 `.engramgraph-*` 目录（没有时为空数组；找不到已安装包或目录读不到时也是空数组，所以空数组不保证没有残留）。
    不是空的时候，无论 `status` 是什么，`message` 都会多一句：先关闭客户端、删除这些目录、
    然后才再升级——“`"current"` 但有残留”正是下一次升级会失败的状态。在残留旁边全新运行
-   `npm i -g` 时，`preinstall` 会打印同样的建议，但 npm 默认隐藏生命周期脚本的输出，所以
-   要信赖的是 `doctor`。`preinstall` 本身拦不住那次会失败的升级：npm 在把包改名到残留
+   `npm i -g` 时，`preinstall` 可能打印同样的建议（只限已没有 `package.json` 的残留，且 npm 有显示脚本输出时），但 npm 默认隐藏生命周期脚本的输出，所以
+   该看的是 `doctor`。`preinstall` 本身拦不住那次会失败的升级：npm 在把包改名到残留
    目录上时就已经失败，新版本的 `preinstall` 根本还没有机会运行。
 
    server 绝不会因为没能去查看就报告 `"current"`。终端里的 `egr doctor` 没有 `server`

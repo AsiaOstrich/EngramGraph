@@ -121,7 +121,7 @@ export function preflightMessage(platform = currentPlatform()) {
  *
  * When npm replaces a package it first renames the installed copy to
  * `.<name>-<hash>`, unpacks the new one, and deletes the renamed copy at the end.
- * The hash is the first 8 characters of the SHA-1 of the package's path
+ * The hash is 8 characters derived from the SHA-1 of the package's path (base64, non-alphanumerics removed)
  * (`@npmcli/arborist/lib/retire-path.js`), so it is the SAME name on every
  * upgrade. On Windows the delete fails while a running `egr-mcp` holds
  * `ryugraph\ryujs.node` open, the directory stays, and the next upgrade then has
@@ -187,7 +187,7 @@ export function leftoverMessage(names, packageDir = process.cwd()) {
     "",
     "This install carries on. Before the next upgrade: close every MCP client that runs",
     `egr-mcp (for example Claude Code), then delete ${names.map((n) => join(parent, n)).join(", ")}.`,
-    "Details: docs/MCP.md, \"Windows: upgrading while egr-mcp is running\".",
+    "Details: https://github.com/AsiaOstrich/EngramGraph/blob/main/docs/MCP.md (\"Windows: upgrading while egr-mcp is running\").",
     "",
   ].join("\n");
 }

@@ -52,7 +52,7 @@ files, so neither shows up there):
 
 1. npm cannot remove the old package directory. It prints `npm warn cleanup
    Failed to remove some directories … EPERM … ryujs.node` and leaves a renamed
-   copy, `%APPDATA%\npm\node_modules\.engramgraph-<random>`. The name is
+   copy, `%APPDATA%\npm\node_modules\.engramgraph-<hash>`. The name is
    **the same on every upgrade** (npm derives it from the package path).
 2. The `egr-mcp` that is already running keeps serving the **old** version until
    its client restarts it. Nothing tells you.
@@ -74,9 +74,9 @@ What to do:
    rollback can leave the package half old and half new (JavaScript files from one
    version, `ryujs.node` from another); in one run with three `egr-mcp` processes
    open it left an install that could not start (`ERR_MODULE_NOT_FOUND`). If the
-   delete is refused, an `egr-mcp` is still running: close it first.
-4. Check that the restarted client started the new server. To check that the server it started is the new one,
-   ask the assistant to run the `doctor` tool and read its **`server`** field. The
+   delete is refused, an `egr-mcp` is still running: close it first. In PowerShell:
+   `Remove-Item -Recurse -Force "$(npm root -g)\.engramgraph-*"` (`npm root -g` also finds a non-default prefix; `doctor` prints the absolute path).
+4. Check that the restarted client started the new server: ask the assistant to run the `doctor` tool and read its **`server`** field. The
    server compares the version it was started with (`runningVersion`, also
    `egrVersion` and the `serverInfo.version` of its `initialize` answer) with the
    `package.json` of the package this server was started from, read from disk
@@ -99,11 +99,11 @@ What to do:
      provided the client starts the same `egr-mcp` that is on your `PATH`.
 
    `server.upgradeLeftovers` lists every `.engramgraph-*` directory beside the
-   installed package (an empty list when there is none). When it is not empty,
+   installed package (an empty list when there is none, and also when the installed package could not be found or its directory could not be read, so an empty list is not proof that there is no leftover). When it is not empty,
    `message` also says to close the clients, delete those directories and only
    then upgrade again, whatever `status` is: a `"current"` server with a leftover
    is the state in which the next upgrade fails. A fresh `npm i -g` next to a
-   leftover prints the same advice from `preinstall`, but npm hides lifecycle-script
+   leftover may print the same advice from `preinstall` (only for a leftover that no longer has a `package.json`, and only when npm shows script output), but npm hides lifecycle-script
    output by default, so `doctor` is the check to rely on. `preinstall` cannot stop
    the failing upgrade itself: npm has already failed to rename the package onto
    the leftover before the new version's `preinstall` exists to run.
