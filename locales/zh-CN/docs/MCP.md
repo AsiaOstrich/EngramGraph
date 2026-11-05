@@ -57,7 +57,8 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
 
 1. npm 无法删除旧的包目录。它会打印 `npm warn cleanup
    Failed to remove some directories … EPERM … ryujs.node`，并留下一份改名后的副本
-   `%APPDATA%\npm\node_modules\.engramgraph-<random>`。
+   `%APPDATA%\npm\node_modules\.engramgraph-<random>`。这个名称**每次升级都相同**
+   （npm 由包路径算出）。
 2. 已经在运行的 `egr-mcp` 会继续提供**旧**版本，直到它的客户端重新启动它。没有任何东西会告诉你。
 
 该怎么做：
@@ -65,10 +66,17 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
 1. **升级前先关闭 Claude Code（或 MCP 客户端）**，这样就不会留下任何 `egr-mcp` 进程。
    残留的那个会在任务管理器里显示为一个 `node.exe`，其命令行结尾是
    `…\node_modules\engramgraph\dist\mcp\stdio.js`。
-2. 升级，然后**删除所有残留的 `%APPDATA%\npm\node_modules\.engramgraph-*` 目录**。
-   那是旧包改名后的副本，没有任何东西在用它。（若删除被拒绝，说明还有 `egr-mcp`
-   在运行：先把它关掉。）
-3. 重新启动客户端。要确认它启动的 server 是新的，请让助手运行 `doctor` 工具，并读它的
+2. 升级。
+3. **每次全局升级之后、下一次升级之前：重新启动所有 MCP 客户端，然后删除所有残留的
+   `%APPDATA%\npm\node_modules\.engramgraph-*` 目录。** 这不是可做可不做的清理。
+   残留的是旧包改名后的副本，没有东西在用它，但旧的 `egr-mcp` 打开着的 `ryujs.node`
+   还在里面；而下一次升级一开始，npm 就要把已安装的包改名成同一个名称。残留还在
+   的话，下一次 `npm i -g engramgraph@<version>` 会失败，报
+   `EBUSY: resource busy or locked, copyfile …`，尽管你什么都没改。npm 会回滚，但回滚
+   可能让包一半是旧的、一半是新的（JavaScript 文件来自一个版本、`ryujs.node` 来自另一个）；
+   有一次同时开着三个 `egr-mcp` 的实测，留下了无法启动的安装（`ERR_MODULE_NOT_FOUND`）。
+   若删除被拒绝，说明还有 `egr-mcp` 在运行：先把它关掉。
+4. 确认重新启动的客户端启动的是新 server。要确认它启动的 server 是新的，请让助手运行 `doctor` 工具，并读它的
    **`server`** 字段。server 会把自己启动时的版本（`runningVersion`，另有 `egrVersion` 与其
    `initialize` 响应中的 `serverInfo.version`）与“此 server 启动所在的包”的
    `package.json` 比对——后者是在你询问的*当下*才从磁盘读取的（`installedVersion`），
@@ -85,6 +93,13 @@ claude mcp add egr --scope local -e "ENGRAM_DB=C:\abs\path\.engram\graph.db" -- 
    - `"unknown"`：读不到已安装的版本（`message` 以 `cannot determine` 开头并说明原因，
      `installedVersion` 为 `null`）。这**不是**通过：请自己拿 `egr --version` 与
      `runningVersion` 比对，前提是客户端启动的就是你 `PATH` 上的那个 `egr-mcp`。
+
+   `server.upgradeLeftovers` 列出已安装包旁所有的 `.engramgraph-*` 目录（没有时为空数组）。
+   不是空的时候，无论 `status` 是什么，`message` 都会多一句：先关闭客户端、删除这些目录、
+   然后才再升级——“`"current"` 但有残留”正是下一次升级会失败的状态。在残留旁边全新运行
+   `npm i -g` 时，`preinstall` 会打印同样的建议，但 npm 默认隐藏生命周期脚本的输出，所以
+   要信赖的是 `doctor`。`preinstall` 本身拦不住那次会失败的升级：npm 在把包改名到残留
+   目录上时就已经失败，新版本的 `preinstall` 根本还没有机会运行。
 
    server 绝不会因为没能去查看就报告 `"current"`。终端里的 `egr doctor` 没有 `server`
    字段：它每次都是全新的进程，所以永远就是已安装的版本。
@@ -125,7 +140,7 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对�
 | `related` *(仅可写入模式)* | `seedId`、`depth?`、`limit?` | 从某个种子 id 出发、结构上重要的节点（对所有边类型跑 seeded PageRank，横跨 `Function`/`Spec`/`Module`/`Decision`）。「有什么跟 X 相关？」**通过 stdio 不提供**——见下方。 |
 | `blindspots` | — | 解析不完全或失败的文件（来自 parse-health manifest）——图可能缺少节点／边的地方。当查询报告 `indexHealth.possiblyIncomplete` 时用它查出**缺的是什么**。`manifestPresent` 用来区分「没有问题」与「从未测量过」。 |
 | `signatures` | — | 同一批文件改以**根本原因**分组而非逐一列出——把「584 个文件」变成「1 个问题」。当 `blindspots` 返回很长的列表时使用。 |
-| `doctor` | — | 哪些语言可用、不可用的原因、这台机器上有哪些是自行编译的、哪些命令需要网络。另有 `server: { runningVersion, installedVersion, status: "current" \| "stale" \| "unknown", message }`：这个运行中的 server 是否就是现在磁盘上已安装的版本（升级之前就启动的 server 是 `"stale"`；见*Windows：`egr-mcp` 运行中升级*）。**不打开图**，所以在「索引本身坏掉」时仍然回答得出来。 |
+| `doctor` | — | 哪些语言可用、不可用的原因、这台机器上有哪些是自行编译的、哪些命令需要网络。另有 `server: { runningVersion, installedVersion, status: "current" \| "stale" \| "unknown", message, upgradeLeftovers }`：这个运行中的 server 是否就是现在磁盘上已安装的版本（升级之前就启动的 server 是 `"stale"`；见*Windows：`egr-mcp` 运行中升级*）。**不打开图**，所以在「索引本身坏掉」时仍然回答得出来。 |
 | `cochange` | `file`、`repo?`、`commits?`、`maxFilesPerCommit?`、`limit?` | 从**本机 git 历史**找出与 `file` 出现在同一批提交里的文件，次数多的在前（XSPEC-514 R2）：“这个文件以前通常还会一起改哪些文件？”读的是 `git`，不是图。`commits`（默认 200）是看该文件最近几个非合并提交；改动超过 `maxFilesPerCommit`（默认 30）个文件的提交会被跳过，答案会写明用了几个、跳过几个。不算合并提交，**不追踪重命名**。`file` 相对于 `repo`（git 工作树内的一个目录；默认为 server 的工作目录）或使用绝对路径；结果是相对于仓库根目录的路径。`existsAtHead` 表示每个路径是否还在 `HEAD` 的树里（被删除的文件与重命名前的旧路径为 `false`；`null` = git 读不出树，无法判定；绝不因此过滤文件）。结果为 `{ status: "ok", file, commitsExamined, commitsUsed, commitsSkippedLarge, commitsSkippedShallowBoundary, shallow, totalFiles, cochanged: [{ file, count, existsAtHead }], … }`。无法回答时（不在 git 工作树内、没有提交碰过该文件、git 失败或超时、每个提交都被跳过）结果是错误（`isError: true`），文本带有 `status: "undetermined"`、原因与“无法判定 (cannot determine)”：**绝不回空列表**。见 [CLI.md](./CLI.md)。 |
 | `lint` | `dir`、`exclude?: string[]` | 检查 `dir` 下规格／决策 Markdown 文档的取代关系有没有自相矛盾（DEC-140）：`superseded-without-declaration`（状态写 Superseded 或 Replaced，却没有任何文档在 front matter 声明 `supersedes: <它的 id>`）与 `live-cites-superseded`（状态有效的文档仍通过 `IMPACTS` 或 `DECISION_RELATES` 引用已被取代的决策）。读的是 `egr index <dir> --docs` 会读的那批文档，**绝不打开图**；不用模型、不写入。状态是 front matter 的 `status`，没有时读第一个 `## ` 之前的第一行状态行（例如 `> **狀態**: Draft`，或表格行 `| 狀態 | Draft |`／`| **狀態** | Draft |`）；每条发现写明是哪一个（`statusSource`）。每份文档都判得出时，即使有发现也是一般结果。没有状态的文档**不判、也不算通过**：计入 `undeterminable`（无法判定）；只要有任何一份判不出、或根本没有规格／决策文档，结果就是**错误结果**（`isError: true`，文本是报告加上“无法判定”那句），不论有没有发现，与 `cochange` 相同；绝不是干净的答案。结果为 `{ status: "findings" \| "undetermined" \| "clean", scanned, supersededStatuses, findings: [{ rule, file, id, status, statusSource, reason, cites?, edge?, supersededBecause? }], counts, undeterminable: { count, files } }`。`exclude` 与 `egr index --exclude` 用同样的 glob。`dir` 读不到或不是目录时结果是没有报告的错误。见 [CLI.md](./CLI.md)。 |
 | `refs_check` | `paths: string[]` | 检查 Markdown 文件／目录中（反引号包住的）文件路径与符号引用，对照图与 `git` 是否仍然正确。每个引用回报 `present`（仍存在）｜`moved`（附新位置）｜`missing`（找不到）｜`unresolvable`（信息不足，例如引用的是这个图没有索引的另一个 repo——绝不回报成 `missing`）。只读，不会修改图或被检查的文件。抽取规则见 [CLI.md](./CLI.md)。 |

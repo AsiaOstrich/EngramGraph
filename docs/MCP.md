@@ -52,7 +52,8 @@ files, so neither shows up there):
 
 1. npm cannot remove the old package directory. It prints `npm warn cleanup
    Failed to remove some directories … EPERM … ryujs.node` and leaves a renamed
-   copy, `%APPDATA%\npm\node_modules\.engramgraph-<random>`.
+   copy, `%APPDATA%\npm\node_modules\.engramgraph-<random>`. The name is
+   **the same on every upgrade** (npm derives it from the package path).
 2. The `egr-mcp` that is already running keeps serving the **old** version until
    its client restarts it. Nothing tells you.
 
@@ -61,10 +62,20 @@ What to do:
 1. **Close Claude Code (or the MCP client) before upgrading**, so no `egr-mcp`
    process is left. A remaining one shows up in Task Manager as a `node.exe`
    whose command line ends in `…\node_modules\engramgraph\dist\mcp\stdio.js`.
-2. Upgrade, then **delete any leftover `%APPDATA%\npm\node_modules\.engramgraph-*`
-   directory**. It is a renamed copy of the old package and nothing uses it.
-   (If the delete is refused, an `egr-mcp` is still running: close it first.)
-3. Start the client again. To check that the server it started is the new one,
+2. Upgrade.
+3. **After every global upgrade, and before the next one: restart every MCP
+   client, then delete any leftover `%APPDATA%\npm\node_modules\.engramgraph-*`
+   directory.** This is not optional tidying. The leftover is a renamed copy of the
+   old package that nothing uses, but it still holds the `ryujs.node` the old
+   `egr-mcp` has open, and npm renames the installed package onto that same name
+   at the start of the next upgrade. With the leftover in the way the next
+   `npm i -g engramgraph@<version>` fails with `EBUSY: resource busy or locked,
+   copyfile …`, even though you did not change anything. npm rolls back, but the
+   rollback can leave the package half old and half new (JavaScript files from one
+   version, `ryujs.node` from another); in one run with three `egr-mcp` processes
+   open it left an install that could not start (`ERR_MODULE_NOT_FOUND`). If the
+   delete is refused, an `egr-mcp` is still running: close it first.
+4. Check that the restarted client started the new server. To check that the server it started is the new one,
    ask the assistant to run the `doctor` tool and read its **`server`** field. The
    server compares the version it was started with (`runningVersion`, also
    `egrVersion` and the `serverInfo.version` of its `initialize` answer) with the
@@ -86,6 +97,16 @@ What to do:
      with `cannot determine` and says why, and `installedVersion` is `null`). It
      is **not** a pass: compare `egr --version` with `runningVersion` yourself,
      provided the client starts the same `egr-mcp` that is on your `PATH`.
+
+   `server.upgradeLeftovers` lists every `.engramgraph-*` directory beside the
+   installed package (an empty list when there is none). When it is not empty,
+   `message` also says to close the clients, delete those directories and only
+   then upgrade again, whatever `status` is: a `"current"` server with a leftover
+   is the state in which the next upgrade fails. A fresh `npm i -g` next to a
+   leftover prints the same advice from `preinstall`, but npm hides lifecycle-script
+   output by default, so `doctor` is the check to rely on. `preinstall` cannot stop
+   the failing upgrade itself: npm has already failed to rename the package onto
+   the leftover before the new version's `preinstall` exists to run.
 
    A server never reports `"current"` because it could not look. `egr doctor` in
    a terminal has no `server` field: it is a fresh process each time, so it is
@@ -128,7 +149,7 @@ Why, and the terminal command for each, is under "Tools not offered over stdio".
 | `related` *(writable only)* | `seedId`, `depth?`, `limit?` | Structurally important nodes around a seed id (seeded PageRank over all edge types, crosses `Function`/`Spec`/`Module`/`Decision`). "What's connected to X?" **Not offered over stdio** — see below. |
 | `blindspots` | — | Files that parsed partially or failed, from the parse-health manifest — where the graph may be missing nodes/edges. Use after a query reports `indexHealth.possiblyIncomplete` to find out WHAT is missing. `manifestPresent` distinguishes "nothing wrong" from "never measured". |
 | `signatures` | — | The same files grouped by root cause instead of listed individually — turns "584 files" into "1 problem". Use when `blindspots` returns a long list. |
-| `doctor` | — | Which languages are available and why any are not, what was compiled on this machine, which commands need network. Also `server: { runningVersion, installedVersion, status: "current" \| "stale" \| "unknown", message }`: whether this running server is the version installed on disk now (a server started before an upgrade is `"stale"`; see *Windows: upgrading while `egr-mcp` is running*). Does not open the graph, so it answers when indexing itself is what is broken. |
+| `doctor` | — | Which languages are available and why any are not, what was compiled on this machine, which commands need network. Also `server: { runningVersion, installedVersion, status: "current" \| "stale" \| "unknown", message, upgradeLeftovers }`: whether this running server is the version installed on disk now (a server started before an upgrade is `"stale"`; see *Windows: upgrading while `egr-mcp` is running*). Does not open the graph, so it answers when indexing itself is what is broken. |
 | `cochange` | `file`, `repo?`, `commits?`, `maxFilesPerCommit?`, `limit?` | Files that changed in the same commits as `file`, most often first, from the **local git history** (XSPEC-514 R2): "what else did we usually change with this file?" Reads `git`, not the graph. `commits` (default 200) is how many of the file's most recent non-merge commits to look at; a commit that changed more than `maxFilesPerCommit` (default 30) files is skipped, and the answer says how many were used and skipped. Merge commits are not counted and **renames are not followed**. `file` is relative to `repo` (a directory inside the git work tree; default: the server's working directory) or absolute; results are repository-root paths. `existsAtHead` says whether each path is still in `HEAD`'s tree (`false` for a deleted file and for the old path of a renamed one; `null` = git could not list the tree, not known; files are never filtered by it). Result `{ status: "ok", file, commitsExamined, commitsUsed, commitsSkippedLarge, commitsSkippedShallowBoundary, shallow, totalFiles, cochanged: [{ file, count, existsAtHead }], … }`. When it cannot answer (not a git work tree, no commit touches the file, git failed or timed out, every commit skipped) the result is an error (`isError: true`) whose text carries `status: "undetermined"`, the reason and 無法判定 (cannot determine): **never an empty list**. See [CLI.md](./CLI.md). |
 | `lint` | `dir`, `exclude?: string[]` | Two ways the replacement relations of the spec/decision Markdown documents under `dir` disagree with themselves (DEC-140): `superseded-without-declaration` (a document whose status says Superseded or Replaced while no document declares `supersedes: <its id>` in its front matter) and `live-cites-superseded` (a document with a live status that still cites a superseded decision through `IMPACTS` or `DECISION_RELATES`). Reads the documents `egr index <dir> --docs` would read, **never the graph**; no model, writes nothing. A status is the front-matter `status`, else the first status line (for example `> **狀態**: Draft`, or a table row `| 狀態 | Draft |` / `| **狀態** | Draft |`) before the first `## `; each finding says which (`statusSource`). Findings over documents that were all judged are an ordinary result. A document with no status is **not judged and not a pass**: it is counted in `undeterminable` (無法判定), and when any document could not be judged, or no spec/decision document was found, the result is an **error result** (`isError: true`; the text is the report followed by the 無法判定 sentence) whether or not there are findings, as with `cochange`; never a clean answer. Result `{ status: "findings" \| "undetermined" \| "clean", scanned, supersededStatuses, findings: [{ rule, file, id, status, statusSource, reason, cites?, edge?, supersededBecause? }], counts, undeterminable: { count, files } }`. `exclude` takes the same globs as `egr index --exclude`. An unreadable or non-directory `dir` is an error result without a report. See [CLI.md](./CLI.md). |
 | `refs_check` | `paths: string[]` | Check file-path/symbol references (backtick-quoted) inside Markdown files/directories against the graph and `git`. Each reference is `present` \| `moved` (+ new location) \| `missing` \| `unresolvable` (e.g. a reference into a repo this graph does not index — never reported as `missing`). Read-only; never modifies the graph or the files checked. See [CLI.md](./CLI.md) for the extraction rule. |

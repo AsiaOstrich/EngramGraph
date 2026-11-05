@@ -44,6 +44,9 @@
  * time — a command someone types cannot be suppressed by a package manager.
  */
 
+import { readdirSync, existsSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+
 import { compiledFromSourceOn, currentPlatform } from "./language-support.js";
 
 const DOCS =
@@ -114,6 +117,82 @@ export function preflightMessage(platform = currentPlatform()) {
 }
 
 /**
+ * Directories npm names `.engramgraph-<hash>` inside a `node_modules`. // implements issue #26
+ *
+ * When npm replaces a package it first renames the installed copy to
+ * `.<name>-<hash>`, unpacks the new one, and deletes the renamed copy at the end.
+ * The hash is the first 8 characters of the SHA-1 of the package's path
+ * (`@npmcli/arborist/lib/retire-path.js`), so it is the SAME name on every
+ * upgrade. On Windows the delete fails while a running `egr-mcp` holds
+ * `ryugraph\ryujs.node` open, the directory stays, and the next upgrade then has
+ * to rename onto that name and fails with EBUSY (issue #26).
+ *
+ * **What this can and cannot do — measured with npm 10.9.9 in a scratch
+ * `--prefix`, 2026-11-05.** `preinstall` runs from the new package's own
+ * directory, AFTER npm has retired the old copy (retire is the first reify step,
+ * lifecycle scripts run in the last), so:
+ *
+ *  - It can NOT stop the failing upgrade. When the leftover is in the way, npm
+ *    fails at the rename, before the new package's `preinstall` exists to run.
+ *    (Reproduced with a non-empty `.engramgraph-<hash>` in place: ENOTEMPTY on
+ *    macOS, EBUSY on Windows; the hook printed nothing.)
+ *  - On every ordinary upgrade it SEES npm's own in-flight copy of the previous
+ *    version, same name, a whole package tree with a `package.json` at its root.
+ *    That is not a leftover; reporting it would warn on every upgrade. A tree
+ *    that has lost its `package.json` is not a retired copy any more, so only
+ *    those are reported. (Windows deletes what it can and keeps the locked file,
+ *    but exactly what remains was not observed. If a leftover still has its
+ *    `package.json`, this stays silent: a missed warning, never a false one.)
+ *  - Where it does reach someone is a FRESH install next to a leftover (after
+ *    `npm uninstall -g`, or after the package directory was removed by hand),
+ *    and — like all of this file — only when npm shows script output.
+ *
+ * It warns and nothing else. Pure, so a test can call it without an install.
+ *
+ * @param {string} [packageDir] The directory the hook runs in (the package root).
+ * @returns {string[]} Names of leftover directories next to it, sorted.
+ */
+export function findUpgradeLeftovers(packageDir = process.cwd()) {
+  if (basename(packageDir) !== "engramgraph") return []; // not an installed copy (repo checkout, CI)
+  const parent = dirname(packageDir);
+  if (basename(parent) !== "node_modules") return [];
+  return readdirSync(parent, { withFileTypes: true })
+    .filter(
+      (e) =>
+        e.isDirectory() &&
+        e.name.startsWith(".engramgraph-") &&
+        !existsSync(join(parent, e.name, "package.json")),
+    )
+    .map((e) => e.name)
+    .sort();
+}
+
+/**
+ * The warning for the leftovers `findUpgradeLeftovers` found, or `null` when
+ * there are none.
+ *
+ * @param {string[]} names
+ * @param {string} [packageDir]
+ * @returns {string | null}
+ */
+export function leftoverMessage(names, packageDir = process.cwd()) {
+  if (names.length === 0) return null;
+  const parent = dirname(packageDir);
+  return [
+    "",
+    `engramgraph: ${names.length === 1 ? "an earlier upgrade left" : "earlier upgrades left"} ${names.join(", ")} in ${parent}.`,
+    "npm renames the installed copy to that name while it upgrades and deletes it at the end;",
+    "on Windows it cannot while a running egr-mcp holds ryugraph\\ryujs.node open.",
+    "Left there, the next upgrade can fail with EBUSY on Windows and leave the install half old, half new.",
+    "",
+    "This install carries on. Before the next upgrade: close every MCP client that runs",
+    `egr-mcp (for example Claude Code), then delete ${names.map((n) => join(parent, n)).join(", ")}.`,
+    "Details: docs/MCP.md, \"Windows: upgrading while egr-mcp is running\".",
+    "",
+  ].join("\n");
+}
+
+/**
  * Only speak when run as the install hook, so importing this module from a
  * test doesn't print to the terminal.
  */
@@ -128,5 +207,14 @@ if (RUN_AS_HOOK) {
     // and get out of the way — npm proceeds exactly as it would have.
     const reason = err instanceof Error ? err.message : String(err);
     console.error(`engramgraph: install preflight skipped (${reason})`);
+  }
+  // Its own try: a failure here must not hide the platform notice above, and a
+  // failure above must not hide this one. Still exit 0 either way.
+  try {
+    const message = leftoverMessage(findUpgradeLeftovers());
+    if (message !== null) console.error(message);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(`engramgraph: leftover check skipped (${reason})`);
   }
 }

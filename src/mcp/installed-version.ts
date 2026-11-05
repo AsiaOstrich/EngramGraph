@@ -24,8 +24,8 @@
  * `current`: a check that says "fine" whenever it cannot look is the failure this
  * exists to remove.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type ServerVersionStatus = "current" | "stale" | "unknown";
@@ -42,19 +42,25 @@ export interface ServerVersionReport {
    */
   status: ServerVersionStatus;
   message: string;
+  /**
+   * Names of `.engramgraph-<hash>` directories that sit next to the installed package, left by an
+   * earlier `npm i -g` (issue #26). Empty when there are none, and when the installed package could
+   * not be located (`status: "unknown"`). When it is not empty, `message` says what to do.
+   */
+  upgradeLeftovers: string[];
 }
 
 const PACKAGE_NAME = "engramgraph";
 
-type Installed = { version: string } | { problem: string };
+type Installed = { version: string; dir: string } | { problem: string };
 
 /**
- * Read the version of the `engramgraph` package that contains `startDir`, from disk, now.
+ * Find the `engramgraph` package that contains `startDir`, and read its version from disk, now.
  * Walks up from `startDir`; a package.json whose name is not `engramgraph` is passed over.
  * The nearest package.json that cannot be parsed is a problem, not a reason to keep
  * walking (a damaged file is not evidence that a package further up is the right one).
  */
-export function readInstalledVersion(startDir: string): Installed {
+function locateInstalled(startDir: string): Installed {
   let dir = startDir;
   for (;;) {
     const file = join(dir, "package.json");
@@ -69,7 +75,7 @@ export function readInstalledVersion(startDir: string): Installed {
       if (obj === undefined) return { problem: `${file} is not a package.json object` };
       if (obj.name === PACKAGE_NAME) {
         return typeof obj.version === "string" && obj.version !== ""
-          ? { version: obj.version }
+          ? { version: obj.version, dir }
           : { problem: `${file} has no version` };
       }
     }
@@ -77,6 +83,49 @@ export function readInstalledVersion(startDir: string): Installed {
     if (parent === dir) return { problem: `no ${PACKAGE_NAME} package.json found above ${startDir}` };
     dir = parent;
   }
+}
+
+/** The version of the `engramgraph` package that contains `startDir`, from disk, now. */
+export function readInstalledVersion(startDir: string): { version: string } | { problem: string } {
+  const found = locateInstalled(startDir);
+  return "problem" in found ? found : { version: found.version };
+}
+
+/**
+ * `.engramgraph-<hash>` directories next to the installed package `packageDir`. // implements issue #26
+ *
+ * npm renames the installed copy to `.<name>-<hash>` while it upgrades and deletes it at the end;
+ * the hash is a function of the package's path, so it is the same name every time. On Windows the
+ * delete fails while a running `egr-mcp` holds `ryugraph\ryujs.node`, the directory stays, and the
+ * next upgrade has to rename onto that name and fails with EBUSY.
+ *
+ * Unlike the install-time check (`preinstall.js`), this runs when no upgrade is in flight, so every
+ * such directory is a leftover and none needs to be told apart from npm's own copy. Only the
+ * package's own `node_modules` is looked at (a checkout or an `npm link` has none and reports
+ * nothing). An unreadable directory reports nothing rather than failing `doctor`, which must
+ * answer when other things are broken.
+ */
+export function findUpgradeLeftovers(packageDir: string): string[] {
+  const parent = dirname(packageDir);
+  if (basename(packageDir) !== PACKAGE_NAME || basename(parent) !== "node_modules") return [];
+  try {
+    return readdirSync(parent, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name.startsWith(`.${PACKAGE_NAME}-`))
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+function leftoverSentence(names: string[], packageDir: string): string {
+  const parent = dirname(packageDir);
+  return (
+    ` A previous upgrade left ${names.join(", ")} next to the installed package, in ${parent}. ` +
+    "npm moves the installed copy there while it upgrades and deletes it at the end; on Windows it cannot while an egr-mcp holds a file in it open, and the next upgrade then fails with EBUSY. " +
+    "Close every MCP client that runs egr-mcp (for example Claude Code), delete " +
+    `${names.map((n) => join(parent, n)).join(", ")}, and only then upgrade again.`
+  );
 }
 
 /**
@@ -88,33 +137,38 @@ export function checkServerVersion(
   runningVersion: string,
   startDir: string = dirname(fileURLToPath(import.meta.url)),
 ): ServerVersionReport {
-  const installed = readInstalledVersion(startDir);
+  const installed = locateInstalled(startDir);
   if ("problem" in installed) {
     return {
       runningVersion,
       installedVersion: null,
       status: "unknown",
+      upgradeLeftovers: [],
       message:
         `cannot determine whether this MCP server is current: it is running version ${runningVersion}, ` +
         `and the installed version could not be read (${installed.problem}). ` +
         "Compare `egr --version` with the running version above (if the client starts the same egr-mcp that is on your PATH); if they differ, restart the MCP client (for example Claude Code).",
     };
   }
+  const upgradeLeftovers = findUpgradeLeftovers(installed.dir);
+  const leftover = upgradeLeftovers.length === 0 ? "" : leftoverSentence(upgradeLeftovers, installed.dir);
   if (installed.version === runningVersion) {
     return {
       runningVersion,
       installedVersion: installed.version,
       status: "current",
-      message: `this MCP server is running version ${runningVersion}, the version that is installed.`,
+      upgradeLeftovers,
+      message: `this MCP server is running version ${runningVersion}, the version that is installed.${leftover}`,
     };
   }
   return {
     runningVersion,
     installedVersion: installed.version,
     status: "stale",
+    upgradeLeftovers,
     message:
       `this MCP server is still running version ${runningVersion}, but version ${installed.version} is installed. ` +
       "The server was started before the package on disk changed and keeps serving the version it started with: " +
-      "restart the MCP client (for example Claude Code) so that it starts the installed one.",
+      `restart the MCP client (for example Claude Code) so that it starts the installed one.${leftover}`,
   };
 }
