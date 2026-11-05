@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1-beta.2] - 2026-11-05
+
+*Preview on the `next` dist-tag. One wording fix on top of 0.15.1-beta.1, from its Windows retest: `doctor` says the next upgrade can fail with EBUSY while an `egr-mcp` holds the leftover open.*
+
 ### Changed
 
 - **`doctor` now says the next upgrade *can* fail with EBUSY while an `egr-mcp` still holds the leftover open, instead of saying it always fails**, matching the `preinstall` warning. The Windows retest of 0.15.1-beta.1 had a leftover in place and an upgrade that still succeeded, because nothing in the leftover was locked any more.
