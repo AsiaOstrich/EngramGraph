@@ -30,7 +30,7 @@ See `.standards/` for detailed coding standards.
 - Follow the testing pyramid: Unit (70%) > Integration (20%) > E2E (10%)
 
 <!-- UDS:STANDARDS:START -->
-<!-- WARNING: This block is managed by UDS (universal-dev-standards). DO NOT manually edit. Use 'npx uds init' or 'npx uds update' to modify. -->
+<!-- WARNING: This block is managed by UDS. DO NOT manually edit. Use 'npx universal-dev-standards init' or 'npx universal-dev-standards update' to modify. -->
 > **This block is an index, not the standards.** The rules are NOT reproduced here.
 > Before acting on anything below, open the relevant file under `.standards/` and
 > follow its contents. Working from this block alone means working without the
@@ -61,6 +61,7 @@ All standards are in `.standards/`. Installed standards:
 - `.standards/commit-message.ai.yaml` — commit-message
 - `.standards/context-aware-loading.ai.yaml` — context-aware-loading
 - `.standards/database-standards.ai.yaml` — database-standards
+- `.standards/deferred-item-exit.ai.yaml` — deferred-item-exit
 - `.standards/deployment-standards.ai.yaml` — deployment-standards
 - `.standards/developer-memory.ai.yaml` — developer-memory
 - `.standards/documentation-lifecycle.ai.yaml` — documentation-lifecycle
@@ -109,8 +110,6 @@ All standards are in `.standards/`. Installed standards:
 - `.standards/options/integration-testing.ai.yaml` — integration-testing
 - `.standards/options/system-testing.ai.yaml` — system-testing
 - `.standards/options/e2e-testing.ai.yaml` — e2e-testing
-- `.standards/deferred-item-exit.ai.yaml` — deferred-item-exit
-- `.standards/open-work-tracking.ai.yaml` — open-work-tracking
 <!-- UDS:STANDARDS:END -->
 
 ## Important Notes

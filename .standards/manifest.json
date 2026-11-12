@@ -2,8 +2,8 @@
   "version": "3.4.0",
   "upstream": {
     "repo": "AsiaOstrich/universal-dev-standards",
-    "version": "6.13.1",
-    "installed": "2026-09-28"
+    "version": "6.15.0",
+    "installed": "2026-11-12"
   },
   "format": "ai",
   "contentMode": "minimal",
@@ -49,7 +49,6 @@
     "mock-boundary",
     "model-selection",
     "mutation-testing",
-    "open-work-tracking",
     "packaging-standards",
     "performance-standards",
     "project-context-memory",
@@ -192,9 +191,9 @@
       "installedAt": "2026-09-28T09:54:01.897Z"
     },
     ".standards/commit-message.ai.yaml": {
-      "hash": "sha256:d2674b92b4c6f23ac30820f047b7ae87406dea3c5592613698d517cd5c7865e6",
-      "size": 4188,
-      "installedAt": "2026-09-28T09:54:01.897Z"
+      "hash": "sha256:edb4c516f0e37d68999f6ac9c408d4312730c45508e9d4fd40e2b46a9e24c942",
+      "size": 5298,
+      "installedAt": "2026-11-12T14:17:26.971Z"
     },
     ".standards/options/english.ai.yaml": {
       "hash": "sha256:2c1f53cf847a8b874efa95e678a61744e25491cc491108e40ad2898dd9074ce8",
@@ -202,9 +201,9 @@
       "installedAt": "2026-09-28T09:54:01.897Z"
     },
     ".standards/checkin-standards.ai.yaml": {
-      "hash": "sha256:e34591acc0e374b294b54d33ecf5f306f3bfc1668407a12a6e64b5d32c7403b0",
-      "size": 6490,
-      "installedAt": "2026-09-28T09:54:01.897Z"
+      "hash": "sha256:4f2319c14fa58eb80011c5be404a62332f0c0b7b7519d5d3d0bc8983939451fa",
+      "size": 7763,
+      "installedAt": "2026-11-12T14:17:26.970Z"
     },
     ".standards/deployment-standards.ai.yaml": {
       "hash": "sha256:23634a0097fc190413a1e9ddfb34c071f4f29d003ec34c294c6f977ebdd24e63",
@@ -232,9 +231,9 @@
       "installedAt": "2026-09-28T09:54:01.897Z"
     },
     ".standards/code-review.ai.yaml": {
-      "hash": "sha256:cff4618c462b89b0215db58ae3feeb514afb715421be689277377387e5b26bff",
-      "size": 5199,
-      "installedAt": "2026-09-28T09:54:01.897Z"
+      "hash": "sha256:3bed6833dd18b156854ac24d1cfab5eb93b7d350750be4a0958b0c8e47399001",
+      "size": 6263,
+      "installedAt": "2026-11-12T14:17:26.971Z"
     },
     ".standards/git-workflow.ai.yaml": {
       "hash": "sha256:a8587127cf1e4be81a165642edb79770cec1f83a02adc2fd4f16441a47bd7b2f",
@@ -297,9 +296,9 @@
       "installedAt": "2026-09-28T09:54:01.897Z"
     },
     ".standards/full-coverage-testing.ai.yaml": {
-      "hash": "sha256:80ccc6cba98469ecbcc76dd96ef417f40a4a2c83e8b82d28c50c7d58404de371",
-      "size": 11797,
-      "installedAt": "2026-09-28T09:54:01.897Z"
+      "hash": "sha256:c77a4a76e212a0f2f848abc5b40df0976ad0fa431c02dbc11390076f9bcaec49",
+      "size": 19995,
+      "installedAt": "2026-11-12T14:17:26.971Z"
     },
     ".standards/documentation-structure.ai.yaml": {
       "hash": "sha256:b698b62ecc67a62b246ffc65a2ed5d39571042a252a41c095f001e607c1086b4",
@@ -352,9 +351,9 @@
       "installedAt": "2026-09-28T09:54:01.897Z"
     },
     ".standards/mock-boundary.ai.yaml": {
-      "hash": "sha256:faf664f1fdac8577c0ac0671434f65dcf62fc46c53caae8ad1f591297ce9bf3f",
-      "size": 20644,
-      "installedAt": "2026-09-28T09:54:01.897Z"
+      "hash": "sha256:e635c2ccc3c802f55e8011d358f39013e8db5ed803064635482a9372ea903b0d",
+      "size": 29881,
+      "installedAt": "2026-11-12T14:17:26.971Z"
     },
     ".standards/security-testing.ai.yaml": {
       "hash": "sha256:c08bf6bd96fe152042b2529353b26e559517653837fb4bfaf35cc3e0a9012baf",
@@ -402,9 +401,9 @@
       "installedAt": "2026-09-28T09:54:01.897Z"
     },
     ".standards/ai-response-navigation.ai.yaml": {
-      "hash": "sha256:71f6ff37f3874b18a0ecc2860d3f15301c220627f71d0a3a11cf8920796c1167",
-      "size": 8342,
-      "installedAt": "2026-09-28T09:54:01.897Z"
+      "hash": "sha256:4c390d9ffe7be05d6bd669c7e2a8a334b7ca2cb9ac823a4afa4b8a3fce2c592f",
+      "size": 11354,
+      "installedAt": "2026-11-12T14:17:26.970Z"
     },
     ".standards/virtual-organization-standards.ai.yaml": {
       "hash": "sha256:2f634b60db4ffe62a77b374d07bd788785cada6333ce2b6332409734fe073214",
@@ -437,14 +436,14 @@
       "installedAt": "2026-09-28T09:54:01.897Z"
     },
     ".standards/developer-memory.ai.yaml": {
-      "hash": "sha256:54dd0b41c12a1e341d3eff50d0708638424055672372af961b31d63d17493e12",
-      "size": 10696,
-      "installedAt": "2026-09-28T09:54:01.897Z"
+      "hash": "sha256:ef060cac3e7729bad6c4331210a2849bb1ec9b7e6626818d7dcee120d82f2a24",
+      "size": 11383,
+      "installedAt": "2026-11-12T14:17:26.971Z"
     },
     ".standards/project-context-memory.ai.yaml": {
-      "hash": "sha256:3002ef8bb21b8e5342b834c4b5ba2387e2b54f91e24c402b06f7522849590422",
-      "size": 4405,
-      "installedAt": "2026-09-28T09:54:01.897Z"
+      "hash": "sha256:347051a1c7ca94d2b9fa226c19e467d707b649a1d563b71cb88168f29e4fb5d1",
+      "size": 5075,
+      "installedAt": "2026-11-12T14:17:26.971Z"
     },
     ".standards/knowledge-graph-memory.ai.yaml": {
       "hash": "sha256:325e80786748002db694c927239550c8983fde4597efd4de1a3deac2004fc3ce",
@@ -545,22 +544,16 @@
       "hash": "sha256:f41d9b858e6d85e4937506ccf105954f0e32a1166d3f668e19bf0cc22fd667e0",
       "size": 14030,
       "installedAt": "2026-09-28T09:54:01.897Z"
-    },
-    ".standards/open-work-tracking.ai.yaml": {
-      "hash": "sha256:d534bdb3afbadeabbb6899ce3764f2ba85023b57e51a68f0c9a85db946cdf911",
-      "size": 14510,
-      "installedAt": "2026-09-28T09:54:01.897Z"
     }
   },
   "skillHashes": {},
   "commandHashes": {},
   "integrationBlockHashes": {
     "AGENTS.md": {
-      "blockHash": "sha256:eae17192b766c24aed74765494ad603f6d6246a2c58a76b7d99196036f41b7f5",
-      "blockSize": 5285,
-      "fullHash": "sha256:cb0a689600feecb32957c5f303a1ba573366bf1f7ec88d2afc8a89349fc43312",
-      "fullSize": 6310,
-      "installedAt": "2026-09-28T09:54:01.897Z"
+      "blockHash": "sha256:42644ce22f8cdd22848c3382d83cc4fe11a1db842b970870453b2dfb2c2f6a41",
+      "blockSize": 5234,
+      "fullHash": "sha256:b615e5cf285cb0f1fec2f273b85bf1a781ae7a386aa898c7efe871ff8b5136f0",
+      "fullSize": 6259
     }
   },
   "provenance": {
