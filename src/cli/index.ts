@@ -18,7 +18,7 @@ import { cmdIndex, cmdCallersAnswer, cmdCalleesAnswer, cmdImplementers, cmdImple
 import type { RefCheckResult } from "./refs-check.js";
 import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
-import { readIndexHealth, describeDefinitionScope, type IndexHealth } from "../code-graph/index.js";
+import { readIndexHealth, describeDefinitionScope, explore, formatExplore, DEFAULT_EXPLORE_LIMIT, DEFAULT_EXPLORE_MAX_CHARS, type IndexHealth } from "../code-graph/index.js";
 import { manifestPathForDb } from "../code-graph/parse-manifest.js";
 import { formatLint } from "../knowledge-graph/lint.js";
 import { unresolvedIdClusters, type DocIdConflict, type ReplacedDocument } from "../knowledge-graph/parser.js";
@@ -101,6 +101,27 @@ Commands:
                                   --include-unclustered
   related <node-id> [--depth N] [--limit N]
                                   Nodes important *around* a seed (seeded PageRank approx.)
+  explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]
+                                  When you don't have a symbol name yet (how
+                                  does X work / where is Y handled), run this
+                                  first, before grep: takes a sentence or a few
+                                  words (not an exact name) and prints the
+                                  symbols whose names or paths match, the
+                                  functions they call and are called by (seeded
+                                  PageRank around the matches), the call paths
+                                  among them and each one's source, in one
+                                  answer. No model. --path limits the search to
+                                  files under a directory or file, relative to
+                                  the directory given to "egr index" (as the
+                                  file paths in the output). --limit (default
+                                  12, at most 50) is the number of symbols
+                                  listed. --max-chars (default 6000, 400 to
+                                  200000; a value outside that is clamped)
+                                  bounds the WHOLE output; what does not fit is
+                                  named under "Not expanded", never dropped
+                                  silently. "NO MATCH" means no symbol or path
+                                  carried the words, not that the code does not
+                                  exist. Read-only.
   refs check <path...>            Check file-path/symbol references (in
                                   backticks) inside Markdown files or
                                   directories against the graph + git —
@@ -312,6 +333,8 @@ async function main(): Promise<void> {
       "max-files": { type: "string" },
       repo: { type: "string" },
       file: { type: "string" },
+      path: { type: "string" },
+      "max-chars": { type: "string" },
     },
   });
 
@@ -887,6 +910,25 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
       if (!a1) throw new Error("related requires a <node-id>");
       const rows = await cmdRelated(conn, a1, num(values.depth, 2), num(values.limit, 10));
       out(rows, values.json, (d) => `related(${a1}):\n${fmtNodes(d as Array<{ name: string; label: string; rank: number }>)}`);
+      break;
+    }
+    case "explore": {
+      // The topic is everything after the command, so an unquoted sentence works too.
+      const topic = positionals.slice(1).join(" ").trim();
+      if (!topic) throw new Error('explore requires a <topic> (a sentence or a few words, for example: egr explore "how does it route requests")');
+      const posInt = (flag: string, v: string | undefined, d: number): number => {
+        if (v === undefined) return d;
+        if (!/^[1-9][0-9]*$/.test(v)) throw new Error(`${flag} must be a positive integer (got "${v}")`);
+        return Number(v);
+      };
+      const limit = posInt("--limit", values.limit, DEFAULT_EXPLORE_LIMIT);
+      const maxChars = posInt("--max-chars", values["max-chars"], DEFAULT_EXPLORE_MAX_CHARS);
+      // The size limit is checked against what is printed: the JSON for --json, the text otherwise, plus the final newline.
+      const measure = values.json
+        ? (r: Parameters<typeof formatExplore>[0]) => JSON.stringify(r, null, 2).length + 1
+        : (r: Parameters<typeof formatExplore>[0]) => formatExplore(r).length + 1;
+      const r = await explore(conn, { topic, path: values.path, limit, maxChars, manifestPath: manifestPathForDb(resolveDbPath(loc)), measure });
+      out(r, values.json, (d) => formatExplore(d as typeof r));
       break;
     }
     case "refs": {

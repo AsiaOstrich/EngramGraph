@@ -268,6 +268,50 @@ indexer sees but `egr` deliberately skips), `definitionsResolved` /
 matched but resolution came back at zero, the human-readable output adds a
 `WARNING` line rather than silently reporting an all-zero result as success.
 
+### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]`
+
+When you don't have a symbol name yet (how does X work / where is Y handled), run this first, before grep (XSPEC-531). Every other
+query needs a name you already have (a function, a spec id); this takes the
+sentence. `<topic>` is a sentence or a few words (everything after `explore`, so
+quotes are optional). No model is used. It prints, in one answer:
+
+1. the symbols whose **names or file paths** match the words (camelCase,
+   snake_case and plurals are folded, question words such as "how" and "does"
+   are dropped);
+2. the functions they call and are called by, two hops out, ranked by seeded
+   PageRank around the matches;
+3. the call paths among the listed symbols (`ServeHTTP → handleHTTPRequest → Next`);
+4. each symbol's source, read from the file between its recorded line and the
+   next definition in that file (at most 40 lines).
+
+```bash
+egr explore "how does it route requests through its middleware chain"
+egr explore "where is the session token validated" --path src/auth --max-chars 3000
+```
+
+`--path` limits the search to files under a directory or a file, relative to the
+directory you gave to `egr index` (the same form as the file paths in the
+output). `--limit` (default 12, at most 50) is the number of symbols listed.
+**`--max-chars` (default 6000, minimum 400, maximum 200000) bounds the whole
+output**, in text and in `--json`. A value outside these ranges is clamped, not
+an error: `--limit 100` lists 50 symbols, `--max-chars 100` is raised to 400 and
+`--max-chars 500000` is lowered to 200000 (`--json` says which in `maxChars`). When the answer does not fit, source is left out from the least
+relevant symbol first, then symbols, and a `Not expanded` section names what was
+left out (`--json`: `notExpanded`, with `truncated: true`). Nothing is cut
+silently. The last section, `Next:`, gives point queries (`egr callers <name>`) to continue with.
+
+`NO MATCH` (`--json`: `status: "no-match"`, exit `0`) means no symbol or file
+path carried the words. It is not the same as "the code does not do this": the
+name may use other words, or the code may not be indexed. A symbol shown without
+source says why: the file is not known (a graph filled through MCP `index_code`
+has no index root), it has moved, or it has changed since it was indexed (run
+`egr index` again). A topic with no searchable word, an empty graph, or a bad
+`--limit` / `--max-chars` exits `1`.
+
+Read-only: plain `MATCH` queries and source reads. It does not use `related`
+(which installs the algo extension and writes), so it works while another
+process reads the graph and needs no network.
+
 ### `callers <symbol> [--depth N] [--file <path>]`
 
 Functions that (transitively, up to `--depth`, default 1) call `<symbol>`.

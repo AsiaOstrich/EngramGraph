@@ -124,7 +124,7 @@ command/args/env 都一樣：
 
 ## 工具
 
-下表列出全部十四個。**stdio server（`egr-mcp`、`egr mcp`）是唯讀的，只提供其中十個**：除了 `index_code`、
+下表列出全部十五個。**stdio server（`egr-mcp`、`egr mcp`）是唯讀的，只提供其中十一個**：除了 `index_code`、
 `index_docs`、`ingest_feedback`、`related` 之外的所有工具；這四個會寫入圖，下表標為*僅可寫入模式*。
 stdio 的 `tools/list` 不含這四個（0.13.0-beta.4 會列出它們、再在每次呼叫時拒絕）；它們只存在於以可寫入連線建立的
 server，例如嵌入式使用的 `createMcpServer(conn)`。原因與各自對應的終端機指令見下方「透過 stdio 不提供的工具」。
@@ -139,6 +139,7 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因與各自對�
 | `implementers` | `specId` | 宣告 `// implements <specId>` 的檔案及其定義的函式。「哪些程式碼實作了這個 spec？」讀取 `IMPLEMENTS(Module→Spec)` + `DEFINES`。 |
 | `implemented_specs` | `moduleId` | 一個檔案宣告自己實作了哪些 spec。「這段程式碼受哪個 spec 規範？」`moduleId` 是該檔案被索引時的路徑。讀取 `IMPLEMENTS(Module→Spec)`。 |
 | `related` *(僅可寫入模式)* | `seedId`、`depth?`、`limit?` | 從某個種子 id 出發、結構上重要的節點（對所有邊型跑 seeded PageRank，橫跨 `Function`/`Spec`/`Module`/`Decision`）。「有什麼跟 X 相關？」**透過 stdio 不提供**——見下方。 |
+| `explore` | `topic`、`path?`、`limit?`、`maxChars?` | **還沒有符號名稱時（X 怎麼運作／Y 在哪裡處理），先於 grep 呼叫它**（XSPEC-531）：輸入白話主題（幾個字詞，不是精確名稱），一次回傳名稱或檔案路徑相符的符號、它們呼叫與被呼叫的函式（以相符處為起點的 seeded PageRank 排序）、這些符號之間的呼叫路徑（`callPaths`，`A → B → C`），以及每個符號的原始碼（`snippet`）。不使用模型。`path` 把搜尋限制在某個目錄或檔案之下，路徑相對於 `egr index` 所給的目錄（與回答中顯示的檔案路徑同一種形式）；`limit`（預設 12、最大 50：更大的值會被降到 50，不是錯誤）是列出的符號數。**`maxChars`（預設 6000、下限 400、上限 200000：超出範圍的值會被夾住，不是錯誤，回傳的 `maxChars` 寫明實際用了多少）限制整份回答的長度**；放不下時，先從最不相關的符號開始拿掉原始碼，再拿掉符號，並由 `notExpanded` 列出被拿掉的內容（`symbols`、`snippets`，以及經 `IMPORTS` 相鄰的 `files`，各附 `…Total`），同時 `truncated` 為 `true`：絕不靜默截斷。沒有 `snippet` 的符號會有 `snippetNote`（檔案位置未知、已移動，或索引之後已被修改）。`status: "no-match"` 表示沒有任何符號或檔案路徑含這些字詞，這不等於程式碼不存在。`next` 列出可接著用的點查詢（`call_chain`）。主題沒有可搜尋的字詞、或圖中沒有任何程式碼，會回傳錯誤結果。唯讀：只做 `MATCH` 查詢與讀原始碼；**不**使用會寫入的 `related`，所以 stdio server 可以提供它。原始碼是依 parse-health manifest 記錄的檔案讀取，所以只經 `index_code` 填入的圖沒有原始碼可顯示。見 [CLI.md](./CLI.md)。 |
 | `blindspots` | — | 解析不完全或失敗的檔案（來自 parse-health manifest）——圖可能缺少節點／邊的地方。當查詢回報 `indexHealth.possiblyIncomplete` 時用它查出**缺的是什麼**。`manifestPresent` 用來區分「沒有問題」與「從未量測過」。 |
 | `signatures` | — | 同一批檔案改以**根本原因**分組而非逐一列出——把「584 個檔案」變成「1 個問題」。當 `blindspots` 回傳很長的清單時使用。 |
 | `doctor` | — | 哪些語言可用、不可用的原因、這台機器上有哪些是自行編譯的、哪些指令需要網路。另有 `server: { runningVersion, installedVersion, status: "current" \| "stale" \| "unknown", message, upgradeLeftovers }`：這個執行中的 server 是否就是現在磁碟上已安裝的版本（升級之前就啟動的 server 是 `"stale"`；見*Windows：`egr-mcp` 執行中升級*）。**不開啟圖**，所以在「索引本身壞掉」時仍然回答得出來。 |
@@ -206,6 +207,7 @@ server 會在下一次查詢時看到結果——不需要重新啟動。在第�
 | `refs_check` | true | false | true | false |
 | `cochange` | true | false | true | false |
 | `lint` | true | false | true | false |
+| `explore` | true | false | true | false |
 
 全部都不連網（`openWorldHint: false`）——圖、檔案系統與 `git` 都是本機的。`cochange` 是唯讀的，因為它只執行 `git rev-parse` 與 `git log`（帶 `GIT_OPTIONAL_LOCKS=0`），什麼都不寫；`lint` 是唯讀的，因為它只走訪一個目錄並在記憶體內解析其中的 Markdown；兩者都是讀實作確認的，不是從名字推的。
 只有 `ingest_feedback` 不是冪等的：它套用的是信心度的**增量**，同一組參數呼叫兩次

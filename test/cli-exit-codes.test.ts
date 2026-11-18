@@ -308,6 +308,8 @@ describe("XSPEC-457 R2: the lock — every command that opens the graph fails wi
     ["related (id that is not in the graph)", ["related", "no-such-id"]],
     // The note cites `a.ts` and `beta`, so this command must reach the graph to answer.
     ["refs check", ["refs", "check", "PROJ/docs/note.md"]],
+    // XSPEC-531: a topic that matches, so the command must reach the graph; a locked graph is an error, not "no match".
+    ["explore", ["explore", "where is beta called"]],
   ];
 
   it.each(LOCKED)("%s exits non-zero and names the lock, not an empty result", (_name, argv) => {
@@ -329,7 +331,7 @@ describe("XSPEC-457 R2: the command table covers every command the CLI has", () 
     // Commands whose failure behaviour is exercised in this file (by name in a test above or in LOCKED).
     const covered = new Set([
       "index", "callers", "callees", "implementers", "implemented-by", "impact", "feedback", "top",
-      "god-nodes", "communities", "related", "refs",
+      "god-nodes", "communities", "related", "refs", "explore",
     ]);
     // Not graph commands that can fail on a graph: they read files / report the install / run until killed.
     const exempt = new Set([

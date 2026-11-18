@@ -8,9 +8,9 @@
  *
  * Tools: index_code, index_docs, call_chain, impact_analysis, ingest_feedback,
  * implementers, implemented_specs, related, blindspots, signatures, doctor,
- * refs_check, cochange, lint.
+ * refs_check, cochange, lint, explore.
  *
- * ## A read-only server offers ten tools, not fourteen (XSPEC-481 R3)
+ * ## A read-only server offers eleven tools, not fifteen (XSPEC-481 R3, XSPEC-531)
  *
  * `index_code`, `index_docs`, `ingest_feedback` and `related` write to the graph
  * (the last one by installing the algo extension and building a projected
@@ -20,8 +20,10 @@
  * Now a read-only source (`GraphSource.readOnly`, which is what stdio uses) does
  * not offer them at all, and says in the server `instructions` which `egr`
  * command does each job. A writable source — a bare connection, tests,
- * embedding — still has all fourteen (`cochange` reads git and `lint` reads
- * documents, not the graph, so both kinds of server have them).
+ * embedding — still has all fifteen (`cochange` reads git and `lint` reads
+ * documents, not the graph, so both kinds of server have them). `explore`
+ * (XSPEC-531) reads the graph with plain MATCH queries and ranks in process, so
+ * it is offered on both; it does not use `related`, which is the writer.
  *
  * ## The graph is held per query, not per session (XSPEC-457 R1)
  *
@@ -58,6 +60,11 @@ import {
   implementers,
   implementedSpecs,
   readIndexHealth,
+  explore,
+  DEFAULT_EXPLORE_LIMIT,
+  DEFAULT_EXPLORE_MAX_CHARS,
+  MAX_EXPLORE_LIMIT,
+  MAX_EXPLORE_MAX_CHARS,
   NotInGraphError,
   requireFunction,
   requireSpec,
@@ -211,6 +218,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       title: "Call chain",
       description:
         "Who calls / is called by a function symbol — 'what breaks if I change X?'. direction: callers | callees | both. " +
+        "Needs the function's name: if all you have is a question (\"how does X work\"), call `explore` first. " +
         "A name several functions share is answered, not refused: the result lists every definition (`definitions`, with file and line) " +
         "and `mergedDefinitions` says how many the answer combines — more than 1 means the callers of different functions are in one list (overloads of one class appear as several entries with the same id and different lines). " +
         "Pass `file` (a path, or its trailing part if unique) to ask about the definition(s) in that file only; a file with no such definition is an error, not an empty list.",
@@ -322,7 +330,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     {
       title: "Implementers (spec → code)",
       description:
-        "Files that declare `// implements <specId>` and the functions they define — 'which code implements this spec?'. Reads IMPLEMENTS(Module→Spec) + DEFINES.",
+        "Files that declare `// implements <specId>` and the functions they define — 'which code implements this spec?'. Reads IMPLEMENTS(Module→Spec) + DEFINES. " +
+        "To find the code behind a topic when you have no spec id, call `explore`.",
       inputSchema: {
         specId: z.string(),
       },
@@ -369,7 +378,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     {
       title: "Related nodes",
       description:
-        "Nodes structurally important around a seed id (seeded PageRank over all edge types) — crosses Function/Spec/Module/Decision. 'what's connected to X?'.",
+        "Nodes structurally important around a seed id (seeded PageRank over all edge types) — crosses Function/Spec/Module/Decision. 'what's connected to X?'. " +
+        "Needs a node id: to find the area of code a question is about, use `explore`.",
       inputSchema: {
         seedId: z.string(),
         depth: z.number().int().optional(),
@@ -387,6 +397,42 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     async ({ seedId, depth, limit }) => {
       try {
         return ok(await source.use((conn) => related(conn, seedId, depth ?? 2, limit ?? 10)));
+      } catch (e) {
+        return failFrom(e);
+      }
+    },
+  );
+
+  // --- Explore an area from a sentence (XSPEC-531) ---
+  //
+  // The one tool that takes a question instead of a name. It reads the graph with plain MATCH queries and the source
+  // files named by the parse-health manifest, and writes nothing: `readOnlyHint: true` was set by reading `explore()`
+  // (code-graph/explore.ts), which deliberately does not call `related` (a writer: it installs the algo extension and
+  // builds a projected graph) and ranks in process instead. That is also why a read-only server can offer it.
+
+  server.registerTool(
+    "explore",
+    {
+      title: "Explore an area of code from a question",
+      description:
+        "When you don't have a symbol name yet (how does X work / where is Y handled), call this first, before grep. Takes a plain-language topic (words, not an exact name) and returns, in one answer: " +
+        "the symbols whose names or paths match, the functions they call and are called by (ranked by seeded PageRank around the matches), the call paths among them, " +
+        "and each symbol's source. No model, deterministic. Use it for architecture questions (\"how does it route requests through its middleware chain\") before reading files one by one. " +
+        "`path` limits the search to files under a directory or file, relative to the directory given to `egr index` (the form of the file paths in the answer). `limit` (default " + DEFAULT_EXPLORE_LIMIT + ") is the number of symbols listed, at most " + MAX_EXPLORE_LIMIT + ". The WHOLE answer stays within `maxChars` (default " + DEFAULT_EXPLORE_MAX_CHARS + ", minimum 400 and maximum " + MAX_EXPLORE_MAX_CHARS + ": a value outside that range is clamped, not an error); " +
+        "when it does not fit, source is left out from the least relevant symbol first and `notExpanded` names everything left out — `truncated: true` means look there. " +
+        "`status: \"no-match\"` means no symbol or file path carried the words (not that the code does not exist). A symbol with no `snippet` carries a `snippetNote` saying why (file not known, moved, or changed since it was indexed). " +
+        "`next` lists point queries (`call_chain`) to continue from the symbols found. A topic with no searchable word, or an empty graph, is an error result.",
+      inputSchema: {
+        topic: z.string().min(1),
+        path: z.string().min(1).optional(),
+        limit: z.number().int().positive().optional(),
+        maxChars: z.number().int().positive().optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ topic, path, limit, maxChars }) => {
+      try {
+        return ok(await source.use((conn) => explore(conn, { topic, path, limit: limit ?? DEFAULT_EXPLORE_LIMIT, maxChars, manifestPath })));
       } catch (e) {
         return failFrom(e);
       }

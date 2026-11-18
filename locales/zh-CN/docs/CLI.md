@@ -187,6 +187,36 @@ egr index . --scip index.scip
 `callsSkippedUnresolvedTarget`。若文件有匹配到、但解析结果是零，人类可读输出
 会多打印一行 `WARNING`，而不是把全零结果悄悄当成成功报告。
 
+### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]`
+
+还没有符号名称时（X 怎么运作／Y 在哪里处理），先跑这个命令，再考虑 grep（XSPEC-531）。其他查询都需要你已经有的名称（函数、规格编号）；
+这个命令直接接受一句话。`<topic>` 是一个句子或几个字词（取 `explore` 之后的全部文字，所以引号可省略）。不使用模型。
+它一次打印出：
+
+1. **名称或文件路径**与字词匹配的符号（camelCase、snake_case 与复数会被折叠，「how」「does」这类疑问词会被丢掉）；
+2. 它们调用与被调用的函数，向外两层，以匹配处为起点用 seeded PageRank 排序；
+3. 所列符号之间的调用路径（`ServeHTTP → handleHTTPRequest → Next`）；
+4. 每个符号的源代码，从记录的行号读到该文件下一个定义之前（最多 40 行）。
+
+```bash
+egr explore "how does it route requests through its middleware chain"
+egr explore "where is the session token validated" --path src/auth --max-chars 3000
+```
+
+`--path` 把搜索限制在某个目录或文件之下，路径相对于 `egr index` 所给的目录（与输出中显示的文件路径同一种形式）。
+`--limit`（默认 12、最大 50）是列出的符号数。**`--max-chars`（默认 6000、下限 400、上限 200000）限制整份输出的长度**，
+文本与 `--json` 都一样。超出范围的值会被夹住，不是错误：`--limit 100` 列出 50 个符号，`--max-chars 100` 被调高到 400，
+`--max-chars 500000` 被降到 200000（`--json` 的 `maxChars` 写明实际用了多少）。放不下时，先从最不相关的符号开始去掉源代码，
+再去掉符号，并用「Not expanded」一节列出被去掉的内容（`--json`：`notExpanded`，并有 `truncated: true`）。
+不会静默截断。最后一节 `Next:` 给出可接着用的点查询（`egr callers <name>`）。
+
+`NO MATCH`（`--json`：`status: "no-match"`，退出码 `0`）表示没有任何符号或文件路径含这些字词。这不等于「代码没有做这件事」：
+名称可能用了别的词，或代码根本没有被索引。显示时没有源代码的符号会说明原因：文件位置未知（经 MCP `index_code`
+填入的图没有索引根目录）、已被移动，或索引之后已被修改（请重新执行 `egr index`）。主题没有可搜索的字词、图中没有代码，
+或 `--limit`／`--max-chars` 不合法，退出码为 `1`。
+
+只读：只做 `MATCH` 查询与读源代码。它不使用 `related`（会安装 algo 扩展并写入），所以另一个进程正在读图时也能运行，且不需要网络。
+
 ### `callers <symbol> [--depth N] [--file <path>]`
 
 （可传递，最多到 `--depth`，默认 1）调用 `<symbol>` 的函数。“改这个会牵动什么？”

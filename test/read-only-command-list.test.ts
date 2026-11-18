@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { GraphConnection } from "../src/graph-db/connection.js";
 import { initSchema } from "../src/graph-db/schema.js";
 import { READ_ONLY_COMMANDS } from "../src/cli/read-only-commands.js";
+import { explore } from "../src/code-graph/index.js";
 import {
   cmdCallers,
   cmdCallees,
@@ -117,6 +118,12 @@ describe("read-only command list (XSPEC-374)", () => {
     refs: async (c) => {
       const r = await cmdRefsCheck(c, [mdPath]);
       return r.items.some((it) => it.status === "present");
+    },
+    // XSPEC-531: explore must reach its expansion and ranking on a graph that has nodes AND edges, on a read-only
+    // connection. It does not call `related`; if it ever did, this case raises the read-only refusal.
+    explore: async (c) => {
+      const r = await explore(c, { topic: "where is alpha calling beta" });
+      return r.status === "ok" && r.symbols.some((s) => s.name === "alpha") && r.symbols.some((s) => s.name === "beta") && r.callPaths.some((p) => p.includes("alpha → beta"));
     },
   };
 

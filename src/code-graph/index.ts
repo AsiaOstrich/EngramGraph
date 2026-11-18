@@ -38,6 +38,17 @@ export type {
   ImplementedSpec,
   ImplementedSpecsResult,
 } from "./query.js";
+export {
+  explore,
+  formatExplore,
+  keywordsOf,
+  DEFAULT_EXPLORE_LIMIT,
+  DEFAULT_EXPLORE_MAX_CHARS,
+  MIN_EXPLORE_MAX_CHARS,
+  MAX_EXPLORE_MAX_CHARS,
+  MAX_EXPLORE_LIMIT,
+} from "./explore.js";
+export type { ExploreResult, ExploreSymbol, ExploreOptions, NotExpanded } from "./explore.js";
 export type {
   ExtractOptions,
   IndexResult,

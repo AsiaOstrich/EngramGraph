@@ -42,4 +42,8 @@ export const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   // comparing node/edge counts before and after a run. `cmd` here is the
   // FIRST positional ("refs"), not the subcommand ("check").
   "refs",
+  // XSPEC-531: `explore` reads with plain MATCH queries and reads source files. It does NOT call `related` (which is a
+  // writer); its ranking is computed in process. Executed against a read-only connection in
+  // `test/read-only-command-list.test.ts`.
+  "explore",
 ]);
