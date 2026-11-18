@@ -52,6 +52,7 @@ describe("EngramGraph MCP server", () => {
       "call_chain",
       "cochange",
       "doctor",
+      "explore",
       "impact_analysis",
       "implemented_specs",
       "implementers",

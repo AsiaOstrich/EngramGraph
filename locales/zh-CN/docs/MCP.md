@@ -124,7 +124,7 @@ command/args/env 都一样：
 
 ## 工具
 
-下表列出全部十四个。**stdio server（`egr-mcp`、`egr mcp`）是只读的，只提供其中十个**：除了 `index_code`、
+下表列出全部十五个。**stdio server（`egr-mcp`、`egr mcp`）是只读的，只提供其中十一个**：除了 `index_code`、
 `index_docs`、`ingest_feedback`、`related` 之外的所有工具；这四个会写入图，下表标为*仅可写入模式*。
 stdio 的 `tools/list` 不含这四个（0.13.0-beta.4 会列出它们、再在每次调用时拒绝）；它们只存在于以可写入连接创建的
 server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对应的终端命令见下方“通过 stdio 不提供的工具”。
@@ -139,6 +139,7 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对�
 | `implementers` | `specId` | 声明 `// implements <specId>` 的文件及其定义的函数。「哪些代码实现了这个 spec？」读取 `IMPLEMENTS(Module→Spec)` + `DEFINES`。 |
 | `implemented_specs` | `moduleId` | 一个文件声明自己实现了哪些 spec。「这段代码受哪个 spec 规范？」`moduleId` 是该文件被索引时的路径。读取 `IMPLEMENTS(Module→Spec)`。 |
 | `related` *(仅可写入模式)* | `seedId`、`depth?`、`limit?` | 从某个种子 id 出发、结构上重要的节点（对所有边类型跑 seeded PageRank，横跨 `Function`/`Spec`/`Module`/`Decision`）。「有什么跟 X 相关？」**通过 stdio 不提供**——见下方。 |
+| `explore` | `topic`、`path?`、`limit?`、`maxChars?` | **「X 怎么运作／Y 在哪里处理」先用它**（XSPEC-531）：输入白话主题（几个字词，不是精确名称），一次返回名称或文件路径匹配的符号、它们调用与被调用的函数（以匹配处为起点的 seeded PageRank 排序）、这些符号之间的调用路径（`callPaths`，`A → B → C`），以及每个符号的源代码（`snippet`）。不使用模型。`path` 把搜索限制在某个目录或文件之下；`limit`（默认 12）是列出的符号数。**`maxChars`（默认 6000、下限 400：更小的值会被调高，返回的 `maxChars` 写明实际用了多少）限制整份回答的长度**；放不下时，先从最不相关的符号开始去掉源代码，再去掉符号，并由 `notExpanded` 列出被去掉的内容（`symbols`、`snippets`，以及经 `IMPORTS` 相邻的 `files`，各附 `…Total`），同时 `truncated` 为 `true`：绝不静默截断。没有 `snippet` 的符号会有 `snippetNote`（文件位置未知、已移动，或索引之后已被修改）。`status: "no-match"` 表示没有任何符号或文件路径含这些字词，这不等于代码不存在。`next` 列出可接着用的点查询（`call_chain`）。主题没有可搜索的字词、或图中没有任何代码，会返回错误结果。只读：只做 `MATCH` 查询与读源代码；**不**使用会写入的 `related`，所以 stdio server 可以提供它。源代码是依 parse-health manifest 记录的文件读取，所以只经 `index_code` 填入的图没有源代码可显示。见 [CLI.md](./CLI.md)。 |
 | `blindspots` | — | 解析不完全或失败的文件（来自 parse-health manifest）——图可能缺少节点／边的地方。当查询报告 `indexHealth.possiblyIncomplete` 时用它查出**缺的是什么**。`manifestPresent` 用来区分「没有问题」与「从未测量过」。 |
 | `signatures` | — | 同一批文件改以**根本原因**分组而非逐一列出——把「584 个文件」变成「1 个问题」。当 `blindspots` 返回很长的列表时使用。 |
 | `doctor` | — | 哪些语言可用、不可用的原因、这台机器上有哪些是自行编译的、哪些命令需要网络。另有 `server: { runningVersion, installedVersion, status: "current" \| "stale" \| "unknown", message, upgradeLeftovers }`：这个运行中的 server 是否就是现在磁盘上已安装的版本（升级之前就启动的 server 是 `"stale"`；见*Windows：`egr-mcp` 运行中升级*）。**不打开图**，所以在「索引本身坏掉」时仍然回答得出来。 |
@@ -206,6 +207,7 @@ server 会在下一次查询时看到结果——不需要重启。在第一次 
 | `refs_check` | true | false | true | false |
 | `cochange` | true | false | true | false |
 | `lint` | true | false | true | false |
+| `explore` | true | false | true | false |
 
 全部都不连网（`openWorldHint: false`）——图、文件系统与 `git` 都是本机的。`cochange` 是只读的，因为它只执行 `git rev-parse` 与 `git log`（带 `GIT_OPTIONAL_LOCKS=0`），什么都不写；`lint` 是只读的，因为它只遍历一个目录并在内存中解析其中的 Markdown；两者都是读实现确认的，不是从名字推断的。
 只有 `ingest_feedback` 不是幂等的：它套用的是置信度的**增量**，同一组参数调用两次

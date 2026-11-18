@@ -187,6 +187,34 @@ egr index . --scip index.scip
 `callsSkippedUnresolvedTarget`。若檔案有匹配到、但解析結果是零，人類可讀輸出
 會多印一行 `WARNING`，而不是把全零結果悄悄當成成功回報。
 
+### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]`
+
+「X 怎麼運作／Y 在哪裡處理」先從這裡開始（XSPEC-531）。其他查詢都需要你已經有的名稱（函式、規格編號）；
+這個指令直接接受一句話。`<topic>` 是一個句子或幾個字詞（取 `explore` 之後的全部文字，所以引號可省略）。不使用模型。
+它一次印出：
+
+1. **名稱或檔案路徑**與字詞相符的符號（camelCase、snake_case 與複數會被折疊，「how」「does」這類疑問詞會被丟掉）；
+2. 它們呼叫與被呼叫的函式，往外兩層，以相符處為起點用 seeded PageRank 排序；
+3. 所列符號之間的呼叫路徑（`ServeHTTP → handleHTTPRequest → Next`）；
+4. 每個符號的原始碼，從記錄的行號讀到該檔下一個定義之前（最多 40 行）。
+
+```bash
+egr explore "how does it route requests through its middleware chain"
+egr explore "where is the session token validated" --path src/auth --max-chars 3000
+```
+
+`--path` 把搜尋限制在某個目錄或檔案之下。`--limit`（預設 12）是列出的符號數。**`--max-chars`（預設 6000、下限 400）
+限制整份輸出的長度**，文字與 `--json` 都一樣；更小的值會被調高到 400。放不下時，先從最不相關的符號開始拿掉原始碼，
+再拿掉符號，並用「Not expanded」一節列出被拿掉的內容（`--json`：`notExpanded`，並有 `truncated: true`）。
+不會靜默截斷。最後一節 `Next:` 給出可接著用的點查詢（`egr callers <name>`）。
+
+`NO MATCH`（`--json`：`status: "no-match"`，結束碼 `0`）表示沒有任何符號或檔案路徑含這些字詞。這不等於「程式碼沒有做這件事」：
+名稱可能用了別的字，或程式碼根本沒有被索引。顯示時沒有原始碼的符號會說明原因：檔案位置未知（經 MCP `index_code`
+填入的圖沒有索引根目錄）、已被移動，或索引之後已被修改（請重新執行 `egr index`）。主題沒有可搜尋的字詞、圖中沒有程式碼，
+或 `--limit`／`--max-chars` 不合法，結束碼為 `1`。
+
+唯讀：只做 `MATCH` 查詢與讀原始碼。它不使用 `related`（會安裝 algo 擴充並寫入），所以另一個行程正在讀圖時也能執行，且不需要網路。
+
 ### `callers <symbol> [--depth N] [--file <path>]`
 
 （可遞移，最多到 `--depth`，預設 1）呼叫 `<symbol>` 的函式。「改這個會牽動什麼？」

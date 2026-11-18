@@ -131,7 +131,7 @@ the command/args/env are the same:
 
 ## Tools
 
-The table lists all fourteen. **The stdio server (`egr-mcp`, `egr mcp`) is read-only and offers ten of them**: every
+The table lists all fifteen. **The stdio server (`egr-mcp`, `egr mcp`) is read-only and offers eleven of them**: every
 tool except `index_code`, `index_docs`, `ingest_feedback` and `related`, which write to the graph and are marked
 *writable only* below. `tools/list` over stdio does not include those four (0.13.0-beta.4 listed them and refused
 each call); they exist on a server created on a writable connection, such as `createMcpServer(conn)` in an embedding.
@@ -147,6 +147,7 @@ Why, and the terminal command for each, is under "Tools not offered over stdio".
 | `implementers` | `specId` | Files declaring `// implements <specId>` and the functions they define. "Which code implements this spec?" Reads `IMPLEMENTS(Module→Spec)` + `DEFINES`. |
 | `implemented_specs` | `moduleId` | Specs a file declares it implements. "Which spec governs this code?" `moduleId` is the file's indexed path. Reads `IMPLEMENTS(Module→Spec)`. |
 | `related` *(writable only)* | `seedId`, `depth?`, `limit?` | Structurally important nodes around a seed id (seeded PageRank over all edge types, crosses `Function`/`Spec`/`Module`/`Decision`). "What's connected to X?" **Not offered over stdio** — see below. |
+| `explore` | `topic`, `path?`, `limit?`, `maxChars?` | **Start here for "how does X work / where is Y handled"** (XSPEC-531): takes a plain-language topic (words, not an exact name) and returns, in one answer, the symbols whose names or file paths match, the functions they call and are called by (ranked by seeded PageRank around the matches), the call paths among them (`callPaths`, `A → B → C`) and each symbol's source (`snippet`). No model. `path` limits the search to files under a directory or file; `limit` (default 12) is the number of symbols listed. **`maxChars` (default 6000, minimum 400: a smaller value is raised, and the answer's `maxChars` says what was used) bounds the whole answer**; when it does not fit, source is left out from the least relevant symbol first, then symbols, and `notExpanded` names what was left out (`symbols`, `snippets`, and the `files` next door through `IMPORTS`, each with a `…Total`) while `truncated` is `true`: never a silent cut. A symbol with no `snippet` carries a `snippetNote` (file not known, moved, or changed since it was indexed). `status: "no-match"` means no symbol or file path carried the words, which is not the same as the code not existing. `next` lists point queries (`call_chain`) to continue with. A topic with no searchable word, or a graph with no code, is an error result. Read-only: plain `MATCH` queries and source reads; it does **not** use `related` (a writer), so the stdio server can offer it. Source is read from the files recorded in the parse-health manifest, so a graph filled only through `index_code` has no source to show. See [CLI.md](./CLI.md). |
 | `blindspots` | — | Files that parsed partially or failed, from the parse-health manifest — where the graph may be missing nodes/edges. Use after a query reports `indexHealth.possiblyIncomplete` to find out WHAT is missing. `manifestPresent` distinguishes "nothing wrong" from "never measured". |
 | `signatures` | — | The same files grouped by root cause instead of listed individually — turns "584 files" into "1 problem". Use when `blindspots` returns a long list. |
 | `doctor` | — | Which languages are available and why any are not, what was compiled on this machine, which commands need network. Also `server: { runningVersion, installedVersion, status: "current" \| "stale" \| "unknown", message, upgradeLeftovers }`: whether this running server is the version installed on disk now (a server started before an upgrade is `"stale"`; see *Windows: upgrading while `egr-mcp` is running*). Does not open the graph, so it answers when indexing itself is what is broken. |
@@ -229,6 +230,7 @@ its own note above and `readOnlyHint: false` below.
 | `refs_check` | true | false | true | false |
 | `cochange` | true | false | true | false |
 | `lint` | true | false | true | false |
+| `explore` | true | false | true | false |
 
 None of these talk to the network (`openWorldHint: false` throughout) — the
 graph, the filesystem and `git` are all local. `cochange` is read-only because it

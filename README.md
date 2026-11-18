@@ -64,7 +64,7 @@ install is the usual reason a checked-in `.mcp.json` silently does nothing on
 someone else's laptop. `ENGRAM_DB` defaults to `./.engram/graph.db`, so it can
 usually be omitted.
 
-Codex / Cursor / Windsurf, all 10 tools, and an example flow:
+Codex / Cursor / Windsurf, all 11 tools, and an example flow:
 **[docs/MCP.md](./docs/MCP.md)**.
 
 > **Indexing is a terminal job, not an assistant one.** The stdio server is
@@ -317,9 +317,12 @@ Or just `egr serve --port 3000`. API reference: **[docs/API.md](./docs/API.md)**
 
 EngramGraph ships an MCP server (stdio) so any MCP-capable assistant can use
 it as a code + knowledge graph. Zero LLM, deterministic, **no Docker**. It has
-14 tools in two sets, and **the stdio server (`egr-mcp`, `egr mcp`) is
-read-only: it lists the 10 that read** — the graph queries (`call_chain`,
-`impact_analysis`, `implementers`, `implemented_specs`), diagnostics
+15 tools in two sets, and **the stdio server (`egr-mcp`, `egr mcp`) is
+read-only: it lists the 11 that read** — the graph queries (`call_chain`,
+`impact_analysis`, `implementers`, `implemented_specs`, and `explore`, which
+takes a plain-language question such as "how does it route requests" and
+returns the matching symbols, their call paths and their source in one answer;
+call it first when you do not yet know a function name), diagnostics
 (`blindspots`, `signatures`, `doctor`), a Markdown reference checker
 (`refs_check`, DEC-115 — see below) and a git-history query for files that
 changed together (`cochange`, XSPEC-514 — it reads git, not the graph) and a
