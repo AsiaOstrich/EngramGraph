@@ -139,7 +139,7 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对�
 | `implementers` | `specId` | 声明 `// implements <specId>` 的文件及其定义的函数。「哪些代码实现了这个 spec？」读取 `IMPLEMENTS(Module→Spec)` + `DEFINES`。 |
 | `implemented_specs` | `moduleId` | 一个文件声明自己实现了哪些 spec。「这段代码受哪个 spec 规范？」`moduleId` 是该文件被索引时的路径。读取 `IMPLEMENTS(Module→Spec)`。 |
 | `related` *(仅可写入模式)* | `seedId`、`depth?`、`limit?` | 从某个种子 id 出发、结构上重要的节点（对所有边类型跑 seeded PageRank，横跨 `Function`/`Spec`/`Module`/`Decision`）。「有什么跟 X 相关？」**通过 stdio 不提供**——见下方。 |
-| `explore` | `topic`、`path?`、`limit?`、`maxChars?` | **还没有符号名称时（X 怎么运作／Y 在哪里处理），先于 grep 调用它**（XSPEC-531）：输入白话主题（几个字词，不是精确名称），一次返回名称或文件路径匹配的符号、它们调用与被调用的函数（以匹配处为起点的 seeded PageRank 排序）、这些符号之间的调用路径（`callPaths`，`A → B → C`），以及每个符号的源代码（`snippet`）。不使用模型。`path` 把搜索限制在某个目录或文件之下，路径相对于 `egr index` 所给的目录（与回答中显示的文件路径同一种形式）；`limit`（默认 12、最大 50：更大的值会被降到 50，不是错误）是列出的符号数。**`maxChars`（默认 6000、下限 400、上限 200000：超出范围的值会被夹住，不是错误，返回的 `maxChars` 写明实际用了多少）限制整份回答的长度**；放不下时，先从最不相关的符号开始去掉源代码，再去掉符号，并由 `notExpanded` 列出被去掉的内容（`symbols`、`snippets`，以及经 `IMPORTS` 相邻的 `files`，各附 `…Total`），同时 `truncated` 为 `true`：绝不静默截断。没有 `snippet` 的符号会有 `snippetNote`（文件位置未知、已移动，或索引之后已被修改）。`status: "no-match"` 表示没有任何符号或文件路径含这些字词，这不等于代码不存在。`next` 列出可接着用的点查询（`call_chain`）。主题没有可搜索的字词、或图中没有任何代码，会返回错误结果。只读：只做 `MATCH` 查询与读源代码；**不**使用会写入的 `related`，所以 stdio server 可以提供它。源代码是依 parse-health manifest 记录的文件读取，所以只经 `index_code` 填入的图没有源代码可显示。见 [CLI.md](./CLI.md)。 |
+| `explore` | `topic`、`path?`、`limit?`、`maxChars?`、`includeTests?` | **还没有符号名称时（X 怎么运作／Y 在哪里处理），先于 grep 调用它**（XSPEC-531）：输入白话主题（几个字词，不是精确名称），一次返回名称或文件路径匹配的符号、它们调用与被调用的函数（以匹配处为起点的 seeded PageRank 排序）、这些符号之间的调用路径（`callPaths`，`A → B → C`），以及每个符号的源代码（`snippet`）。不使用模型。`path` 把搜索限制在某个目录或文件之下，路径相对于 `egr index` 所给的目录（与回答中显示的文件路径同一种形式）；`limit`（默认 12、最大 50：更大的值会被降到 50，不是错误）是列出的符号数。**`maxChars`（默认 6000、下限 400、上限 200000：超出范围的值会被夹住，不是错误，返回的 `maxChars` 写明实际用了多少）限制整份回答的长度**；放不下时，先从最不相关的符号开始去掉源代码，再去掉符号，并由 `notExpanded` 列出被去掉的内容（`symbols`、`snippets`，以及经 `IMPORTS` 相邻的 `files`，各附 `…Total`），同时 `truncated` 为 `true`：绝不静默截断。没有 `snippet` 的符号会有 `snippetNote`（文件位置未知、已移动，或索引之后已被修改）。`status: "no-match"` 表示没有任何符号或文件路径含这些字词，这不等于代码不存在。**默认不列出测试代码**（`*_test.go`、`*.test.*`、`*.spec.*`、`test/`、`tests/`、`__tests__/`）：测试会重复它所测功能的字词，因此得分高过代码、占掉版面（在 gin 的重放里，列出的 12 个符号有 7 个是测试函数）。它们既不当起点、也不纳入调用邻域，`testsLeftOut` 会算出被略过的数量；`includeTests: true` 则把它们当一般代码列出。名称过于泛用的函数（`has`、`get`、`set`、`save`、`error`、`config`、`init`、`new` ……）与构建／工具配置文件中的函数（`vite.config.*`、`*.config.*`、`scripts/`）会被排在后面并带 `noise`（`generic-name` 或 `build-tooling`）：它们被到处调用，随机游走的质量会堆到它们身上（在 excalidraw 的重放里，`has`、`save`、`error`、`config` 都被列了出来）。版面还有空间时仍会列出，排在一般符号之后；泛用名称的文件路径若含主题的字词、或主题本身就是关于构建，这条规则就不适用。`note` 是一句读法说明：每个 `snippet` 都是该文件在那一行的原文，读它等于在那里打开文件，没有显示的内容由 `notExpanded` 列名。`next` 列出可接着用的点查询（`call_chain`），绝不从测试代码或 `noise` 起算。主题没有可搜索的字词、或图中没有任何代码，会返回错误结果。只读：只做 `MATCH` 查询与读源代码；**不**使用会写入的 `related`，所以 stdio server 可以提供它。源代码是依 parse-health manifest 记录的文件读取，所以只经 `index_code` 填入的图没有源代码可显示。见 [CLI.md](./CLI.md)。 |
 | `blindspots` | — | 解析不完全或失败的文件（来自 parse-health manifest）——图可能缺少节点／边的地方。当查询报告 `indexHealth.possiblyIncomplete` 时用它查出**缺的是什么**。`manifestPresent` 用来区分「没有问题」与「从未测量过」。 |
 | `signatures` | — | 同一批文件改以**根本原因**分组而非逐一列出——把「584 个文件」变成「1 个问题」。当 `blindspots` 返回很长的列表时使用。 |
 | `doctor` | — | 哪些语言可用、不可用的原因、这台机器上有哪些是自行编译的、哪些命令需要网络。另有 `server: { runningVersion, installedVersion, status: "current" \| "stale" \| "unknown", message, upgradeLeftovers }`：这个运行中的 server 是否就是现在磁盘上已安装的版本（升级之前就启动的 server 是 `"stale"`；见*Windows：`egr-mcp` 运行中升级*）。**不打开图**，所以在「索引本身坏掉」时仍然回答得出来。 |
@@ -183,6 +183,18 @@ Windows 11 上，编辑器开着的整段时间里 `egr index`、`egr feedback`�
 
 server 会在下一次查询时看到结果——不需要重启。在第一次 `egr index` 之前就启动的 server，每次查询都会回答
 “No graph at …”，图一出现就开始正常工作。
+
+### 先用哪个工具，以及预先加载 `explore`
+
+每个 server（只读或可写入）在客户端连接时都会发送一段 `instructions`。除了只读 server 不提供的那几个工具所对应的终端命令（见上），它还带有一张简短的对照表，从问题类型指向该先用的工具：X 怎么运作／Y 在哪里处理 → `explore`；谁调用它／改了它会坏什么 → `call_chain`；这段代码受哪份规格约束 → `implemented_specs`；文档与代码是否还同步 → `refs_check`。因为索引是某个时间点的快照，它也指明两个“这个答案可不可信”的自查工具：`doctor`（索引在不在、是不是最新）与 `blindspots`（哪些文件没有完整解析）。工具自己的描述只有在客户端考虑该工具时才会被读；这段文字则在一开始就读一次。
+
+Claude Code 另外会延后加载 MCP 工具定义：助手搜索某个工具时才取回它的定义，不搜索的助手永远看不到它。工具可以用 `_meta` 键 `anthropic/alwaysLoad` 要求从第一轮就加载。**`explore` 默认不提出这个要求。** 要开启，在客户端启动 `egr-mcp` 的环境中设置 `ENGRAM_MCP_ALWAYS_LOAD=explore`：
+
+```bash
+claude mcp add egr --env ENGRAM_MCP_ALWAYS_LOAD=explore -- npx egr-mcp
+```
+
+代价：`explore` 的定义（描述与参数，约 2,500 字符）会被加载**每一次**对话，不论这个问题需不需要它。换来的是：助手第一轮就看得到 `explore`，不必先想到要去搜索。值是以逗号分隔的工具名称列表，不区分大小写，目前只认得 `explore`；其他内容（以及空值）一律保持关闭。它在 server 启动时读取，所以改了之后要重启客户端。不认得这个键的客户端会直接忽略它。
 
 ### 工具标注（DEC-115 L2）
 
