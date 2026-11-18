@@ -382,7 +382,9 @@ Full extraction rule and examples: **[docs/CLI.md](./docs/CLI.md)**.
    Default: `SingleRepoIsolation` (one `graph.db`, no org concept).
    Opt-in: `OrgProjectIsolation` (`org-{orgId}/project-{projectId}/graph.db`).
 3. **SAGE signal source** — `SignalSource → FeedbackEvent[]`.
-   Defaults: `GitHistorySignalSource`, `TestExitCodeSignalSource`.
+   `GitHistorySignalSource` and `TestExitCodeSignalSource` are placeholders that
+   return no events; supply your own source, or enter feedback with
+   `egr feedback` / MCP `ingest_feedback`.
 
 ## Graph schema
 
@@ -415,8 +417,10 @@ structure, and the spec/decision documents your repository already contains.
       resolution, scope-qualified function ids
 - [x] **Phase 3** — KnowledgeGraph: front-matter markdown → `Spec` / `Decision`
       + `IMPACTS` / `SUPERSEDES` edges
-- [x] **Phase 4** — SAGE evolution layer: confidence feedback (`STEP` 0.25,
+- [x] **Phase 4** — SAGE evolution layer mechanics: confidence feedback (`STEP` 0.25,
       floor 0.1), `topByConfidence`, `rankedImpact`
+- [ ] **Phase 4b** — automatic signal sources, and evidence that confidence
+      ranking beats simple baselines (in progress)
 - [x] **Phase 5** — REST routes (`/graph/call-chain`, `/graph/impact-analysis`,
       `/graph/ingest`), MCP server (5 tools), standalone `egr` CLI
 
