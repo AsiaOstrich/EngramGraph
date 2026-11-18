@@ -158,6 +158,18 @@ Why, and the terminal command for each, is under "Tools not offered over stdio".
 Every tool returns a text content block of JSON; on failure it returns
 `error: <message>` with `isError: true`.
 
+**`indexHealth` on a code query.** `call_chain`, `implementers`, `implemented_specs`
+and `explore` add an `indexHealth` field when there is something to say about the
+graph behind the answer, and nothing otherwise (a graph that parsed cleanly and is up
+to date adds no field): `possiblyIncomplete` (+ `blindspots`) when the answer is near
+files that parsed partially or failed, and `staleFiles` (+ `staleSample`, up to 20
+names) when indexed files are **newer than the index** or gone from disk, so the answer
+may describe their old content. `staleFiles` counts the whole graph, not just the
+answer; it does not see files created since the index. Run `egr index <dir>
+--incremental`, or keep `egr watch <dir>` running in a terminal (it re-runs that index
+after each change and works alongside this server: the graph is held only while an
+index run is in flight). See `watch` in [CLI.md](./CLI.md).
+
 Two failures are answers, not crashes, and neither is ever returned as an empty
 result:
 

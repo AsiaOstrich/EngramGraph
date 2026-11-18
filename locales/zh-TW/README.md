@@ -207,6 +207,10 @@ egr cochange src/model.ts --limit 5
 # 5.「有沒有文件寫著 Superseded、卻沒有任何文件宣告誰取代了它，或仍引用已被取代的決策？」
 #    （讀文件，不讀圖；單有發現不算失敗）
 egr lint docs/
+
+# 6.「編輯的時候讓圖譜保持最新。」先補齊一次，之後每次原始碼檔案有變動就重跑增量索引；
+#    兩次之間，回答會說「index is behind」
+egr watch .
 ```
 
 圖譜資料庫位於 `ENGRAM_DB`（預設 `./.engram/graph.db`）。

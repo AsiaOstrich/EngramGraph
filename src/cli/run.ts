@@ -588,6 +588,9 @@ export async function cmdIndex(
       "--incremental cannot be combined with --scip: the SCIP overlay is written for the whole index, and an incremental run would not know which of its edges to keep. Run the SCIP overlay with a plain `egr index`.",
     );
   }
+  // Taken before any file is read: a file edited after this moment may be read before its edit, and the manifest
+  // section says so (`startedAt`), which is what `indexHealth.staleFiles` compares file times with.
+  const startedAt = new Date().toISOString();
   if (opts.clean) await clearGraph(conn); // drop existing data so deleted nodes are pruned
   if (opts.scip) await assertCallsSchemaHasProvenanceColumns(conn);
   // `detectShebangScripts: true` (XSPEC-414 R4 OQ2) only on the CODE walk —
@@ -717,7 +720,7 @@ export async function cmdIndex(
   // failing must not undo a successful index (same spirit as R1a's per-file
   // tolerance). The summary/diff are still computed when no manifestPath is
   // given, so programmatic/test callers get the counts without a file.
-  const nextManifest = upsertRun(upsertBase, root, new Date().toISOString(), parseHealth, EGR_VERSION, opts.exclude, incremental?.token, assignment.rootLabel);
+  const nextManifest = upsertRun(upsertBase, root, new Date().toISOString(), parseHealth, EGR_VERSION, opts.exclude, incremental?.token, assignment.rootLabel, startedAt);
   if (opts.manifestPath) {
     try {
       writeManifest(opts.manifestPath, nextManifest);

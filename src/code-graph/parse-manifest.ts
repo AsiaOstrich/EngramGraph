@@ -136,8 +136,15 @@ export function summarize(files: FileParseHealth[]): ParseHealthSummary {
 
 /** One index root's section of a manifest (see `ParseManifest.runs`). */
 export interface ManifestRun {
-  /** ISO timestamp of the `egr index <dir>` run that wrote this section. */
+  /** ISO timestamp of the `egr index <dir>` run that wrote this section (when it finished). */
   indexedAt: string;
+  /**
+   * ISO timestamp of when that run began, before it read any file. A file written at or after this moment may have
+   * been read before the write, so it counts as newer than the index (`stale-files.ts`); `indexedAt` is the end of
+   * the run and would call a file edited mid-run up to date. Absent in a section an older egr wrote: `indexedAt` is
+   * used then.
+   */
+  startedAt?: string;
   /** Per-file raw measurements for the files under this root (R1b). */
   files: FileParseHealth[];
   /**
@@ -200,10 +207,12 @@ export function upsertRun(
   exclude?: readonly string[],
   incrementalToken?: string,
   rootLabel?: string,
+  startedAt?: string,
 ): ParseManifest {
   const runs = { ...(prev?.runs ?? {}) };
   runs[root] = {
     indexedAt,
+    ...(startedAt ? { startedAt } : {}),
     files,
     ...(exclude && exclude.length > 0 ? { exclude: [...exclude] } : {}),
     ...(incrementalToken ? { incrementalToken } : {}),

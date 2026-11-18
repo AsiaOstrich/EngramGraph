@@ -187,6 +187,53 @@ egr index . --scip index.scip
 `callsSkippedUnresolvedTarget`。若檔案有匹配到、但解析結果是零，人類可讀輸出
 會多印一行 `WARNING`，而不是把全零結果悄悄當成成功回報。
 
+### `watch <dir> [--debounce <ms>] [--docs] [--exclude <glob>]...`
+
+讓圖譜跟著檔案走，不必手動跑 `egr index`。它先用 `egr index <dir> --incremental` 補齊一次、印出 `[watch] ready`，
+然後監看 `<dir>`：原始碼檔案最後一次變動後 `--debounce` 毫秒（預設 500），**再跑一次同樣的增量索引**。
+這裡沒有第二套索引邏輯：新增的只有觸發，索引就是上面 `--incremental` 說明的那一個（對每個檔案做雜湊、只解析內容有變的檔案、只寫入差異）。
+它會一直執行，直到你停止（Ctrl-C 或 SIGTERM）。在 macOS、91 個檔案的目錄、`--debounce 300` 的實測：
+存檔後 0.75 到 1.0 秒，查詢就回傳得到改動（三次；含 0.3 秒的去抖動與啟動查詢的時間）。
+
+```bash
+egr watch .                        # 放在終端機或行程管理員底下一直跑
+egr watch ./src --debounce 1000 --exclude "generated/**"
+# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index proj --incremental
+# [watch] index done (initial): incremental: indexed in full — the first --incremental run; 210 file(s) parsed, state saved for the next run
+# [watch] ready
+# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: ...
+```
+
+- **什麼會觸發一次執行。** 變動的檔案是 `egr index` 會讀的：有原始碼副檔名的檔案、**沒有**副檔名的檔案
+  （有 shebang 的 shell 腳本是依內容索引的），以及 `.md`（只在加 `--docs` 時）。不會觸發的：index 從不走訪的目錄底下的一切
+  （`node_modules`、`.git`、`.engram`、`dist` 等；見 `egr --help`），所以圖譜自己的檔案不會觸發自己；
+  `--exclude` 排除的路徑（與 `egr index` 相同的 glob）；其他所有副檔名。找不到事可做的一次執行，只花雜湊的成本。
+  `--docs`、`--exclude`、`--graph`、`--isolation` 會原樣傳給索引執行。持續不斷的存檔不會把一次執行無限期往後推：
+  最晚 5 秒（或四倍去抖動時間，取較長者）後就會開始。
+- **只在執行進行中才持有圖譜。** 每次執行都是一個子行程（`egr index <dir> --incremental`，用同一個 `node`、同一個 `egr` 啟動），
+  所以寫入鎖只存在於那一次執行的長度，行程結束就釋放。`egr mcp` 與終端機查詢在兩次執行之間照常運作，
+  `egr watch` 閒置時也能手動跑 `egr index`。**正在執行當中**到達的查詢，會像其他查詢一樣等它結束（MCP server 會重試約 5 秒）。
+  監看行程本身從不開啟圖譜。
+- **圖譜被別人鎖住時**（另一個 `egr index`、`egr serve`、一個很長的查詢）：這次執行被拒絕，監看器印出
+  `[watch] graph is locked by another writer; retry 1 in 500 ms (…)`，之後等 0.5 秒、1 秒、2 秒……
+  （每次最多間隔 15 秒）再試，試到成功為止。不會有東西遺失：下一次成功的執行會索引自上次成功以來的所有變動。
+  執行因其他原因失敗時，會印在 stderr（`[watch] index failed (…); watching on: …`），監看繼續；下一次變動再試。
+  如果**第一次**補齊就失敗，`egr watch` 以 `1` 結束（寫不進去的圖譜不值得監看）。
+- **停止**時會讓進行中的執行先完成（並說明這件事），然後以 `0` 結束；再送一次訊號則殺掉該次執行並以 `1` 結束。
+- **索引現在落後了嗎？** 凡是讀取 parse-health manifest 的回答——`callers`、`callees`、`implementers`、`implemented-by`、
+  `explore` 的文字輸出，以及 `explore --json` 與 MCP 工具 `call_chain`、`implementers`、`implemented_specs`、`explore` 裡的
+  `indexHealth`——在有已索引的檔案比索引新時都會說出來：`indexHealth.staleFiles` 是數量，`indexHealth.staleSample`
+  列出最多 20 個，文字輸出則是 `⚠ index is behind: 1 file(s) changed since this graph was indexed (a.ts) — …`。
+  `egr watch` 執行中，它只在存檔到隨後那次執行結束之間不是零。這個數字是整張圖譜的，不是這個答案的；
+  沒有任何落後時（且圖譜沒有盲點），回傳裡完全沒有 `indexHealth`。**它比較什麼：** manifest 列出的每個檔案，
+  以修改時間對照索引執行開始的時刻；已不存在的檔案也算。**它看不到的：** 索引之後才建立的檔案（它不在 manifest 裡；
+  監看器會索引它，但沒有東西先把它算進來），以及被修改的 Markdown 文件（文件不在 manifest 裡）。
+  只被 touch 而內容沒變的檔案會一直算到下一次執行，因為那次執行比對的是雜湊。檢查的成本是每個已索引檔案一次 `stat`
+  （MCP server 會把答案重用 1 秒）。
+- **限制。** 它使用 Node 的 `fs.watch` 搭配 `recursive`。每次執行都會雜湊每個檔案，所以在非常大的目錄樹上，
+  一次執行的成本是讀完整棵樹的成本，而不是改動本身的成本。**未在 Windows 上測試**：編輯器還開著的檔案可能讀取失敗，
+  該檔案會被排除在那次執行之外，與手動 `egr index` 的情況相同。
+
 ### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]`
 
 還沒有符號名稱時（X 怎麼運作／Y 在哪裡處理），先跑這個指令，再考慮 grep（XSPEC-531）。其他查詢都需要你已經有的名稱（函式、規格編號）；

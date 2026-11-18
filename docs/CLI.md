@@ -268,6 +268,78 @@ indexer sees but `egr` deliberately skips), `definitionsResolved` /
 matched but resolution came back at zero, the human-readable output adds a
 `WARNING` line rather than silently reporting an all-zero result as success.
 
+### `watch <dir> [--debounce <ms>] [--docs] [--exclude <glob>]...`
+
+Keep the graph in step with the files, without running `egr index` by hand. It
+first catches up with `egr index <dir> --incremental`, prints `[watch] ready`,
+then watches `<dir>` and, `--debounce` ms (default 500) after the last change to a source file,
+runs **that same incremental index** again. There is no second indexing path: the
+trigger is new, the index is the one described under `--incremental` above (it
+hashes every file, parses the ones whose content changed, writes only the
+difference). Runs until you stop it (Ctrl-C or SIGTERM). Measured on macOS on a
+91-file tree with `--debounce 300`: a saved edit was returned by a query 0.75 to
+1.0 s later (three runs; this includes the 0.3 s debounce and starting the query).
+
+```bash
+egr watch .                        # leave it running in a terminal, or under a process manager
+egr watch ./src --debounce 1000 --exclude "generated/**"
+# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index proj --incremental
+# [watch] index done (initial): incremental: indexed in full — the first --incremental run; 210 file(s) parsed, state saved for the next run
+# [watch] ready
+# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: ...
+```
+
+- **What starts a run.** A change to a file `egr index` would read: a source
+  extension, a file with **no** extension (a shell script with a shebang is
+  indexed by its content), and `.md` only with `--docs`. Not: anything under a
+  directory index never walks (`node_modules`, `.git`, `.engram`, `dist`, …; see
+  `egr --help`), so the graph's own files cannot start a run of their own; anything
+  `--exclude` leaves out (the same globs as `egr index`); every other extension.
+  A run that finds nothing to do costs the hashing and nothing else. `--docs`,
+  `--exclude`, `--graph` and `--isolation` are passed on to the index run.
+  A steady stream of saves does not postpone a run for ever: it starts at the
+  latest after 5 s (or four debounces, if longer).
+- **The graph is held only while a run is in flight.** Each run is a child
+  process (`egr index <dir> --incremental`, started with the same `node` and the
+  same `egr`), so the writer's lock exists for the length of one run and its exit
+  releases it. `egr mcp` and terminal queries work between runs, and a manual
+  `egr index` can run while `egr watch` is idle. A query that arrives *during* a
+  run waits for it like any other query (the MCP server retries for about 5 s).
+  The watcher process itself never opens the graph.
+- **When the graph is locked by someone else** (another `egr index`, `egr serve`,
+  a long query) the run is refused, the watcher logs `[watch] graph is locked by
+  another writer; retry 1 in 500 ms (…)` and tries again after 0.5 s, 1 s, 2 s,
+  … at most 15 s apart, for as long as it takes. Nothing is lost: the next
+  successful run indexes everything that changed since the last good one. Any
+  other failure of a run is printed on stderr (`[watch] index failed (…); watching on:
+  …`) and the watcher keeps watching; the next change tries again. If the
+  **first** catch-up fails, `egr watch` exits `1` (a graph it cannot write is not
+  worth watching).
+- **Stopping** lets a run in progress finish (it says so), then exits `0`; a
+  second signal kills the run and exits `1`.
+- **Is the index behind right now?** Every answer that reads the parse-health
+  manifest — the text of `callers`, `callees`, `implementers`, `implemented-by`,
+  `explore`, and `indexHealth` in `explore --json` and in the MCP tools
+  `call_chain`, `implementers`, `implemented_specs`, `explore` — says so when
+  indexed files are newer than the index: `indexHealth.staleFiles` is how many,
+  `indexHealth.staleSample` names up to 20 of them, and the text says `⚠ index is
+  behind: 1 file(s) changed since this graph was indexed (a.ts) — …`. With
+  `egr watch` running it is non-zero only between a save and the end of the run
+  that follows it. The number is for the whole graph, not for the answer, and it
+  is absent (no `indexHealth` at all, on a graph with no blindspots) when
+  nothing is behind. **What it compares:** each file the manifest lists, by
+  modification time against the moment the index run began; a file that is gone
+  counts too. **What it does not see:** a file created since the index (it is not
+  in the manifest; the watcher indexes it, but nothing counts it first), and a
+  changed Markdown document (documents are not in the manifest). A file that was
+  touched without a change counts until the next run, which compares hashes.
+  The check costs one `stat` per indexed file (the MCP server reuses the answer for 1 s).
+- **Limits.** It uses Node's `fs.watch` with `recursive`. Every run hashes every
+  file, so on a very large tree a run costs what reading the tree costs, not
+  what the change costs. **Not tested on Windows**, where a file an editor still
+  holds open can fail to read; it is then left out of that run, as it would be
+  by a manual `egr index`.
+
 ### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]`
 
 When you don't have a symbol name yet (how does X work / where is Y handled), run this first, before grep (XSPEC-531). Every other

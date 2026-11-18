@@ -149,6 +149,13 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因与各自对�
 
 每个工具都返回一个 JSON 文本内容块；失败时返回 `error: <message>` 并带 `isError: true`。
 
+**代码查询上的 `indexHealth`。** `call_chain`、`implementers`、`implemented_specs` 与 `explore` 在答案背后的图谱有话要说时，
+会加上 `indexHealth` 字段，没有就不加（解析干净且是最新的图谱不会多出这个字段）：答案靠近解析不完全或失败的文件时，是
+`possiblyIncomplete`（加 `blindspots`）；已索引的文件**比索引新**或已从磁盘消失、使答案可能描述的是它们的旧内容时，是
+`staleFiles`（加 `staleSample`，最多 20 个名称）。`staleFiles` 算的是整张图谱，不只这个答案；它看不到索引之后才创建的文件。
+请跑 `egr index <dir> --incremental`，或在终端让 `egr watch <dir>` 一直运行（它在每次变动后重跑那个索引，并且与这个 server 并存：
+图谱只在索引运行进行中才被持有）。见 [CLI.md](./CLI.md) 的 `watch`。
+
 有两种失败是“答案”而不是崩溃，而且都不会被当成空结果返回：
 
 - **图里没有这个名字。** 对图里没有的函数调用 `call_chain`、对没见过的 spec id 调用 `impact_analysis`，
