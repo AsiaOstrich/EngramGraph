@@ -510,9 +510,12 @@ export function formatExplore(r: ExploreResult): string {
   const ne = r.notExpanded;
   if (ne && (ne.symbolsTotal > 0 || ne.snippetsTotal > 0 || ne.filesTotal > 0)) {
     lines.push("", `Not expanded${r.truncated ? ` (to stay within ${r.maxChars} characters)` : ""}:`);
-    if (ne.symbolsTotal > 0) lines.push(`  symbols not listed: ${ne.symbols.join(", ")}${ne.symbolsTotal > ne.symbols.length ? ` (+${ne.symbolsTotal - ne.symbols.length} more)` : ""}`);
-    if (ne.snippetsTotal > 0) lines.push(`  source left out for: ${ne.snippets.join(", ")}${ne.snippetsTotal > ne.snippets.length ? ` (+${ne.snippetsTotal - ne.snippets.length} more)` : ""}`);
-    if (ne.filesTotal > 0) lines.push(`  neighbouring files (imports): ${ne.files.join(", ")}${ne.filesTotal > ne.files.length ? ` (+${ne.filesTotal - ne.files.length} more)` : ""}`);
+    // When the names do not fit, say how many are left out; never print a label with an empty list after it.
+    const list = (label: string, names: readonly string[], total: number, noun: string): string =>
+      names.length > 0 ? `  ${label}: ${names.join(", ")}${total > names.length ? ` (+${total - names.length} more)` : ""}` : `  +${total} more ${noun}`;
+    if (ne.symbolsTotal > 0) lines.push(list("symbols not listed", ne.symbols, ne.symbolsTotal, "symbols not listed"));
+    if (ne.snippetsTotal > 0) lines.push(list("source left out for", ne.snippets, ne.snippetsTotal, "symbols with source left out"));
+    if (ne.filesTotal > 0) lines.push(list("neighbouring files (imports)", ne.files, ne.filesTotal, "neighbouring files (imports)"));
   }
   const fnSyms = r.symbols.filter((s) => s.kind === "Function").slice(0, 3);
   if (fnSyms.length > 0) {

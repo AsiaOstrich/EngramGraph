@@ -189,7 +189,7 @@ egr index . --scip index.scip
 
 ### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]`
 
-「X 怎么运作／Y 在哪里处理」先从这里开始（XSPEC-531）。其他查询都需要你已经有的名称（函数、规格编号）；
+还没有符号名称时（X 怎么运作／Y 在哪里处理），先跑这个命令，再考虑 grep（XSPEC-531）。其他查询都需要你已经有的名称（函数、规格编号）；
 这个命令直接接受一句话。`<topic>` 是一个句子或几个字词（取 `explore` 之后的全部文字，所以引号可省略）。不使用模型。
 它一次打印出：
 
@@ -203,8 +203,10 @@ egr explore "how does it route requests through its middleware chain"
 egr explore "where is the session token validated" --path src/auth --max-chars 3000
 ```
 
-`--path` 把搜索限制在某个目录或文件之下。`--limit`（默认 12）是列出的符号数。**`--max-chars`（默认 6000、下限 400）
-限制整份输出的长度**，文本与 `--json` 都一样；更小的值会被调高到 400。放不下时，先从最不相关的符号开始去掉源代码，
+`--path` 把搜索限制在某个目录或文件之下，路径相对于 `egr index` 所给的目录（与输出中显示的文件路径同一种形式）。
+`--limit`（默认 12、最大 50）是列出的符号数。**`--max-chars`（默认 6000、下限 400、上限 200000）限制整份输出的长度**，
+文本与 `--json` 都一样。超出范围的值会被夹住，不是错误：`--limit 100` 列出 50 个符号，`--max-chars 100` 被调高到 400，
+`--max-chars 500000` 被降到 200000（`--json` 的 `maxChars` 写明实际用了多少）。放不下时，先从最不相关的符号开始去掉源代码，
 再去掉符号，并用「Not expanded」一节列出被去掉的内容（`--json`：`notExpanded`，并有 `truncated: true`）。
 不会静默截断。最后一节 `Next:` 给出可接着用的点查询（`egr callers <name>`）。
 

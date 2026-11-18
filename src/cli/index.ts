@@ -101,22 +101,27 @@ Commands:
                                   --include-unclustered
   related <node-id> [--depth N] [--limit N]
                                   Nodes important *around* a seed (seeded PageRank approx.)
-  explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N]
-                                  Start here for "how does X work / where is Y
-                                  handled": takes a sentence or a few words
-                                  (not an exact name) and prints the symbols
-                                  whose names or paths match, the functions they
-                                  call and are called by (seeded PageRank around
-                                  the matches), the call paths among them and
-                                  each one's source, in one answer. No model.
-                                  --path limits the search to files under a
-                                  directory or file. --limit (default 12) is the
-                                  number of symbols listed. --max-chars (default
-                                  6000, minimum 400) bounds the WHOLE output;
-                                  what does not fit is named under "Not
-                                  expanded", never dropped silently. "NO MATCH"
-                                  means no symbol or path carried the words, not
-                                  that the code does not exist. Read-only.
+  explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]
+                                  When you don't have a symbol name yet (how
+                                  does X work / where is Y handled), run this
+                                  first, before grep: takes a sentence or a few
+                                  words (not an exact name) and prints the
+                                  symbols whose names or paths match, the
+                                  functions they call and are called by (seeded
+                                  PageRank around the matches), the call paths
+                                  among them and each one's source, in one
+                                  answer. No model. --path limits the search to
+                                  files under a directory or file, relative to
+                                  the directory given to "egr index" (as the
+                                  file paths in the output). --limit (default
+                                  12, at most 50) is the number of symbols
+                                  listed. --max-chars (default 6000, 400 to
+                                  200000; a value outside that is clamped)
+                                  bounds the WHOLE output; what does not fit is
+                                  named under "Not expanded", never dropped
+                                  silently. "NO MATCH" means no symbol or path
+                                  carried the words, not that the code does not
+                                  exist. Read-only.
   refs check <path...>            Check file-path/symbol references (in
                                   backticks) inside Markdown files or
                                   directories against the graph + git —

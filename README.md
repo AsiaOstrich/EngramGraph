@@ -322,7 +322,7 @@ read-only: it lists the 11 that read** — the graph queries (`call_chain`,
 `impact_analysis`, `implementers`, `implemented_specs`, and `explore`, which
 takes a plain-language question such as "how does it route requests" and
 returns the matching symbols, their call paths and their source in one answer;
-call it first when you do not yet know a function name), diagnostics
+call it first, before grep, when you do not yet have a symbol name), diagnostics
 (`blindspots`, `signatures`, `doctor`), a Markdown reference checker
 (`refs_check`, DEC-115 — see below) and a git-history query for files that
 changed together (`cochange`, XSPEC-514 — it reads git, not the graph) and a

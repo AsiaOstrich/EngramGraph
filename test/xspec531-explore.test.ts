@@ -198,7 +198,7 @@ describe("XSPEC-531 R1/R2: explore through the stdio MCP server", () => {
       const tools = (await client.listTools()).tools;
       const explore = tools.find((t) => t.name === "explore");
       expect(explore, `tools: ${tools.map((t) => t.name).join(", ")}`).toBeDefined();
-      expect(explore!.description).toMatch(/^How does X work \/ where is Y handled — call this first, before grep/);
+      expect(explore!.description).toMatch(/^When you don't have a symbol name yet \(how does X work \/ where is Y handled\), call this first, before grep/);
       expect(explore!.annotations?.readOnlyHint).toBe(true);
       for (const name of ["call_chain", "implementers"]) {
         expect(tools.find((t) => t.name === name)!.description, name).toMatch(/\bexplore\b/);
@@ -313,6 +313,16 @@ describe("XSPEC-531 R1/R3: egr explore through the CLI", () => {
       expect(r.stdout.length, `${extra.join(" ")}\n${r.stdout}`).toBeLessThanOrEqual(800);
       expect(r.stdout).toMatch(/not expanded|notExpanded/i);
     }
+  });
+
+  it("never prints an empty list of names when the names do not fit, only how many are left out [xspec531-cli-empty-names]", () => {
+    // 400 is the floor: the totals fit, the names do not. It used to print "symbols not listed:  (+5 more)".
+    const r = exploreViaCli(GIN_QUESTION, ["--max-chars", "400"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.length, r.stdout).toBeLessThanOrEqual(400);
+    expect(r.stdout, r.stdout).not.toMatch(/:\s+\(\+\d+ more\)/);
+    expect(r.stdout, r.stdout).not.toMatch(/(listed|for|imports):\s*$/m);
+    expect(r.stdout).toMatch(/\+\d+ more symbols not listed/);
   });
 
   it("scopes the seeds to --path, and says NO MATCH when nothing under it fits [xspec531-cli-path]", () => {

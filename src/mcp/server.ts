@@ -63,6 +63,8 @@ import {
   explore,
   DEFAULT_EXPLORE_LIMIT,
   DEFAULT_EXPLORE_MAX_CHARS,
+  MAX_EXPLORE_LIMIT,
+  MAX_EXPLORE_MAX_CHARS,
   NotInGraphError,
   requireFunction,
   requireSpec,
@@ -413,10 +415,10 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     {
       title: "Explore an area of code from a question",
       description:
-        "How does X work / where is Y handled — call this first, before grep. Takes a plain-language topic (words, not an exact name) and returns, in one answer: " +
+        "When you don't have a symbol name yet (how does X work / where is Y handled), call this first, before grep. Takes a plain-language topic (words, not an exact name) and returns, in one answer: " +
         "the symbols whose names or paths match, the functions they call and are called by (ranked by seeded PageRank around the matches), the call paths among them, " +
         "and each symbol's source. No model, deterministic. Use it for architecture questions (\"how does it route requests through its middleware chain\") before reading files one by one. " +
-        "`path` limits the search to files under a directory or file. The WHOLE answer stays within `maxChars` (default " + DEFAULT_EXPLORE_MAX_CHARS + ", minimum 400, which is raised to if lower); " +
+        "`path` limits the search to files under a directory or file, relative to the directory given to `egr index` (the form of the file paths in the answer). `limit` (default " + DEFAULT_EXPLORE_LIMIT + ") is the number of symbols listed, at most " + MAX_EXPLORE_LIMIT + ". The WHOLE answer stays within `maxChars` (default " + DEFAULT_EXPLORE_MAX_CHARS + ", minimum 400 and maximum " + MAX_EXPLORE_MAX_CHARS + ": a value outside that range is clamped, not an error); " +
         "when it does not fit, source is left out from the least relevant symbol first and `notExpanded` names everything left out — `truncated: true` means look there. " +
         "`status: \"no-match\"` means no symbol or file path carried the words (not that the code does not exist). A symbol with no `snippet` carries a `snippetNote` saying why (file not known, moved, or changed since it was indexed). " +
         "`next` lists point queries (`call_chain`) to continue from the symbols found. A topic with no searchable word, or an empty graph, is an error result.",
