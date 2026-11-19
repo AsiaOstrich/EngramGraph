@@ -125,6 +125,15 @@ const READ_ONLY_INSTRUCTIONS =
   "related nodes `egr related <seed-id>` (it installs and builds in the graph, so it is a writer too).";
 
 /**
+ * What the four tools that attach `indexHealth` say about it in their descriptions. `staleFiles` is the one field whose
+ * meaning is not obvious from its name, and an assistant that reads "indexHealth is absent" as "complete" is wrong
+ * once `staleFiles` can appear on a graph that parsed cleanly: completeness is `possiblyIncomplete`.
+ */
+const INDEX_HEALTH_NOTE =
+  "The answer may carry `indexHealth`. `indexHealth.staleFiles` is how many indexed files were changed on disk after the last index (or are gone), counted for the whole graph, not for this answer: the answer may describe their old content, so re-run `egr index <dir> --incremental` (or keep `egr watch <dir>` running) before relying on it. " +
+  "To judge whether the answer is complete read `indexHealth.possiblyIncomplete`, not whether `indexHealth` is present.";
+
+/**
  * What EVERY server tells a client at `initialize`, read-only or writable: which tool to start with for which kind of
  * question, and what to do when the index may be out of date. A tool description is read only when the tool is
  * considered; this is read once, up front, so a question that fits `explore` is not answered by grep because `explore`
@@ -259,7 +268,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
         "Needs the function's name: if all you have is a question (\"how does X work\"), call `explore` first. " +
         "A name several functions share is answered, not refused: the result lists every definition (`definitions`, with file and line) " +
         "and `mergedDefinitions` says how many the answer combines — more than 1 means the callers of different functions are in one list (overloads of one class appear as several entries with the same id and different lines). " +
-        "Pass `file` (a path, or its trailing part if unique) to ask about the definition(s) in that file only; a file with no such definition is an error, not an empty list.",
+        "Pass `file` (a path, or its trailing part if unique) to ask about the definition(s) in that file only; a file with no such definition is an error, not an empty list. " +
+        INDEX_HEALTH_NOTE,
       inputSchema: {
         symbol: z.string(),
         direction: z.enum(["callers", "callees", "both"]).optional(),
@@ -369,7 +379,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       title: "Implementers (spec → code)",
       description:
         "Files that declare `// implements <specId>` and the functions they define — 'which code implements this spec?'. Reads IMPLEMENTS(Module→Spec) + DEFINES. " +
-        "To find the code behind a topic when you have no spec id, call `explore`.",
+        "To find the code behind a topic when you have no spec id, call `explore`. " +
+        INDEX_HEALTH_NOTE,
       inputSchema: {
         specId: z.string(),
       },
@@ -392,7 +403,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     {
       title: "Implemented specs (code → spec)",
       description:
-        "Specs a file declares it implements — 'which spec governs this code?'. moduleId is the file's indexed path. Reads IMPLEMENTS(Module→Spec).",
+        "Specs a file declares it implements — 'which spec governs this code?'. moduleId is the file's indexed path. Reads IMPLEMENTS(Module→Spec). " +
+        INDEX_HEALTH_NOTE,
       inputSchema: {
         moduleId: z.string(),
       },
@@ -461,7 +473,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
         "`status: \"no-match\"` means no symbol or file path carried the words (not that the code does not exist). A symbol with no `snippet` carries a `snippetNote` saying why (file not known, moved, or changed since it was indexed). " +
         "Test code (`*_test.go`, `*.test.*`, `*.spec.*`, `test/`, `tests/`, `__tests__/`) is left out and only counted in `testsLeftOut`, because tests repeat the topic's words and crowd out the code they test; pass `includeTests: true` to list them like any other code. " +
         "Symbols with a very generic name (`has`, `get`, `save` ...) or in build/tool configuration files are ranked low and marked with `noise`. " +
-        "`next` lists point queries (`call_chain`) to continue from the symbols found, never from test code or `noise`. A topic with no searchable word, or an empty graph, is an error result.",
+        "`next` lists point queries (`call_chain`) to continue from the symbols found, never from test code or `noise`. A topic with no searchable word, or an empty graph, is an error result. " +
+        INDEX_HEALTH_NOTE,
       inputSchema: {
         topic: z.string().min(1),
         path: z.string().min(1).optional(),

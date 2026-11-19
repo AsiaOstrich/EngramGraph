@@ -273,6 +273,10 @@ egr cochange src/model.ts --limit 5
 # 5. "Does any document still say Superseded without anything declaring the replacement,
 #    or cite a decision that was superseded?" (reads the documents, not the graph; findings alone do not fail it)
 egr lint docs/
+
+# 6. "Keep the graph current while I edit." Catches up once, then re-runs the incremental
+#    index after each change to a source file; an answer says "index is behind" in between
+egr watch .
 ```
 
 The graph DB lives at `ENGRAM_DB` (default `./.engram/graph.db`).

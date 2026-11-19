@@ -53,8 +53,9 @@
 import { statSync, existsSync } from "node:fs";
 
 import { allFiles, isHealthy, readManifest, type ParseManifest } from "./parse-manifest.js";
+import { scanStaleFiles, type StaleScan } from "./stale-files.js";
 
-/** Compact index-health surfaced on a query response (present only when there ARE blindspots). */
+/** Compact index-health surfaced on a query response (present only when there is something to say: blindspots, or files newer than the index). */
 export interface IndexHealth {
   /** Total files across the graph's parse manifest. */
   filesIndexed: number;
@@ -90,6 +91,16 @@ export interface IndexHealth {
    * how many files are affected.
    */
   blindspotsTotal?: number;
+  /**
+   * How many indexed files are newer than the index, or gone from disk — the answer may describe their old content
+   * (see `stale-files.ts` for what is compared and what is not seen). Present only when it is at least 1, so a graph
+   * that is up to date and parsed cleanly still carries no `indexHealth` at all. The cure is `egr index <dir>
+   * --incremental`, or `egr watch <dir>` to have it done on every change. Not scoped to the answer: it counts the
+   * whole graph.
+   */
+  staleFiles?: number;
+  /** Up to 20 of those files, as graph ids. Present iff `staleFiles`. The count is the number to report. */
+  staleSample?: string[];
 }
 
 /** Directory part of a `/`-separated path (`""` for a top-level file). */
@@ -112,18 +123,19 @@ const MAX_BLINDSPOTS_LISTED = 20;
  * touched. Returns `null` when there is nothing to report (no manifest, or the
  * graph has zero unhealthy files) so callers attach nothing on a healthy graph.
  */
-export function computeIndexHealth(manifest: ParseManifest | null, resultFiles: string[]): IndexHealth | null {
+export function computeIndexHealth(manifest: ParseManifest | null, resultFiles: string[], stale?: StaleScan): IndexHealth | null {
   if (!manifest) return null;
   const files = allFiles(manifest);
   const unhealthy = files.filter((f) => !isHealthy(f));
-  if (unhealthy.length === 0) return null; // healthy graph → no field, no noise
+  const staleCount = stale?.count ?? 0;
+  if (unhealthy.length === 0 && staleCount === 0) return null; // healthy, current graph → no field, no noise
 
   let partial = 0;
   let failed = 0;
   for (const f of unhealthy) (f.failed !== undefined ? failed++ : partial++);
   const health: IndexHealth = { filesIndexed: files.length, partial, failed };
 
-  if (resultFiles.length > 0) {
+  if (unhealthy.length > 0 && resultFiles.length > 0) {
     const resultDirs = [...new Set(resultFiles.map(dirOf))];
     // In graph-id space, like the result files: a root-qualified file (`id`) is found under the
     // directory its Module id names, not under the bare relative path another root also has.
@@ -133,6 +145,10 @@ export function computeIndexHealth(manifest: ParseManifest | null, resultFiles: 
       health.blindspotsTotal = touched.length; // full count — blindspots[] may be truncated
       health.blindspots = touched.slice(0, MAX_BLINDSPOTS_LISTED).map((u) => u.id ?? u.path);
     }
+  }
+  if (stale && staleCount > 0) {
+    health.staleFiles = staleCount;
+    health.staleSample = stale.sample;
   }
   return health;
 }
@@ -197,8 +213,23 @@ export function readIndexHealth(manifestPath: string | undefined, resultFiles: s
     if (manifest === null && existsSync(manifestPath)) {
       return unknown("manifest exists but could not be parsed");
     }
-    return computeIndexHealth(manifest, resultFiles);
+    // The disk is looked at here, not in `computeIndexHealth` (which stays a pure function of the manifest): a manifest
+    // is a record of the last index, and "is anything newer than it" is a question to the files.
+    return computeIndexHealth(manifest, resultFiles, manifest ? scanStaleFiles(manifest) : undefined);
   } catch (err) {
     return unknown(err instanceof Error ? err.message : String(err));
   }
+}
+
+/**
+ * The one line that says the graph is behind its files, for text output (the CLI's query notes and `explore`).
+ * Says how many, names a few, and what to run. Empty when nothing is behind.
+ */
+export function staleNote(h: IndexHealth): string {
+  if (!h.staleFiles) return "";
+  const names = h.staleSample && h.staleSample.length > 0 ? ` (${h.staleSample.slice(0, 3).join(", ")}${h.staleFiles > 3 ? ", …" : ""})` : "";
+  return (
+    `⚠ index is behind: ${h.staleFiles} file(s) changed since this graph was indexed${names} — this answer may not reflect them; ` +
+    `run \`egr index <dir> --incremental\`, or keep \`egr watch <dir>\` running`
+  );
 }

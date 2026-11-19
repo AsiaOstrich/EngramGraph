@@ -18,7 +18,7 @@ import { cmdIndex, cmdCallersAnswer, cmdCalleesAnswer, cmdImplementers, cmdImple
 import type { RefCheckResult } from "./refs-check.js";
 import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
-import { readIndexHealth, describeDefinitionScope, explore, formatExplore, DEFAULT_EXPLORE_LIMIT, DEFAULT_EXPLORE_MAX_CHARS, type IndexHealth } from "../code-graph/index.js";
+import { readIndexHealth, staleNote, describeDefinitionScope, explore, formatExplore, DEFAULT_EXPLORE_LIMIT, DEFAULT_EXPLORE_MAX_CHARS, type IndexHealth } from "../code-graph/index.js";
 import { manifestPathForDb } from "../code-graph/parse-manifest.js";
 import { formatLint } from "../knowledge-graph/lint.js";
 import { unresolvedIdClusters, type DocIdConflict, type ReplacedDocument } from "../knowledge-graph/parser.js";
@@ -28,6 +28,8 @@ import { SKIP_DIRS } from "./walk.js";
 import { isLockContention } from "../graph-db/lease.js";
 import { coChange, formatCoChange, undeterminedMessage, DEFAULT_COCHANGE_COMMITS, DEFAULT_COCHANGE_MAX_FILES, DEFAULT_COCHANGE_LIMIT } from "../cochange/index.js";
 import { checkpointOrWarn } from "../graph-db/checkpoint.js";
+import { startWatch, parseDebounceMs } from "./watch.js";
+import { ignoreClosedOutput } from "./closed-output.js";
 import type { GraphConnection } from "../graph-db/connection.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
@@ -64,6 +66,21 @@ Commands:
                                   hashing every file (see "Incremental index").
                                   Skips a fixed list of directories (see
                                   below); .gitignore is NOT read
+  watch <dir> [--debounce <ms>] [--docs] [--exclude <glob>]...
+                                  Keep the graph in step with the files: first
+                                  catches up with "egr index <dir> --incremental",
+                                  then watches <dir> and, <ms> (default 500)
+                                  after the last change to a source file, runs
+                                  that same incremental index again. Runs until
+                                  stopped (Ctrl-C). The graph is held only while
+                                  an index run is in flight; while another
+                                  process holds it, the run is retried with a
+                                  growing wait and the log says so. Source
+                                  answers say "N file(s) changed since this
+                                  graph was indexed" while the index is behind
+                                  (see "Watch" below). --docs, --exclude,
+                                  --graph and --isolation are passed to the
+                                  index run
   callers <symbol> [--depth N] [--file <path>]
                                   Functions that (transitively) call <symbol>.
                                   A symbol the graph does not contain is an
@@ -235,6 +252,19 @@ Incremental index: egr index <dir> --incremental [--changed-from <git-ref>]
   a wrong graph; without it every file is hashed, which is always correct.
   --docs still indexes every document; --scip is refused.
 
+Watch: egr watch <dir> [--debounce <ms>]
+  Prints "[watch] ready" once the first catch-up index is done, then one
+  "[watch] index done (...)" line per run. A change counts when it is to a file
+  "egr index" would read (a source extension, no extension at all, or .md with
+  --docs) outside the directories index never walks and outside --exclude; the
+  graph's own files never start a run. A run that finds the graph locked by
+  another process is retried after 0.5 s, 1 s, 2 s ... up to 15 s, with a log line
+  each time. A run that fails for any other reason is logged and watching goes on.
+  Stopping (Ctrl-C, or SIGTERM where the platform has one) lets a run in progress
+  finish; a second signal kills it. The graph's own files never start a run.
+  A file that is new since the index is not seen by the "changed since" hint
+  (only files the index already holds are compared), but the watcher indexes it.
+
 Several roots in one graph: a file keeps its path relative to its root as its id
   (src/index.ts), unless another root of the same graph already holds that path.
   Then it is indexed as <last two segments of its root>/<path> (EngramGraph/src/index.ts),
@@ -299,9 +329,11 @@ function healthNote(h: IndexHealth | null): string {
   if (h?.unavailable) {
     return `\n⚠ index health unknown: the parse-health manifest could not be read (${h.unavailable}) — this result is unannotated, not verified`;
   }
-  if (!h?.possiblyIncomplete) return "";
+  // A graph that is behind its files says so first: it applies to every answer, not only the ones near a blindspot.
+  const behind = h?.staleFiles ? `\n${staleNote(h)}` : "";
+  if (!h?.possiblyIncomplete) return behind;
   const n = h.blindspotsTotal ?? h.blindspots?.length ?? 0;
-  return `\n⚠ possibly incomplete: ${n} file(s) near this result parsed partially/failed (see \`egr blindspots\`)`;
+  return `${behind}\n⚠ possibly incomplete: ${n} file(s) near this result parsed partially/failed (see \`egr blindspots\`)`;
 }
 
 /**
@@ -340,11 +372,17 @@ async function main(): Promise<void> {
       file: { type: "string" },
       path: { type: "string" },
       "max-chars": { type: "string" },
+      debounce: { type: "string" },
       "include-tests": { type: "boolean" },
     },
   });
 
   const [cmd, a1, a2] = positionals;
+
+  // A one-shot command whose reader has gone (`| head`, a killed `egr watch` that started this run) still finishes: the
+  // checkpoint and the exit status come after the printing. See closed-output.ts. Not for the commands that talk to a
+  // client or keep running for a reader, where a vanished reader means stop.
+  if (cmd !== "mcp" && cmd !== "serve" && cmd !== "watch") ignoreClosedOutput();
 
   if (values.version) return void process.stdout.write(VERSION + "\n");
   if (values.help || !cmd) return void process.stdout.write(HELP + "\n");
@@ -414,6 +452,26 @@ async function main(): Promise<void> {
       process.exitCode = 1;
     }
     return;
+  }
+
+  // watch opens no graph connection itself: each index run is a child process that holds the graph for its own
+  // lifetime (see watch.ts). It stays above `openGraph` for the same reason cochange does: this process must never
+  // be the one holding the lock between runs.
+  if (cmd === "watch") {
+    if (!a1) throw new Error("watch requires a <dir>");
+    const debounceMs = parseDebounceMs(values.debounce);
+    const w = startWatch({
+      dir: a1,
+      debounceMs,
+      docs: values.docs,
+      exclude: values.exclude,
+      graph: values.graph,
+      isolation: values.isolation,
+      dbPath: resolveDbPath(loc),
+    });
+    process.on("SIGINT", () => w.stop());
+    process.on("SIGTERM", () => w.stop());
+    process.exit(await w.done);
   }
 
   // blindspots reads the parse-health manifest, not a graph connection.

@@ -187,6 +187,63 @@ egr index . --scip index.scip
 `callsSkippedUnresolvedTarget`。若文件有匹配到、但解析结果是零，人类可读输出
 会多打印一行 `WARNING`，而不是把全零结果悄悄当成成功报告。
 
+### `watch <dir> [--debounce <ms>] [--docs] [--exclude <glob>]...`
+
+让图谱跟着文件走，不必手动跑 `egr index`。它先用 `egr index <dir> --incremental` 补齐一次、打印 `[watch] ready`，
+然后监看 `<dir>`：源代码文件最后一次变动后 `--debounce` 毫秒（默认 500），**再跑一次同样的增量索引**。
+这里没有第二套索引逻辑：新增的只有触发，索引就是上面 `--incremental` 说明的那一个（对每个文件做哈希、只解析内容有变的文件、只写入差异）。
+它会一直运行，直到你停止（Ctrl-C，或在有 SIGTERM 的平台上用 SIGTERM；Windows 没有 SIGTERM）。在 macOS、91 个文件的目录、`--debounce 300` 的实测：
+保存后 0.75 到 1.0 秒，查询就能返回改动（三次；含 0.3 秒的去抖动与启动查询的时间）。
+
+```bash
+egr watch .                        # 放在终端或进程管理器下一直跑
+egr watch ./src --debounce 1000 --exclude "generated/**"
+# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index proj --incremental
+# [watch] index done (initial): incremental: indexed in full — the first --incremental run; 210 file(s) parsed, state saved for the next run
+# [watch] ready
+# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: ...
+```
+
+- **什么会触发一次运行。** 变动的文件是 `egr index` 会读的：有源代码扩展名的文件、**没有**扩展名的文件
+  （有 shebang 的 shell 脚本是按内容索引的），以及 `.md`（只在加 `--docs` 时）。不会触发的：index 从不遍历的目录下的一切
+  （`node_modules`、`.git`、`.engram`、`dist` 等；见 `egr --help`），所以图谱自己的文件不会触发自己；
+  `--exclude` 排除的路径（与 `egr index` 相同的 glob）；其他所有扩展名；
+  图谱自己的文件（`<graph>.db`、它的 `.wal`、parse-health manifest 与增量状态文件），不论图谱放在哪里，
+  即使放在 `<dir>` 里面、文件名没有扩展名也一样。找不到事可做的一次运行，只花哈希的成本。
+  `--docs`、`--exclude`、`--graph`、`--isolation` 会原样传给索引运行。持续不断的保存不会把一次运行无限期往后推：
+  最晚 5 秒（或四倍去抖动时间，取较长者）后就会开始。
+- **只在运行进行中才持有图谱。** 每次运行都是一个子进程（`egr index <dir> --incremental`，用同一个 `node`、同一个 `egr` 启动），
+  所以写入锁只存在于那一次运行的时长，进程结束就释放。`egr mcp` 与终端查询在两次运行之间照常工作，
+  `egr watch` 空闲时也能手动跑 `egr index`。**正在运行当中**到达的查询，会像其他查询一样等它结束（MCP server 会重试约 5 秒）。
+  监看进程本身从不打开图谱。
+- **图谱被别人锁住时**（另一个 `egr index`、`egr serve`、一个很长的查询）：这次运行被拒绝，监看器打印
+  `[watch] graph is locked by another writer; retry 1 in 500 ms (…)`，之后等 0.5 秒、1 秒、2 秒……
+  （每次最多间隔 15 秒）再试，试到成功为止。不会有东西丢失：下一次成功的运行会索引自上次成功以来的所有变动。
+  运行因其他原因失败时，会打印在 stderr（`[watch] index failed (…); watching on: …`），监看继续；下一次变动再试。
+  如果**第一次**补齐就失败，`egr watch` 以 `1` 退出（写不进去的图谱不值得监看）。
+- **停止**（Ctrl-C，或在有 SIGTERM 的平台上用 SIGTERM）时会让进行中的运行先完成（并说明这件事），然后以 `0` 退出；
+  再发一次信号则杀掉该次运行并以 `1` 退出。终端的 Ctrl-C 会发给前台进程组里的每个进程，所以每次运行都在自己的进程组里启动：
+  只有监看器听得到它，它等着的那次运行不会被打断。（在 macOS 上实测：第一次补齐索引进行中，对整个进程组发 SIGINT。
+  Windows 没有 SIGTERM，而 Ctrl-C 在那里是否不打断运行，未测试。）如果监看器被强制杀掉（SIGKILL、关闭终端），
+  已经开始的那次运行不会跟着被杀：它自己跑完并释放图谱。这次运行的 stdout 与 stderr 是接到监看器的管道，
+  此时管道已经关闭；`egr index` 会忽略由此产生的写入错误（管道已关，与 `egr index … | head` 相同），
+  照常把预写日志（WAL）并回图谱并以 `0` 退出。
+  **重新启动监看器时若看到 `[watch] graph is locked by another writer; retry …`，说明旧监看器留下的那次运行还在跑。**
+  等它结束即可：新的监看器会自己重试，那次运行结束后就继续。等待的时间约等于那一次索引的耗时，再加上至多 15 秒的重试间隔。
+  管道被关闭的行为，以及 `detached` 与 Ctrl-C 的行为，在 Windows 上未测试。
+- **索引现在落后了吗？** 凡是读取 parse-health manifest 的回答——`callers`、`callees`、`implementers`、`implemented-by`、
+  `explore` 的文本输出，以及 `explore --json` 与 MCP 工具 `call_chain`、`implementers`、`implemented_specs`、`explore` 里的
+  `indexHealth`——在有已索引的文件比索引新时都会说出来：`indexHealth.staleFiles` 是数量，`indexHealth.staleSample`
+  列出最多 20 个，文本输出则是 `⚠ index is behind: 1 file(s) changed since this graph was indexed (a.ts) — …`。
+  `egr watch` 运行中，它只在保存到随后那次运行结束之间不是零。这个数字是整张图谱的，不是这个答案的；
+  没有任何落后时（且图谱没有盲点），返回里完全没有 `indexHealth`。**它比较什么：** manifest 列出的每个文件，
+  以修改时间对照索引运行开始的时刻；已不存在的文件也算。**它看不到的：** 索引之后才创建的文件（它不在 manifest 里；
+  监看器会索引它，但没有东西先把它算进来），以及被修改的 Markdown 文档（文档不在 manifest 里）。
+  只被 touch 而内容没变的文件会一直算到下一次运行，因为那次运行比对的是哈希。检查的成本是每个已索引文件一次 `stat`
+  （MCP server 会把答案复用 1 秒）。
+- **限制。** 它使用 Node 的 `fs.watch` 搭配 `recursive`。每次运行都会哈希每个文件，所以在非常大的目录树上，
+  一次运行的成本是读完整棵树的成本，而不是改动本身的成本。**未在 Windows 上测试**；文件被其他程序占用时的行为未验证。
+
 ### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--include-tests] [--json]`
 
 还没有符号名称时（X 怎么运作／Y 在哪里处理），先跑这个命令，再考虑 grep（XSPEC-531）。其他查询都需要你已经有的名称（函数、规格编号）；
