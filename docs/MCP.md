@@ -165,7 +165,7 @@ to date adds no field): `possiblyIncomplete` (+ `blindspots`) when the answer is
 files that parsed partially or failed, and `staleFiles` (+ `staleSample`, up to 20
 names) when indexed files are **newer than the index** or gone from disk, so the answer
 may describe their old content. `staleFiles` counts the whole graph, not just the
-answer; it does not see files created since the index. Run `egr index <dir>
+answer; it does not see files created since the index. `indexHealth` can now be present on a graph that parsed cleanly, so judge completeness by `possiblyIncomplete`, not by whether `indexHealth` exists. Run `egr index <dir>
 --incremental`, or keep `egr watch <dir>` running in a terminal (it re-runs that index
 after each change and works alongside this server: the graph is held only while an
 index run is in flight). See `watch` in [CLI.md](./CLI.md).

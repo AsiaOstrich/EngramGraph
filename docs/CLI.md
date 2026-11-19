@@ -276,7 +276,7 @@ then watches `<dir>` and, `--debounce` ms (default 500) after the last change to
 runs **that same incremental index** again. There is no second indexing path: the
 trigger is new, the index is the one described under `--incremental` above (it
 hashes every file, parses the ones whose content changed, writes only the
-difference). Runs until you stop it (Ctrl-C or SIGTERM). Measured on macOS on a
+difference). Runs until you stop it (Ctrl-C, or SIGTERM where the platform has one; Windows has none). Measured on macOS on a
 91-file tree with `--debounce 300`: a saved edit was returned by a query 0.75 to
 1.0 s later (three runs; this includes the 0.3 s debounce and starting the query).
 
@@ -294,7 +294,10 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   indexed by its content), and `.md` only with `--docs`. Not: anything under a
   directory index never walks (`node_modules`, `.git`, `.engram`, `dist`, …; see
   `egr --help`), so the graph's own files cannot start a run of their own; anything
-  `--exclude` leaves out (the same globs as `egr index`); every other extension.
+  `--exclude` leaves out (the same globs as `egr index`); every other extension;
+  the graph's own files (`<graph>.db`, its `.wal`, the parse-health manifest and the
+  incremental state), wherever the graph is, even inside `<dir>` under a name
+  with no extension.
   A run that finds nothing to do costs the hashing and nothing else. `--docs`,
   `--exclude`, `--graph` and `--isolation` are passed on to the index run.
   A steady stream of saves does not postpone a run for ever: it starts at the
@@ -315,8 +318,16 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   …`) and the watcher keeps watching; the next change tries again. If the
   **first** catch-up fails, `egr watch` exits `1` (a graph it cannot write is not
   worth watching).
-- **Stopping** lets a run in progress finish (it says so), then exits `0`; a
-  second signal kills the run and exits `1`.
+- **Stopping** (Ctrl-C, or SIGTERM where the platform has one) lets a run in
+  progress finish (it says so), then exits `0`; a second signal kills the run and
+  exits `1`. A terminal's Ctrl-C goes to every process in the foreground process
+  group, so each run is started in its own process group: only the watcher hears
+  it, and the run it is waiting for is not interrupted. (Checked on macOS by
+  sending SIGINT to the whole group while the first catch-up index was running.
+  On Windows there is no SIGTERM, and whether Ctrl-C leaves a run alone there is
+  not tested.) If the watcher is killed hard (SIGKILL, a closed terminal), a run
+  already started is not killed with it: it finishes on its own and releases the
+  graph.
 - **Is the index behind right now?** Every answer that reads the parse-health
   manifest — the text of `callers`, `callees`, `implementers`, `implemented-by`,
   `explore`, and `indexHealth` in `explore --json` and in the MCP tools
@@ -336,9 +347,8 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   The check costs one `stat` per indexed file (the MCP server reuses the answer for 1 s).
 - **Limits.** It uses Node's `fs.watch` with `recursive`. Every run hashes every
   file, so on a very large tree a run costs what reading the tree costs, not
-  what the change costs. **Not tested on Windows**, where a file an editor still
-  holds open can fail to read; it is then left out of that run, as it would be
-  by a manual `egr index`.
+  what the change costs. **Not tested on Windows**; what happens there when
+  another program holds a file open is not verified.
 
 ### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]`
 

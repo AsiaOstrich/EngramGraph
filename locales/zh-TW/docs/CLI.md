@@ -192,7 +192,7 @@ egr index . --scip index.scip
 讓圖譜跟著檔案走，不必手動跑 `egr index`。它先用 `egr index <dir> --incremental` 補齊一次、印出 `[watch] ready`，
 然後監看 `<dir>`：原始碼檔案最後一次變動後 `--debounce` 毫秒（預設 500），**再跑一次同樣的增量索引**。
 這裡沒有第二套索引邏輯：新增的只有觸發，索引就是上面 `--incremental` 說明的那一個（對每個檔案做雜湊、只解析內容有變的檔案、只寫入差異）。
-它會一直執行，直到你停止（Ctrl-C 或 SIGTERM）。在 macOS、91 個檔案的目錄、`--debounce 300` 的實測：
+它會一直執行，直到你停止（Ctrl-C，或在有 SIGTERM 的平台上用 SIGTERM；Windows 沒有 SIGTERM）。在 macOS、91 個檔案的目錄、`--debounce 300` 的實測：
 存檔後 0.75 到 1.0 秒，查詢就回傳得到改動（三次；含 0.3 秒的去抖動與啟動查詢的時間）。
 
 ```bash
@@ -207,7 +207,9 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
 - **什麼會觸發一次執行。** 變動的檔案是 `egr index` 會讀的：有原始碼副檔名的檔案、**沒有**副檔名的檔案
   （有 shebang 的 shell 腳本是依內容索引的），以及 `.md`（只在加 `--docs` 時）。不會觸發的：index 從不走訪的目錄底下的一切
   （`node_modules`、`.git`、`.engram`、`dist` 等；見 `egr --help`），所以圖譜自己的檔案不會觸發自己；
-  `--exclude` 排除的路徑（與 `egr index` 相同的 glob）；其他所有副檔名。找不到事可做的一次執行，只花雜湊的成本。
+  `--exclude` 排除的路徑（與 `egr index` 相同的 glob）；其他所有副檔名；
+  圖譜自己的檔案（`<graph>.db`、它的 `.wal`、parse-health manifest 與增量狀態檔），不論圖譜放在哪裡，
+  即使放在 `<dir>` 裡面、檔名沒有副檔名也一樣。找不到事可做的一次執行，只花雜湊的成本。
   `--docs`、`--exclude`、`--graph`、`--isolation` 會原樣傳給索引執行。持續不斷的存檔不會把一次執行無限期往後推：
   最晚 5 秒（或四倍去抖動時間，取較長者）後就會開始。
 - **只在執行進行中才持有圖譜。** 每次執行都是一個子行程（`egr index <dir> --incremental`，用同一個 `node`、同一個 `egr` 啟動），
@@ -219,7 +221,11 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   （每次最多間隔 15 秒）再試，試到成功為止。不會有東西遺失：下一次成功的執行會索引自上次成功以來的所有變動。
   執行因其他原因失敗時，會印在 stderr（`[watch] index failed (…); watching on: …`），監看繼續；下一次變動再試。
   如果**第一次**補齊就失敗，`egr watch` 以 `1` 結束（寫不進去的圖譜不值得監看）。
-- **停止**時會讓進行中的執行先完成（並說明這件事），然後以 `0` 結束；再送一次訊號則殺掉該次執行並以 `1` 結束。
+- **停止**（Ctrl-C，或在有 SIGTERM 的平台上用 SIGTERM）時會讓進行中的執行先完成（並說明這件事），然後以 `0` 結束；
+  再送一次訊號則殺掉該次執行並以 `1` 結束。終端機的 Ctrl-C 會送給前景行程群組裡的每個行程，所以每次執行都在自己的行程群組裡啟動：
+  只有監看器聽得到它，它等著的那次執行不會被打斷。（在 macOS 上實測：第一次補齊索引進行中，對整個行程群組送 SIGINT。
+  Windows 沒有 SIGTERM，而 Ctrl-C 在那裡是否不打斷執行，未測試。）如果監看器被強制殺掉（SIGKILL、關閉終端機），
+  已經開始的那次執行不會跟著被殺：它自己跑完並釋放圖譜。
 - **索引現在落後了嗎？** 凡是讀取 parse-health manifest 的回答——`callers`、`callees`、`implementers`、`implemented-by`、
   `explore` 的文字輸出，以及 `explore --json` 與 MCP 工具 `call_chain`、`implementers`、`implemented_specs`、`explore` 裡的
   `indexHealth`——在有已索引的檔案比索引新時都會說出來：`indexHealth.staleFiles` 是數量，`indexHealth.staleSample`
@@ -231,8 +237,7 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   只被 touch 而內容沒變的檔案會一直算到下一次執行，因為那次執行比對的是雜湊。檢查的成本是每個已索引檔案一次 `stat`
   （MCP server 會把答案重用 1 秒）。
 - **限制。** 它使用 Node 的 `fs.watch` 搭配 `recursive`。每次執行都會雜湊每個檔案，所以在非常大的目錄樹上，
-  一次執行的成本是讀完整棵樹的成本，而不是改動本身的成本。**未在 Windows 上測試**：編輯器還開著的檔案可能讀取失敗，
-  該檔案會被排除在那次執行之外，與手動 `egr index` 的情況相同。
+  一次執行的成本是讀完整棵樹的成本，而不是改動本身的成本。**未在 Windows 上測試**；檔案被其他程式占用時的行為未驗證。
 
 ### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]`
 

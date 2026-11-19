@@ -158,6 +158,19 @@ describe("argument rules", () => {
   });
 });
 
+describe("the graph's own files", () => {
+  it("a change to the graph file or the files written beside it starts no run, even when the graph lies inside the watched directory", async () => {
+    const db = join(dir, "graphfile"); // no extension: it would count as a source file otherwise
+    await startReady({ dbPath: db });
+    for (const f of ["graphfile", "graphfile.wal", "graphfile.parse-manifest.json", "graphfile.incremental-state.json"]) fsEvent(f);
+    await flush(30_000);
+    expect(spawned()).toBe(1); // the catch-up only
+    fsEvent("other-script"); // a file with no extension that is not the graph still starts one
+    await flush(200);
+    expect(spawned()).toBe(2);
+  });
+});
+
 describe("start-up: the catch-up index", () => {
   it("watches recursively and runs `egr index <dir> --incremental` with every option passed on, then says ready", async () => {
     start({ docs: true, exclude: ["a/**", "b"], graph: "g.db", isolation: "strict" });
@@ -167,7 +180,8 @@ describe("start-up: the catch-up index", () => {
     const { args, opts } = world.children[0]!;
     const i = args.indexOf("index");
     expect(args.slice(i)).toEqual(["index", dir, "--incremental", "--docs", "--exclude", "a/**", "--exclude", "b", "--graph", "g.db", "--isolation", "strict"]);
-    expect(opts).toMatchObject({ stdio: ["ignore", "pipe", "pipe"] });
+    // `detached`: its own process group, so a terminal's Ctrl-C does not reach the run (the entry-level proof is in egr-watch.test.ts).
+    expect(opts).toMatchObject({ stdio: ["ignore", "pipe", "pipe"], detached: true, windowsHide: true });
     expect(lines).not.toContain("[watch] ready"); // not until the catch-up index is done
 
     await endRun(0, "indexed 3 files\nincremental: 1 changed, 2 unchanged\n");

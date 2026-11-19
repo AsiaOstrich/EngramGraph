@@ -254,7 +254,8 @@ Watch: egr watch <dir> [--debounce <ms>]
   graph's own files never start a run. A run that finds the graph locked by
   another process is retried after 0.5 s, 1 s, 2 s ... up to 15 s, with a log line
   each time. A run that fails for any other reason is logged and watching goes on.
-  Stopping (Ctrl-C / SIGTERM) lets a run in progress finish; a second signal kills it.
+  Stopping (Ctrl-C, or SIGTERM where the platform has one) lets a run in progress
+  finish; a second signal kills it. The graph's own files never start a run.
   A file that is new since the index is not seen by the "changed since" hint
   (only files the index already holds are compared), but the watcher indexes it.
 
@@ -447,7 +448,15 @@ async function main(): Promise<void> {
   if (cmd === "watch") {
     if (!a1) throw new Error("watch requires a <dir>");
     const debounceMs = parseDebounceMs(values.debounce);
-    const w = startWatch({ dir: a1, debounceMs, docs: values.docs, exclude: values.exclude, graph: values.graph, isolation: values.isolation });
+    const w = startWatch({
+      dir: a1,
+      debounceMs,
+      docs: values.docs,
+      exclude: values.exclude,
+      graph: values.graph,
+      isolation: values.isolation,
+      dbPath: resolveDbPath(loc),
+    });
     process.on("SIGINT", () => w.stop());
     process.on("SIGTERM", () => w.stop());
     process.exit(await w.done);

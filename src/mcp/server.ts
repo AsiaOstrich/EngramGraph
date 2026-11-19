@@ -125,6 +125,15 @@ const READ_ONLY_INSTRUCTIONS =
   "related nodes `egr related <seed-id>` (it installs and builds in the graph, so it is a writer too).";
 
 /**
+ * What the four tools that attach `indexHealth` say about it in their descriptions. `staleFiles` is the one field whose
+ * meaning is not obvious from its name, and an assistant that reads "indexHealth is absent" as "complete" is wrong
+ * once `staleFiles` can appear on a graph that parsed cleanly: completeness is `possiblyIncomplete`.
+ */
+const INDEX_HEALTH_NOTE =
+  "The answer may carry `indexHealth`. `indexHealth.staleFiles` is how many indexed files were changed on disk after the last index (or are gone), counted for the whole graph, not for this answer: the answer may describe their old content, so re-run `egr index <dir> --incremental` (or keep `egr watch <dir>` running) before relying on it. " +
+  "To judge whether the answer is complete read `indexHealth.possiblyIncomplete`, not whether `indexHealth` is present.";
+
+/**
  * Register EngramGraph's tools on an MCP server backed by a graph.
  *
  * `graph` is either a {@link GraphSource} (the stdio server passes a
@@ -221,7 +230,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
         "Needs the function's name: if all you have is a question (\"how does X work\"), call `explore` first. " +
         "A name several functions share is answered, not refused: the result lists every definition (`definitions`, with file and line) " +
         "and `mergedDefinitions` says how many the answer combines — more than 1 means the callers of different functions are in one list (overloads of one class appear as several entries with the same id and different lines). " +
-        "Pass `file` (a path, or its trailing part if unique) to ask about the definition(s) in that file only; a file with no such definition is an error, not an empty list.",
+        "Pass `file` (a path, or its trailing part if unique) to ask about the definition(s) in that file only; a file with no such definition is an error, not an empty list. " +
+        INDEX_HEALTH_NOTE,
       inputSchema: {
         symbol: z.string(),
         direction: z.enum(["callers", "callees", "both"]).optional(),
@@ -331,7 +341,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       title: "Implementers (spec → code)",
       description:
         "Files that declare `// implements <specId>` and the functions they define — 'which code implements this spec?'. Reads IMPLEMENTS(Module→Spec) + DEFINES. " +
-        "To find the code behind a topic when you have no spec id, call `explore`.",
+        "To find the code behind a topic when you have no spec id, call `explore`. " +
+        INDEX_HEALTH_NOTE,
       inputSchema: {
         specId: z.string(),
       },
@@ -354,7 +365,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
     {
       title: "Implemented specs (code → spec)",
       description:
-        "Specs a file declares it implements — 'which spec governs this code?'. moduleId is the file's indexed path. Reads IMPLEMENTS(Module→Spec).",
+        "Specs a file declares it implements — 'which spec governs this code?'. moduleId is the file's indexed path. Reads IMPLEMENTS(Module→Spec). " +
+        INDEX_HEALTH_NOTE,
       inputSchema: {
         moduleId: z.string(),
       },
@@ -421,7 +433,8 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
         "`path` limits the search to files under a directory or file, relative to the directory given to `egr index` (the form of the file paths in the answer). `limit` (default " + DEFAULT_EXPLORE_LIMIT + ") is the number of symbols listed, at most " + MAX_EXPLORE_LIMIT + ". The WHOLE answer stays within `maxChars` (default " + DEFAULT_EXPLORE_MAX_CHARS + ", minimum 400 and maximum " + MAX_EXPLORE_MAX_CHARS + ": a value outside that range is clamped, not an error); " +
         "when it does not fit, source is left out from the least relevant symbol first and `notExpanded` names everything left out — `truncated: true` means look there. " +
         "`status: \"no-match\"` means no symbol or file path carried the words (not that the code does not exist). A symbol with no `snippet` carries a `snippetNote` saying why (file not known, moved, or changed since it was indexed). " +
-        "`next` lists point queries (`call_chain`) to continue from the symbols found. A topic with no searchable word, or an empty graph, is an error result.",
+        "`next` lists point queries (`call_chain`) to continue from the symbols found. A topic with no searchable word, or an empty graph, is an error result. " +
+        INDEX_HEALTH_NOTE,
       inputSchema: {
         topic: z.string().min(1),
         path: z.string().min(1).optional(),

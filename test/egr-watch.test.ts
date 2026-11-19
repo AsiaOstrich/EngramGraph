@@ -21,7 +21,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 import { buildEgr, type BuiltEgr } from "./helpers/build-cli.js";
 import { runEgr } from "./helpers/run-egr.js";
-import { isRelevantChange } from "../src/cli/watch.js";
+import { graphOwnFiles, isRelevantChange } from "../src/cli/watch.js";
 
 const require_ = createRequire(import.meta.url);
 const RYU = require_.resolve("ryugraph");
@@ -65,8 +65,8 @@ interface Watcher {
   stop(): Promise<number | null>;
 }
 
-function startWatch(s: { work: string; proj: string; env: NodeJS.ProcessEnv }, extra: string[] = []): Watcher {
-  const child = spawn(process.execPath, [built.cli, "watch", s.proj, ...extra], { cwd: s.work, env: s.env, stdio: ["ignore", "pipe", "pipe"] });
+function startWatch(s: { work: string; proj: string; env: NodeJS.ProcessEnv }, extra: string[] = [], spawnOpts: { detached?: boolean } = {}): Watcher {
+  const child = spawn(process.execPath, [built.cli, "watch", s.proj, ...extra], { cwd: s.work, env: s.env, stdio: ["ignore", "pipe", "pipe"], ...spawnOpts });
   let out = "";
   let err = "";
   child.stdout!.on("data", (d) => (out += String(d)));
@@ -170,6 +170,25 @@ describe("egr watch: the graph follows the files", () => {
     await w.stop();
   }, 120_000);
 
+  it("a graph file with no extension kept inside the watched directory does not start runs of its own [egr-watch-own-graph]", async () => {
+    const base = scratch();
+    // `egr watch` indexes a file with no extension, and so this graph file would look like one.
+    const db = join(base.proj, "graphfile");
+    const s = { ...base, db, env: { ...base.env, ENGRAM_DB: db } };
+    const w = startWatch(s, ["--debounce", "200"]);
+    await w.waitFor(/\[watch\] ready/);
+    const runs = (): number => (w.out().match(/\[watch\] index done/g) ?? []).length;
+    await sleep(4_000); // twenty debounces: the writes of the catch-up itself have long been seen
+    expect(runs()).toBe(1);
+
+    // ...and the watcher is still following the source.
+    await addFunction(s.proj);
+    await until("freshlyAdded among the callers of helper", 60_000, () => (callersOfHelper(s)?.includes("freshlyAdded") ? true : undefined));
+    await sleep(4_000);
+    expect(runs()).toBe(2); // the one run for the edit; the graph written by it started no third
+    await w.stop();
+  }, 120_000);
+
   it("SIGTERM stops it with exit 0 and leaves the graph readable [egr-watch-stops-cleanly]", async () => {
     if (process.platform === "win32") return; // no SIGTERM to send
     const s = scratch();
@@ -178,6 +197,41 @@ describe("egr watch: the graph follows the files", () => {
     expect(await w.stop()).toBe(0);
     expect(callersOfHelper(s)).toEqual(["main"]);
   }, 120_000);
+
+  it("Ctrl-C reaches the whole foreground process group, and the index run in progress still finishes and leaves a readable graph [egr-watch-ctrl-c-group]", async () => {
+    if (process.platform === "win32") return; // process groups and SIGINT to a group are POSIX
+    const s = scratch();
+    // Enough files that the first catch-up index is still running when the signal arrives (seconds, not milliseconds).
+    for (let i = 0; i < 40; i += 1) {
+      const fns = Array.from({ length: 8 }, (_v, j) => `export function f${i}_${j}(x: number) { return ${j === 0 ? `x + ${i}` : `f${i}_0(x) + ${j}`}; }`);
+      writeFileSync(join(s.proj, `filler${i}.ts`), fns.join("\n") + "\n");
+    }
+    // `detached` makes the watcher the leader of its own process group, which is what a terminal's foreground group is.
+    const w = startWatch(s, ["--debounce", "200"], { detached: true });
+    cleanups.push(() => {
+      try {
+        process.kill(-w.child.pid!, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    });
+    await w.waitFor(/\[watch\] watching/);
+    await sleep(500);
+    process.kill(-w.child.pid!, "SIGINT"); // what the terminal does on Ctrl-C: every process in the group, not only the watcher
+
+    const end = Date.now() + 120_000;
+    while (w.child.exitCode === null && Date.now() < end) await sleep(100);
+    // It was told it was mid-run, waited for the run, and the run was not killed by the same signal.
+    expect(w.out()).toMatch(/\[watch\] stopping: letting the index run in progress finish/);
+    expect(w.err()).not.toMatch(/initial index failed/);
+    expect(w.child.exitCode).toBe(0);
+    expect(w.out()).toMatch(/\[watch\] index done \(initial\)/);
+    // The effect, read back: the graph holds the project, files and all.
+    expect(callersOfHelper(s)).toEqual(["main"]);
+    const r = runEgr(built.cli, ["callers", "f39_0", "--json"], { env: s.env, cwd: s.work });
+    expect(r.status, r.stderr).toBe(0);
+    expect((JSON.parse(r.stdout) as Array<{ name: string }>).map((n) => n.name)).toContain("f39_1"); // the last file's function is in the graph
+  }, 180_000);
 
   it("a second writer can run while `egr watch` is idle: it does not hold the graph between runs [egr-watch-short-hold]", async () => {
     const s = scratch();
@@ -298,6 +352,24 @@ describe("indexHealth.staleFiles: files newer than the index", () => {
     }
   }, 120_000);
 
+  it("the four MCP tools that return indexHealth say in their description what staleFiles means and that completeness is possiblyIncomplete [egr-watch-mcp-descriptions]", async () => {
+    const s = scratch();
+    const client = new Client({ name: "t", version: "0" });
+    await client.connect(new StdioClientTransport({ command: process.execPath, args: [built.mcp], env: { ...s.env } as Record<string, string>, stderr: "ignore" }));
+    try {
+      const tools = (await client.listTools()).tools;
+      for (const name of ["call_chain", "implementers", "implemented_specs", "explore"]) {
+        const d = tools.find((t) => t.name === name)?.description ?? "";
+        expect(d, name).toMatch(/`indexHealth\.staleFiles` is how many indexed files were changed on disk after the last index/);
+        expect(d, name).toMatch(/read `indexHealth\.possiblyIncomplete`, not whether `indexHealth` is present/);
+      }
+      // Tools that do not return indexHealth do not carry the note.
+      expect(tools.find((t) => t.name === "blindspots")?.description ?? "").not.toMatch(/staleFiles/);
+    } finally {
+      await client.close();
+    }
+  }, 60_000);
+
   it("a file deleted after the index counts as newer than it: the graph still holds a file that is gone [egr-watch-stale-deleted]", async () => {
     const s = scratch();
     writeFileSync(join(s.proj, "b.ts"), "export function other() { return 2; }\n");
@@ -326,6 +398,23 @@ describe("which changes start an index run", () => {
     expect(isRelevantChange("dist/out.js", opts)).toBe(false);
     expect(isRelevantChange("README.txt", opts)).toBe(false);
     expect(isRelevantChange("graph.db.wal", opts)).toBe(false);
+  });
+
+  it("the graph's own files never count, wherever they are, even with no extension; a source file with a similar name still does", () => {
+    const own = { dir: "/w/proj", files: graphOwnFiles("/w/proj/graphfile") };
+    const o = { docs: false, exclude: undefined, own };
+    expect(isRelevantChange("graphfile", o)).toBe(false);
+    expect(isRelevantChange("graphfile.wal", o)).toBe(false);
+    expect(isRelevantChange("graphfile.parse-manifest.json", o)).toBe(false);
+    expect(isRelevantChange("graphfile.incremental-state.json", o)).toBe(false);
+    expect(isRelevantChange("sub/graphfile", o)).toBe(true); // another file that happens to share the name
+    expect(isRelevantChange("graphfile.ts", o)).toBe(true);
+    // Without the graph's location nothing is excluded on this ground: a file with no extension counts.
+    expect(isRelevantChange("graphfile", { docs: false, exclude: undefined })).toBe(true);
+    // `.db` form: <name>.db -> <name>.parse-manifest.json / <name>.incremental-state.json
+    const db = { dir: "/w/proj", files: graphOwnFiles("/w/proj/g.db") };
+    expect(isRelevantChange("g.parse-manifest.json", { docs: false, exclude: undefined, own: db })).toBe(false);
+    expect(isRelevantChange("g.ts", { docs: false, exclude: undefined, own: db })).toBe(true);
   });
 
   it("markdown counts only with --docs, and --exclude patterns apply as they do for `egr index`", () => {

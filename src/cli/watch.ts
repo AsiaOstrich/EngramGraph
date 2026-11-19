@@ -22,6 +22,19 @@
  *    close can deadlock beside tree-sitter and that a process has a finite budget of native handles; a process that
  *    lives for days and opens the graph over and over is the shape that meets that budget. A child per run never does.
  *
+ * ## Ctrl-C: the child is in its own process group
+ *
+ * A terminal sends Ctrl-C (SIGINT) to every process in the foreground process group. A child started the plain way is in
+ * the watcher's group, so it receives that SIGINT too and dies mid-run, while the watcher says it is "letting the index
+ * run in progress finish". The index run is therefore started `detached` (its own session and process group on POSIX):
+ * only the watcher hears Ctrl-C, and the watcher alone decides what happens to the run (it lets it finish; a second
+ * Ctrl-C kills it with SIGKILL, by pid). Measured on macOS before the change: SIGINT to the whole group during the first
+ * catch-up index ended the child with no output and the watcher with "the initial index failed", exit 1.
+ * Not tested on Windows: there `detached` gives the child its own console (hidden here with `windowsHide`), which is
+ * what keeps a console Ctrl-C away from it, but that has not been run.
+ * Side effect: if the watcher itself is killed hard (SIGKILL, closed terminal), a run already started is not killed with
+ * it; it finishes on its own and releases the graph.
+ *
  * ## The lock
  *
  * `GraphLease` is the READER's way of holding the graph briefly (read-only, retried for a few seconds). The writer
@@ -37,17 +50,22 @@
  *   and renaming it is seen as a change to the final name on all three.
  * - Every run hashes every file (that is what makes the incremental index correct). On a very large tree a run costs
  *   what reading the tree costs, not what the change costs.
+ * - The graph's own files (`<graph>.db`, `.wal`, the parse-health manifest, the incremental state) never start a run,
+ *   wherever the graph is: a graph named without an extension and kept inside the watched directory would otherwise
+ *   look like "a file with no extension" and keep the watcher indexing its own output.
  * - Documents are watched only with `--docs`, and `indexHealth.staleFiles` (which reads the parse-health manifest)
  *   counts code files only.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { statSync, watch as fsWatch, type FSWatcher } from "node:fs";
-import { basename, extname, resolve } from "node:path";
+import { realpathSync, statSync, watch as fsWatch, type FSWatcher } from "node:fs";
+import { basename, dirname, extname, join, resolve } from "node:path";
 
 import { compileExcludes, type ExcludeMatcher } from "./exclude.js";
 import { CODE_EXTS } from "./run.js";
 import { SKIP_DIRS } from "./walk.js";
+import { statePathForManifest } from "../code-graph/incremental.js";
+import { manifestPathForDb } from "../code-graph/parse-manifest.js";
 import { isLockContention } from "../graph-db/lease.js";
 
 export const DEFAULT_DEBOUNCE_MS = 500;
@@ -70,6 +88,36 @@ export interface RelevanceOptions {
   docs: boolean;
   /** `--exclude` globs, as `egr index` takes them. */
   exclude: readonly string[] | undefined;
+  /**
+   * The files an index run itself writes (see {@link graphOwnFiles}), canonical absolute paths, together with the
+   * canonical watched directory they are compared under. A change to one of them is never relevant.
+   */
+  own?: { dir: string; files: ReadonlySet<string> };
+}
+
+/** The path as the file system sees it: symlinks in the directory part resolved, the file itself need not exist. */
+function canonicalPath(p: string): string {
+  const abs = resolve(p);
+  try {
+    return join(realpathSync(dirname(abs)), basename(abs));
+  } catch {
+    return abs;
+  }
+}
+
+/** Case does not tell two files apart on macOS and Windows (the default file systems there). */
+function foldCase(p: string): string {
+  return process.platform === "darwin" || process.platform === "win32" ? p.toLowerCase() : p;
+}
+
+/**
+ * The files `egr index` writes beside, or as, the graph: the graph file, its write-ahead log, the parse-health manifest
+ * and the incremental state. `dbPath` is what `resolveDbPath` gives the index run (the watcher's own `--graph`,
+ * `--isolation` and environment reach the child unchanged, so both resolve the same path).
+ */
+export function graphOwnFiles(dbPath: string): Set<string> {
+  const manifest = manifestPathForDb(dbPath);
+  return new Set([dbPath, `${dbPath}.wal`, manifest, statePathForManifest(manifest)].map((p) => foldCase(canonicalPath(p))));
 }
 
 /**
@@ -78,7 +126,7 @@ export interface RelevanceOptions {
  * Counts: a file with a source extension `egr index` parses, a file with no extension at all (a shell script with a
  * shebang is indexed by content), and — with `--docs` — Markdown. Does not count: anything under a directory the index
  * never walks (`node_modules`, `.git`, `.engram`, `dist`, … — `SKIP_DIRS`, so the graph's own files cannot start a
- * run of their own), anything `--exclude` leaves out, and every other extension (`.db`, `.wal`, `.json`, `.txt`).
+ * run of their own), the graph's own files (`opts.own`), anything `--exclude` leaves out, and every other extension (`.db`, `.wal`, `.json`, `.txt`).
  * Wrongly saying "yes" costs one run that finds nothing to do; wrongly saying "no" leaves the graph behind, so the
  * unsure case (no extension) says yes.
  */
@@ -90,6 +138,7 @@ export function isRelevantChange(relPath: string, opts: RelevanceOptions): boole
     const matcher = compileExcludes(opts.exclude);
     if (isExcluded(matcher, segments)) return false;
   }
+  if (opts.own && opts.own.files.has(foldCase(join(opts.own.dir, ...segments)))) return false;
   const name = segments[segments.length - 1]!;
   const ext = extname(name).toLowerCase();
   if (ext === "") return true;
@@ -115,6 +164,11 @@ export interface WatchOptions {
   /** `--graph` / `--isolation`, passed on so the child opens the same graph this command would. */
   graph?: string;
   isolation?: string;
+  /**
+   * Where that graph file is (`resolveDbPath`). Changes to it and to the files written beside it do not start a run,
+   * even when it lies inside `dir`. Left out, nothing is excluded on this ground (the unit tests that need no graph).
+   */
+  dbPath?: string;
   /** Status lines (stdout). */
   log?: (line: string) => void;
   /** Failures (stderr). */
@@ -151,7 +205,11 @@ export function startWatch(opts: WatchOptions): Watcher {
   }
   const log = opts.log ?? ((line: string) => void process.stdout.write(line + "\n"));
   const logError = opts.logError ?? ((line: string) => void process.stderr.write(line + "\n"));
-  const relevance: RelevanceOptions = { docs: opts.docs === true, exclude: opts.exclude };
+  const relevance: RelevanceOptions = {
+    docs: opts.docs === true,
+    exclude: opts.exclude,
+    own: opts.dbPath !== undefined ? { dir: canonicalPath(dir), files: graphOwnFiles(opts.dbPath) } : undefined,
+  };
   // Fail now, with `--exclude`'s own message, on a malformed pattern rather than on the first change.
   if (opts.exclude?.length) compileExcludes(opts.exclude);
   // The longest a steady stream of saves can postpone an index run.
@@ -185,7 +243,13 @@ export function startWatch(opts: WatchOptions): Watcher {
       let stdout = "";
       let stderr = "";
       // The one place an index run starts. Cutting this line leaves a watcher that sees changes and does nothing.
-      child = spawn(process.execPath, indexArgs(), { stdio: ["ignore", "pipe", "pipe"], env: process.env }); // watch-spawn-index
+      // `detached`: its own process group, so a terminal's Ctrl-C reaches the watcher and not this run (header: "Ctrl-C").
+      child = spawn(process.execPath, indexArgs(), {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: process.env,
+        detached: true,
+        windowsHide: true,
+      }); // watch-spawn-index
       child.stdout!.on("data", (d) => (stdout += String(d)));
       child.stderr!.on("data", (d) => (stderr += String(d)));
       child.on("error", (err) => {
