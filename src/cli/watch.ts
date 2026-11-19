@@ -33,7 +33,10 @@
  * Not tested on Windows: there `detached` gives the child its own console (hidden here with `windowsHide`), which is
  * what keeps a console Ctrl-C away from it, but that has not been run.
  * Side effect: if the watcher itself is killed hard (SIGKILL, closed terminal), a run already started is not killed with
- * it; it finishes on its own and releases the graph.
+ * it; it finishes on its own and releases the graph. That holds only because `egr index` survives the close of its own
+ * stdout/stderr pipes (the watcher's end is gone): the write error (EPIPE) is ignored (`closed-output.ts`), so the
+ * run still folds the write-ahead log and exits 0. Without that, the run died at the line that prints its summary.
+ * A watcher restarted in that window finds the graph locked and waits for the orphan through the back-off below.
  *
  * ## The lock
  *

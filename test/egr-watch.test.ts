@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -55,6 +55,14 @@ function scratch(): { work: string; proj: string; db: string; env: NodeJS.Proces
 async function addFunction(proj: string): Promise<void> {
   await sleep(60);
   appendFileSync(join(proj, "a.ts"), "export function freshlyAdded() { return helper(); }\n");
+}
+
+/** Enough files that an index run takes seconds, not milliseconds. Each calls the previous function of its file. */
+function addFillers(proj: string): void {
+  for (let i = 0; i < 40; i += 1) {
+    const fns = Array.from({ length: 8 }, (_v, j) => `export function f${i}_${j}(x: number) { return ${j === 0 ? `x + ${i}` : `f${i}_0(x) + ${j}`}; }`);
+    writeFileSync(join(proj, `filler${i}.ts`), fns.join("\n") + "\n");
+  }
 }
 
 interface Watcher {
@@ -232,6 +240,69 @@ describe("egr watch: the graph follows the files", () => {
     expect(r.status, r.stderr).toBe(0);
     expect((JSON.parse(r.stdout) as Array<{ name: string }>).map((n) => n.name)).toContain("f39_1"); // the last file's function is in the graph
   }, 180_000);
+
+  it("the watcher being SIGKILLed mid-run does not stop the index run it started: the orphan exits 0, and the graph and the incremental state are complete [egr-watch-orphan-run]", async () => {
+    if (process.platform === "win32") return; // detached + SIGKILL of a single pid are POSIX; Windows is untested (see CHANGELOG)
+    const s = scratch();
+    addFillers(s.proj);
+    // Record every egr process's start and its exit code: the orphan has no parent left to wait for it.
+    const log = join(s.work, "exit-log.jsonl");
+    const hook = join(s.work, "exit-log.cjs");
+    writeFileSync(
+      hook,
+      `const fs=require("fs");const log=process.env.EGR_TEST_EXIT_LOG;
+       if(log){const cmd=process.argv[2];fs.appendFileSync(log,JSON.stringify({ev:"start",pid:process.pid,cmd})+"\\n");
+       process.on("exit",(code)=>fs.appendFileSync(log,JSON.stringify({ev:"exit",pid:process.pid,cmd,code})+"\\n"));}`,
+    );
+    const env = { ...s.env, EGR_TEST_EXIT_LOG: log, NODE_OPTIONS: `--require=${hook}` };
+    const events = (): Array<{ ev: string; pid: number; cmd: string; code?: number }> =>
+      existsSync(log)
+        ? readFileSync(log, "utf8")
+            .split("\n")
+            .filter(Boolean)
+            .map((l) => JSON.parse(l))
+        : [];
+
+    const w = startWatch({ ...s, env }, ["--debounce", "200"]);
+    const run = await until("the watcher's index run to start", 60_000, () => events().find((e) => e.ev === "start" && e.cmd === "index"));
+    // Only the watcher is killed. Its pipe to the run (stdout and stderr) is closed with it, while the run is still indexing.
+    process.kill(w.child.pid!, "SIGKILL");
+    const exited = await until("the orphaned index run to exit", 120_000, () => events().find((e) => e.ev === "exit" && e.pid === run.pid));
+    expect(w.child.exitCode === null ? "SIGKILL" : w.child.signalCode, "the watcher died by the kill").toBe("SIGKILL");
+    // It was killed by neither the signal nor a write to the closed pipe: it finished and exited 0.
+    expect(exited.code).toBe(0);
+
+    // The effect, read back. The graph reads and holds the whole project (the last file too).
+    expect(callersOfHelper(s)).toEqual(["main"]);
+    const r = runEgr(built.cli, ["callers", "f39_0", "--json"], { env: s.env, cwd: s.work });
+    expect(r.status, r.stderr).toBe(0);
+    expect((JSON.parse(r.stdout) as Array<{ name: string }>).map((n) => n.name)).toContain("f39_1");
+    // The incremental state is whole: the next incremental run finds nothing left to parse.
+    const again = runEgr(built.cli, ["index", s.proj, "--incremental"], { env: s.env, cwd: s.work });
+    expect(again.status, again.stderr).toBe(0);
+    expect(again.stdout).toMatch(/incremental: 0 file\(s\) parsed \(0 changed, 0 new\)/);
+  }, 180_000);
+
+  it("`egr index` whose stdout and stderr readers are gone (a closed pipe, `| head`) still finishes: exit 0, graph and incremental state written [egr-index-closed-pipe]", async () => {
+    if (process.platform === "win32") return;
+    const s = scratch();
+    const c = spawn(process.execPath, [built.cli, "index", s.proj, "--incremental"], { cwd: s.work, env: s.env, stdio: ["ignore", "pipe", "pipe"] });
+    cleanups.push(() => c.kill("SIGKILL"));
+    c.stdout!.destroy(); // the reader hangs up before the run has anything to say
+    c.stderr!.destroy();
+    const code = await new Promise<number | null>((res) => {
+      const t = setTimeout(() => res(-1), 60_000);
+      c.on("exit", (x) => {
+        clearTimeout(t);
+        res(x);
+      });
+    });
+    expect(code).toBe(0);
+    expect(callersOfHelper(s)).toEqual(["main"]);
+    const again = runEgr(built.cli, ["index", s.proj, "--incremental"], { env: s.env, cwd: s.work });
+    expect(again.status, again.stderr).toBe(0);
+    expect(again.stdout).toMatch(/incremental: 0 file\(s\) parsed \(0 changed, 0 new\)/);
+  }, 120_000);
 
   it("a second writer can run while `egr watch` is idle: it does not hold the graph between runs [egr-watch-short-hold]", async () => {
     const s = scratch();

@@ -29,6 +29,7 @@ import { isLockContention } from "../graph-db/lease.js";
 import { coChange, formatCoChange, undeterminedMessage, DEFAULT_COCHANGE_COMMITS, DEFAULT_COCHANGE_MAX_FILES, DEFAULT_COCHANGE_LIMIT } from "../cochange/index.js";
 import { checkpointOrWarn } from "../graph-db/checkpoint.js";
 import { startWatch, parseDebounceMs } from "./watch.js";
+import { ignoreClosedOutput } from "./closed-output.js";
 import type { GraphConnection } from "../graph-db/connection.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
@@ -371,6 +372,11 @@ async function main(): Promise<void> {
   });
 
   const [cmd, a1, a2] = positionals;
+
+  // A one-shot command whose reader has gone (`| head`, a killed `egr watch` that started this run) still finishes: the
+  // checkpoint and the exit status come after the printing. See closed-output.ts. Not for the commands that talk to a
+  // client or keep running for a reader, where a vanished reader means stop.
+  if (cmd !== "mcp" && cmd !== "serve" && cmd !== "watch") ignoreClosedOutput(); // closed-output-ignore
 
   if (values.version) return void process.stdout.write(VERSION + "\n");
   if (values.help || !cmd) return void process.stdout.write(HELP + "\n");

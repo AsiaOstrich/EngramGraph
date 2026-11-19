@@ -327,7 +327,13 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   On Windows there is no SIGTERM, and whether Ctrl-C leaves a run alone there is
   not tested.) If the watcher is killed hard (SIGKILL, a closed terminal), a run
   already started is not killed with it: it finishes on its own and releases the
-  graph.
+  graph. The run's stdout and stderr are pipes to the watcher, which are closed
+  by then; `egr index` ignores the write error that causes (a closed pipe, as with
+  `egr index … | head`) and goes on to fold the write-ahead log and exit `0`.
+  **If you restart the watcher and see `[watch] graph is locked by another writer;
+  retry …`, the run the old watcher left behind is still going.** Wait: the new
+  watcher retries by itself and carries on once that run ends. How long that
+  takes is how long that one index run takes, nothing more.
 - **Is the index behind right now?** Every answer that reads the parse-health
   manifest — the text of `callers`, `callees`, `implementers`, `implemented-by`,
   `explore`, and `indexHealth` in `explore --json` and in the MCP tools

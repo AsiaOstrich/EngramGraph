@@ -225,7 +225,11 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   再发一次信号则杀掉该次运行并以 `1` 退出。终端的 Ctrl-C 会发给前台进程组里的每个进程，所以每次运行都在自己的进程组里启动：
   只有监看器听得到它，它等着的那次运行不会被打断。（在 macOS 上实测：第一次补齐索引进行中，对整个进程组发 SIGINT。
   Windows 没有 SIGTERM，而 Ctrl-C 在那里是否不打断运行，未测试。）如果监看器被强制杀掉（SIGKILL、关闭终端），
-  已经开始的那次运行不会跟着被杀：它自己跑完并释放图谱。
+  已经开始的那次运行不会跟着被杀：它自己跑完并释放图谱。这次运行的 stdout 与 stderr 是接到监看器的管道，
+  此时管道已经关闭；`egr index` 会忽略由此产生的写入错误（管道已关，与 `egr index … | head` 相同），
+  照常把预写日志（WAL）并回图谱并以 `0` 退出。
+  **重新启动监看器时若看到 `[watch] graph is locked by another writer; retry …`，说明旧监看器留下的那次运行还在跑。**
+  等它结束即可：新的监看器会自己重试，那次运行结束后就继续。等待的时间只取决于那一次索引本身的耗时。
 - **索引现在落后了吗？** 凡是读取 parse-health manifest 的回答——`callers`、`callees`、`implementers`、`implemented-by`、
   `explore` 的文本输出，以及 `explore --json` 与 MCP 工具 `call_chain`、`implementers`、`implemented_specs`、`explore` 里的
   `indexHealth`——在有已索引的文件比索引新时都会说出来：`indexHealth.staleFiles` 是数量，`indexHealth.staleSample`
