@@ -6,7 +6,7 @@
  * ## Why it exists
  *
  * Every other query needs a name the asker does not have yet (`call_chain` a function, `impact_analysis` a spec id,
- * `related` a node id). In the #91 trial an assistant asked how something works used none of them in 16 runs and went
+ * `related` a node id). Asked how something works, an assistant used none of them and went
  * to grep. This takes the sentence.
  *
  * ## What it does, with no model
@@ -24,6 +24,23 @@
  *     same idea as `related`, and it is computed here, in process, on purpose — see below.
  *  5. Read the source of each symbol from the file, between its recorded start line and the next definition in that
  *     file (at most {@link MAX_SNIPPET_LINES} lines).
+ *
+ * ## What the ranking is told NOT to trust (XSPEC-531 follow-up; replays of a how-does-it-work question on gin and excalidraw)
+ *
+ * Replaying real questions on two real projects showed the answer's limited room going to code that is near the
+ * words but is not the answer:
+ *
+ *  - gin: 7 of 12 listed symbols were test functions (`*_test.go`). Test names repeat the words of the feature they
+ *    test, so they out-scored the code (`combineHandlers`, `addRoute`) and, through the calls they make, pulled more
+ *    test helpers into the neighbourhood. Test code is therefore left OUT of seeds and neighbourhood unless the caller
+ *    asks for it (`includeTests`), and the answer says how many it left out ({@link ExploreResult.testsLeftOut}).
+ *  - excalidraw: `has`, `save`, `error`, `config` were listed. They are not near the words; they are called from
+ *    everywhere (the graph binds a call to a bare name), so random-walk mass flows into them. Two kinds of
+ *    result are pushed down ({@link NOISE_FACTOR}): functions with a short generic name ({@link GENERIC_NAMES}) and
+ *    functions in build/tool configuration files ({@link isToolingPath}). They are still listed when there is room;
+ *    they just never outrank code that is about the topic.
+ *
+ * `next` only recommends symbols that are neither test code nor pushed down.
  *
  * ## Why this does not call `related`
  *
@@ -143,6 +160,77 @@ export function nameStems(name: string): string[] {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Test code and noise (see the module doc)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** Directory names that mark a file as test code (any segment of the path except the file name). */
+const TEST_DIR_SEGMENTS: ReadonlySet<string> = new Set(["test", "tests", "__tests__", "__test__", "testdata"]);
+/** File-name shapes of test code: `x_test.go`, `x.test.ts`, `x.spec.js`, `test_x.py`, `x_spec.rb`, `XTest.java`, `XTests.cs`. */
+const TEST_FILE_PATTERNS: readonly RegExp[] = [
+  /_test\.[^/.]+$/,
+  /\.(?:test|spec)\.[^/.]+$/,
+  /(?:^|\/)test_[^/]+\.py$/,
+  /_spec\.rb$/,
+  /Tests?\.(?:java|kt|cs|scala)$/,
+];
+
+/** Whether a module id (a file path as stored, `/`-separated) is test code. */
+export function isTestPath(file: string): boolean {
+  const p = toPosixPath(file);
+  if (TEST_FILE_PATTERNS.some((re) => re.test(p))) return true;
+  const segments = p.split("/").slice(0, -1);
+  return segments.some((seg) => TEST_DIR_SEGMENTS.has(seg.toLowerCase()));
+}
+
+/**
+ * A pushed-down result's rank is multiplied by this. 0.1 puts a hub such as `has` (which can hold 2-3x the share of a
+ * real match in a small neighbourhood) below the real matches without hiding it when nothing better is left.
+ */
+export const NOISE_FACTOR = 0.1;
+
+/**
+ * Names so common that a function carrying one says nothing about the topic. Deliberately a list and not "short
+ * names": gin's answer to "how are requests routed through the middleware chain" is `Use`, `Next` and `addRoute`, so
+ * three or four letters is not a sign of noise. Verbs that name a real job (`handle`, `render`, `update`, `create`,
+ * `parse`) are not here for the same reason.
+ */
+export const GENERIC_NAMES: ReadonlySet<string> = new Set([
+  "has", "get", "set", "put", "add", "del", "delete", "remove", "save", "load", "read", "write", "open", "close",
+  "start", "stop", "run", "do", "is", "new", "init", "main", "config", "error", "log", "on", "off", "emit", "each",
+]);
+
+/** Build/tool configuration files: `vite.config.ts`, `woff2-vite-plugins.js`, `eslint.config.mjs`, anything `*.config.*`, anything under `scripts/`. */
+const TOOLING_FILE_PATTERNS: readonly RegExp[] = [
+  /(?:^|[/._-])(?:vite|vitest|webpack|rollup|eslint|babel|jest|karma|tsup|esbuild|postcss|tailwind|prettier|gulpfile|gruntfile)(?:[._-][^/]*)?\.[cm]?[jt]sx?$/i,
+  /\.config\.[^/]+$/i,
+  /(?:^|\/)scripts\//,
+];
+
+export function isToolingPath(file: string): boolean {
+  const p = toPosixPath(file);
+  return TOOLING_FILE_PATTERNS.some((re) => re.test(p));
+}
+
+/** A topic that is itself about build or tool configuration; then tooling files are the answer, not noise. */
+const TOOLING_TOPIC_STEMS: ReadonlySet<string> = new Set(["vite", "vitest", "webpack", "rollup", "eslint", "babel", "jest", "build", "config", "script", "bundl", "lint", "tooling"]);
+
+export type NoiseKind = "generic-name" | "build-tooling";
+
+/**
+ * Why a function is pushed down, or `undefined` when it is not. A generic name is forgiven when the file path carries
+ * one of the topic's words (`save` in `scene/save.ts` for "save the scene"); a tooling file is forgiven when the topic
+ * is about tooling.
+ */
+export function noiseOf(name: string, file: string | null, stems: readonly string[]): NoiseKind | undefined {
+  if (file !== null && isToolingPath(file) && !stems.some((q) => TOOLING_TOPIC_STEMS.has(q))) return "build-tooling";
+  if (GENERIC_NAMES.has(name.toLowerCase())) {
+    const pathStems = file === null ? [] : nameStems(file);
+    if (!stems.some((q) => pathStems.some((n) => stemsMatch(q, n)))) return "generic-name";
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -155,8 +243,10 @@ export interface ExploreSymbol {
   line?: number;
   /** `seed`: matched the words. `neighbor`: reached by calls from a seed. */
   role: "seed" | "neighbor";
-  /** Seeded-PageRank share of the neighbourhood, 0..1. Comparable within one answer only. */
+  /** Seeded-PageRank share of the neighbourhood, 0..1. Comparable within one answer only. Already multiplied by {@link NOISE_FACTOR} when `noise` is set. */
   rank: number;
+  /** Set when the symbol was pushed down because it looks like noise rather than part of the topic (see the module doc). Absent for ordinary symbols. */
+  noise?: NoiseKind;
   /** The source, from the symbol's line to the next definition in its file (cut at {@link MAX_SNIPPET_LINES}, or at the size limit, saying so). */
   snippet?: string;
   /** Why there is no `snippet` when one could have been shown (file unknown, moved, changed since indexing). */
@@ -187,8 +277,12 @@ export interface ExploreResult {
   symbols: ExploreSymbol[];
   /** Call chains among the listed symbols, `A → B → C`, most relevant first. */
   callPaths: string[];
-  /** Point queries that continue from here, written as MCP tool calls. */
+  /** Point queries that continue from here, written as MCP tool calls. Only symbols that are neither test code nor pushed down as noise. */
   next: string[];
+  /** One sentence on how to read the answer: what the source shown stands for and where what was not shown is named. Dropped first when `maxChars` is tiny. */
+  note?: string;
+  /** How many test functions (matched the words, or called/called by the matches) were left out because `includeTests` was not set. Absent when none, or when `includeTests` was set. */
+  testsLeftOut?: number;
   notExpanded?: NotExpanded;
   /** Present when the parse-health manifest says the answer may rest on files that did not parse (same field as the point queries). */
   indexHealth?: IndexHealth;
@@ -202,6 +296,17 @@ export interface ExploreOptions {
   path?: string;
   limit?: number;
   maxChars?: number;
+  /**
+   * List test code too, ranked like any other code. Default false: test files (`*_test.go`, `*.test.*`, `*.spec.*`,
+   * `__tests__/`, `tests/`, `test/` ...) are left out of the seeds and the neighbourhood and only counted
+   * ({@link ExploreResult.testsLeftOut}), because they repeat the topic's words and crowd out the code they test.
+   */
+  includeTests?: boolean;
+  /**
+   * How the caller spells the switch above, so the hint in the answer ("pass ... to list them") can be typed as written.
+   * Default `includeTests: true` (the MCP argument, as it is typed); the CLI passes `--include-tests`.
+   */
+  includeTestsFlag?: string;
   /** The graph's parse-health manifest: gives the index roots (where the source is) and the index health. Without it no source can be shown. */
   manifestPath?: string;
   /** How the caller will print the result; the size limit is checked with it. Default: pretty JSON, which is what the MCP tool returns. */
@@ -222,6 +327,9 @@ interface Found {
 
 interface Seed extends Found {
   score: number;
+  /** Share of the name's own words that the topic named (`Next` 1, `combineHandlers` 0.5): breaks ties between equal scores in favour of names that are about the topic and nothing else. */
+  coverage: number;
+  noise?: NoiseKind;
 }
 
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
@@ -241,7 +349,12 @@ function inScope(file: string | null, scope: string | undefined): boolean {
  *
  * THIS is the seam the whole tool hangs on: with no seed there is nothing to expand, rank or read.
  */
-export async function findSeeds(conn: GraphConnection, stems: readonly string[], scope?: string): Promise<{ seeds: Seed[]; total: number }> {
+export async function findSeeds(
+  conn: GraphConnection,
+  stems: readonly string[],
+  scope?: string,
+  includeTests = true,
+): Promise<{ seeds: Seed[]; total: number; testMatches: string[] }> {
   const byId = new Map<string, Found>();
   for (const stem of stems) {
     const needle = stem.slice(0, Math.min(stem.length, 4));
@@ -259,6 +372,8 @@ export async function findSeeds(conn: GraphConnection, stems: readonly string[],
     for (const r of classes) byId.set(String(r.id), { id: String(r.id), name: String(r.name), kind: "Class", file: str(r.file), line: null });
   }
   const scored: Seed[] = [];
+  /** Ids of test code that matched the words and was not made a seed. */
+  const testMatches: string[] = [];
   for (const c of byId.values()) {
     if (!inScope(c.file, scope)) continue;
     const nameT = nameStems(c.name);
@@ -269,11 +384,19 @@ export async function findSeeds(conn: GraphConnection, stems: readonly string[],
       if (nameT.some((n) => stemsMatch(q, n))) nameHits += 1;
       else if (fileT.some((n) => stemsMatch(q, n))) pathHits += 1;
     }
-    const score = 3 * nameHits + pathHits;
-    if (score > 0) scored.push({ ...c, score });
+    let score = 3 * nameHits + pathHits;
+    if (score <= 0) continue;
+    if (!includeTests && c.file !== null && isTestPath(c.file)) {
+      testMatches.push(c.id);
+      continue;
+    }
+    // A seed that is noise starts the random walk with a tenth of the weight, so it neither takes a seed place from real matches nor drags its callers up.
+    const noise = c.kind === "Function" ? noiseOf(c.name, c.file, stems) : undefined;
+    if (noise) score *= NOISE_FACTOR;
+    scored.push({ ...c, score, coverage: nameT.length === 0 ? 0 : nameHits / nameT.length, ...(noise ? { noise } : {}) });
   }
-  scored.sort((a, b) => b.score - a.score || (a.kind === b.kind ? 0 : a.kind === "Function" ? -1 : 1) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return { seeds: scored.slice(0, SEED_CAP), total: scored.length };
+  scored.sort((a, b) => b.score - a.score || b.coverage - a.coverage || (a.kind === b.kind ? 0 : a.kind === "Function" ? -1 : 1) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { seeds: scored.slice(0, SEED_CAP), total: scored.length, testMatches };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -285,18 +408,38 @@ interface Neighbourhood {
   /** Directed CALLS edges, both ends inside `fns`. */
   calls: Array<[string, string]>;
   capped: boolean;
+  /** Ids of test functions the walk met and did not enter (only when tests are excluded). */
+  testIds: Set<string>;
 }
 
-async function expandCalls(conn: GraphConnection, seeds: readonly Seed[]): Promise<Neighbourhood> {
+/**
+ * Both directions along CALLS, {@link EXPAND_DEPTH} hops from the seeds. With `includeTests` false a test function is
+ * neither entered nor allowed to carry the walk further (a test calls the code under test AND everything else the
+ * test needs, so entering it drags unrelated helpers in): the edge to it is dropped and the id is remembered in
+ * `testIds` so the answer can say how many were left out.
+ */
+async function expandCalls(conn: GraphConnection, seeds: readonly Seed[], includeTests: boolean): Promise<Neighbourhood> {
   const visited = new Set(seeds.filter((s) => s.kind === "Function").map((s) => s.id));
   const edges = new Map<string, [string, string]>();
+  const testIds = new Set<string>();
+  const known = new Map<string, boolean>(); // id -> is test code
   let frontier = [...visited];
   let capped = false;
   for (let level = 0; level < EXPAND_DEPTH && frontier.length > 0; level += 1) {
-    const rows = await conn.query(
+    let rows = await conn.query(
       `MATCH (a:Function)-[:CALLS]->(b:Function) WHERE a.id IN $ids OR b.id IN $ids RETURN DISTINCT a.id AS a, b.id AS b`,
       { ids: frontier },
     );
+    if (!includeTests) {
+      const unknown = [...new Set(rows.flatMap((r) => [String(r.a), String(r.b)]))].filter((id) => !known.has(id) && !visited.has(id));
+      if (unknown.length > 0) {
+        const files = await conn.query(`MATCH (n:Function) WHERE n.id IN $ids RETURN n.id AS id, n.file AS file`, { ids: unknown });
+        for (const f of files) known.set(String(f.id), str(f.file) !== null && isTestPath(String(f.file)));
+      }
+      const isTest = (id: string): boolean => known.get(id) === true;
+      for (const [id, t] of known) if (t) testIds.add(id);
+      rows = rows.filter((r) => !isTest(String(r.a)) && !isTest(String(r.b)));
+    }
     const next: string[] = [];
     for (const r of rows) {
       const a = String(r.a);
@@ -324,7 +467,7 @@ async function expandCalls(conn: GraphConnection, seeds: readonly Seed[]): Promi
     for (const r of rows) fns.set(String(r.id), { id: String(r.id), name: String(r.name), kind: "Function", file: str(r.file), line: int(r.line) });
   }
   const calls = [...edges.values()].filter(([a, b]) => fns.has(a) && fns.has(b));
-  return { fns, calls, capped };
+  return { fns, calls, capped, testIds };
 }
 
 /**
@@ -493,7 +636,7 @@ export function formatExplore(r: ExploreResult): string {
   else if (r.indexHealth?.possiblyIncomplete) lines.push(`⚠ possibly incomplete: ${r.indexHealth.blindspotsTotal ?? r.indexHealth.blindspots?.length ?? 0} file(s) near this result parsed partially/failed (see \`egr blindspots\`)`);
   if (r.symbols.length > 0) {
     lines.push("", "Symbols (most relevant first):");
-    for (const s of r.symbols) lines.push(`  ${s.name}  ${s.kind}  ${s.file}${s.line ? `:${s.line}` : ""}  ${s.role}`);
+    for (const s of r.symbols) lines.push(`  ${s.name}  ${s.kind}  ${s.file}${s.line ? `:${s.line}` : ""}  ${s.role}${s.noise ? `  (pushed down: ${s.noise})` : ""}`);
   }
   if (r.callPaths.length > 0) {
     lines.push("", "Call paths:");
@@ -517,12 +660,35 @@ export function formatExplore(r: ExploreResult): string {
     if (ne.snippetsTotal > 0) lines.push(list("source left out for", ne.snippets, ne.snippetsTotal, "symbols with source left out"));
     if (ne.filesTotal > 0) lines.push(list("neighbouring files (imports)", ne.files, ne.filesTotal, "neighbouring files (imports)"));
   }
-  const fnSyms = r.symbols.filter((s) => s.kind === "Function").slice(0, 3);
+  if (r.note) lines.push("", r.note);
+  const fnSyms = r.symbols.filter((s) => s.kind === "Function" && isRecommendable(s)).slice(0, 3);
   if (fnSyms.length > 0) {
     lines.push("", "Next:");
     for (const s of fnSyms) lines.push(`  egr callers ${s.name}  |  egr callees ${s.name}  (add --file ${s.file} if the name is shared)`);
   }
   return lines.join("\n");
+}
+
+/** `sym` marked as noise, with its rank cut by {@link NOISE_FACTOR}; unchanged when `noise` is undefined. */
+function withNoise(sym: ExploreSymbol, noise: NoiseKind | undefined): ExploreSymbol {
+  return noise ? { ...sym, rank: sym.rank * NOISE_FACTOR, noise } : sym;
+}
+
+/**
+ * What the answer says about how to read it. The first sentence is the point: a snippet is the file's own text, but a
+ * slice of it (from the symbol's line to the next definition, at most {@link MAX_SNIPPET_LINES} lines, and only what
+ * fits), not the whole file, and it is read from disk now, so a file edited since indexing can differ from the index.
+ */
+function readingNote(testsLeftOut: number, includeTestsFlag: string): string {
+  return (
+    `Each snippet is the file's own text starting at that line (up to ${MAX_SNIPPET_LINES} lines, to the next definition); it is not the whole file — open the file for the rest. What was not shown is named under notExpanded.` +
+    (testsLeftOut > 0 ? ` ${testsLeftOut} test function(s) were left out on purpose; pass ${includeTestsFlag} to list them.` : "")
+  );
+}
+
+/** Whether `next` may point at a symbol: not test code, not pushed down as noise. */
+export function isRecommendable(s: Pick<ExploreSymbol, "file" | "noise">): boolean {
+  return s.noise === undefined && !isTestPath(s.file);
 }
 
 /**
@@ -546,7 +712,9 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
   }
   const stems = [...new Set(words.map(stemOf))];
 
-  const { seeds, total } = await findSeeds(conn, stems, opts.path);
+  const includeTests = opts.includeTests === true;
+  const includeTestsFlag = opts.includeTestsFlag ?? "`includeTests: true`";
+  const { seeds, total, testMatches } = await findSeeds(conn, stems, opts.path, includeTests);
   const frame = { topic, keywords: words, matches: { total, seeds: seeds.length }, maxChars } as const;
 
   if (seeds.length === 0) {
@@ -555,6 +723,10 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
       throw new Error("the graph has no indexed code, so there is nothing to explore. Run `egr index <dir>` first.");
     }
     const scope = opts.path ? ` under "${opts.path}"` : "";
+    const onlyTests =
+      testMatches.length > 0
+        ? ` ${testMatches.length} test symbol(s) did match; test code is left out unless ${includeTestsFlag} is set, so repeat the call with it to see them.`
+        : "";
     return {
       status: "no-match",
       ...frame,
@@ -562,14 +734,16 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
       symbols: [],
       callPaths: [],
       next: [],
+      ...(testMatches.length > 0 ? { testsLeftOut: testMatches.length } : {}),
       message:
         `No symbol or file path matched the words (${words.join(", ")})${scope}. This is not the same as "the code does not do this": ` +
-        `the name may use other words, or the code may not be indexed. Try synonyms or a name you saw in a file, or lower the scope.`,
+        `the name may use other words, or the code may not be indexed. Try synonyms or a name you saw in a file, or lower the scope.${onlyTests}`,
     };
   }
 
   // --- neighbourhood, files, ranking
-  const hood = await expandCalls(conn, seeds);
+  const hood = await expandCalls(conn, seeds, includeTests);
+  const testsLeftOut = new Set([...testMatches, ...hood.testIds]).size;
   const seedIds = new Set(seeds.map((s) => s.id));
   const classSeeds = seeds.filter((s) => s.kind === "Class").slice(0, MAX_CLASSES);
   const fnList = [...hood.fns.values()];
@@ -598,7 +772,10 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
   const idOfSymbol = new Map<ExploreSymbol, string>();
   const fnEntries = fnList.map((f) => ({
     id: f.id,
-    sym: { name: f.name, kind: "Function", file: f.file ?? "(unknown)", ...(f.line !== null ? { line: f.line } : {}), role: seedIds.has(f.id) ? "seed" : "neighbor", rank: pr.get(`fn:${f.id}`) ?? 0 } as ExploreSymbol,
+    sym: withNoise(
+      { name: f.name, kind: "Function", file: f.file ?? "(unknown)", ...(f.line !== null ? { line: f.line } : {}), role: seedIds.has(f.id) ? "seed" : "neighbor", rank: pr.get(`fn:${f.id}`) ?? 0 } as ExploreSymbol,
+      noiseOf(f.name, f.file, stems),
+    ),
   }));
   fnEntries.sort((a, b) => b.sym.rank - a.sym.rank || (a.sym.role === b.sym.role ? 0 : a.sym.role === "seed" ? -1 : 1) || (a.sym.name < b.sym.name ? -1 : a.sym.name > b.sym.name ? 1 : 0) || (a.id < b.id ? -1 : 1));
   for (const e of fnEntries) idOfSymbol.set(e.sym, e.id);
@@ -626,6 +803,8 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
   const skippedSnippets: ExploreSymbol[] = [];
   /** How many names each "not expanded" list spells out; the totals are always given. Lowered only when nothing else is left to cut. */
   let listCap = LIST_CAP;
+  /** The reading note goes only when nothing else is left to cut but the last symbol. */
+  let withNote = true;
   const snippetOf = new Map<ExploreSymbol, string>();
   const health = (): IndexHealth | null =>
     readIndexHealth(opts.manifestPath, [...new Set(shown.map((s) => s.file).filter((f) => f !== "(unknown)"))]);
@@ -651,7 +830,8 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
       filesTotal: neighbourFiles.length,
     };
     const h = health();
-    const topFns = shown.filter((s) => s.kind === "Function").slice(0, 3);
+    // Only code worth continuing from: not test code (even when `includeTests` put it in the list) and not noise.
+    const topFns = shown.filter((s) => s.kind === "Function" && isRecommendable(s)).slice(0, 3);
     const symbols = shown.map((s): ExploreSymbol => {
       const out: ExploreSymbol = { ...s, rank: Math.round(s.rank * 1000) / 1000 };
       const sn = snippetOf.get(s);
@@ -665,6 +845,8 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
       truncated: dropped.length > 0 || skippedSnippets.length > 0 || hood.capped,
       symbols,
       callPaths: callPathsOf(idsShown(), hood.calls.map(([a, b]) => [a, b] as [string, string]), labels(), rank),
+      ...(withNote ? { note: readingNote(testsLeftOut, includeTestsFlag) } : {}),
+      ...(testsLeftOut > 0 ? { testsLeftOut } : {}),
       next: topFns.map((s) => (s.file === "(unknown)" ? `call_chain {"symbol": "${s.name}"}` : `call_chain {"symbol": "${s.name}", "file": "${s.file}"}`)),
       ...(ne.symbolsTotal + ne.snippetsTotal + ne.filesTotal > 0 ? { notExpanded: ne } : {}),
       ...(h ? { indexHealth: h } : {}),
@@ -692,6 +874,10 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
     }
     if (listCap > 0) {
       listCap = 0;
+      return true;
+    }
+    if (withNote) {
+      withNote = false;
       return true;
     }
     if (shown.length > 0) {

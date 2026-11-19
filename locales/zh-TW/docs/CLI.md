@@ -187,7 +187,7 @@ egr index . --scip index.scip
 `callsSkippedUnresolvedTarget`。若檔案有匹配到、但解析結果是零，人類可讀輸出
 會多印一行 `WARNING`，而不是把全零結果悄悄當成成功回報。
 
-### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]`
+### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--include-tests] [--json]`
 
 還沒有符號名稱時（X 怎麼運作／Y 在哪裡處理），先跑這個指令，再考慮 grep（XSPEC-531）。其他查詢都需要你已經有的名稱（函式、規格編號）；
 這個指令直接接受一句話。`<topic>` 是一個句子或幾個字詞（取 `explore` 之後的全部文字，所以引號可省略）。不使用模型。
@@ -208,7 +208,9 @@ egr explore "where is the session token validated" --path src/auth --max-chars 3
 文字與 `--json` 都一樣。超出範圍的值會被夾住，不是錯誤：`--limit 100` 列出 50 個符號，`--max-chars 100` 被調高到 400，
 `--max-chars 500000` 被降到 200000（`--json` 的 `maxChars` 寫明實際用了多少）。放不下時，先從最不相關的符號開始拿掉原始碼，
 再拿掉符號，並用「Not expanded」一節列出被拿掉的內容（`--json`：`notExpanded`，並有 `truncated: true`）。
-不會靜默截斷。最後一節 `Next:` 給出可接著用的點查詢（`egr callers <name>`）。
+不會靜默截斷。最後一節 `Next:` 給出可接著用的點查詢（`egr callers <name>`），絕不從測試程式碼或被當成雜訊排後面的符號起算。
+
+**預設不列出測試程式碼**（`*_test.go`、`*.test.*`、`*.spec.*`，以及 `test/`、`tests/`、`__tests__/`、`__test__/`、`testdata/` 下的檔案）：測試會重複它所測功能的字詞，分數因此高過程式碼、佔掉版面。它們既不列出、也不用來沿呼叫關係往外走，回答會說明略過了幾個（`--json`：`testsLeftOut`）。`--include-tests` 則把它們當一般程式碼列出。名稱過於泛用的函式（`has`、`get`、`save`、`error`、`config`、`init`、`new` ⋯⋯）與建置／工具設定檔中的函式（`vite.config.*`、`*.config.*`、`scripts/`）排名會降為原本的十分之一（`--json`：`noise`），版面有空間時仍會列出。**這兩條規則可能抓得比你預期的多：** `start`、`run`、`open` 在泛用名稱清單裡，`testdata/` 目錄算測試程式碼，所以預期中的符號不見時，先看 `testsLeftOut` 與 `noise`。完整規則是 `src/code-graph/explore.ts` 的 `isTestPath` 與 `GENERIC_NAMES`，也寫在 [MCP.md](./MCP.md) 的 `explore` 那一列。輸出的列表之後有一句話（`--json`：`note`）：每個 snippet 是該檔案從那一行開始的原文（最多 40 行、到下一個定義為止），不是整個檔案；沒有顯示的內容由 `Not expanded` 列名。
 
 `NO MATCH`（`--json`：`status: "no-match"`，結束碼 `0`）表示沒有任何符號或檔案路徑含這些字詞。這不等於「程式碼沒有做這件事」：
 名稱可能用了別的字，或程式碼根本沒有被索引。顯示時沒有原始碼的符號會說明原因：檔案位置未知（經 MCP `index_code`

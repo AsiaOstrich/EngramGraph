@@ -125,6 +125,44 @@ const READ_ONLY_INSTRUCTIONS =
   "related nodes `egr related <seed-id>` (it installs and builds in the graph, so it is a writer too).";
 
 /**
+ * What EVERY server tells a client at `initialize`, read-only or writable: which tool to start with for which kind of
+ * question, and what to do when the index may be out of date. A tool description is read only when the tool is
+ * considered; this is read once, up front, so a question that fits `explore` is not answered by grep because `explore`
+ * was never looked at. (Adopted because an assistant asked "how does X work" never called an EGR
+ * tool; the question-to-tool table is the part that was missing.)
+ */
+const ROUTING_INSTRUCTIONS =
+  "Which tool to start with, by the kind of question:\n" +
+  "- How does X work / where is Y handled / what is the flow of Z (you have words, not a symbol name): `explore`. " +
+  "It takes the sentence and returns the matching symbols, how they call each other and their source in one answer — call it before grep or before reading files one by one. " +
+  "Test code is left out unless `includeTests` is true.\n" +
+  "- Who calls this function / what does it call / what breaks if I change it: `call_chain` (it needs the function's name; if you only have a question, get the name from `explore`).\n" +
+  "- Which spec constrains this code, or which code implements this spec: `implemented_specs` (code to spec), `implementers` (spec to code), `impact_analysis` (what changing a spec touches).\n" +
+  "- Do the documents still match the code (the file paths and symbols they name still exist): `refs_check`.\n" +
+  "- Which files change together in git history: `cochange`.\n" +
+  "The index is a snapshot and can be out of date or partly parsed. If an answer is empty or surprising, check before trusting it: " +
+  "`doctor` says whether the index exists, is current, and belongs to this checkout; `blindspots` lists the files that did not parse fully, which makes answers near them possibly incomplete. " +
+  "A result that carries `possiblyIncomplete` or `truncated: true` says so itself — read that before relying on the list.";
+
+/** The environment variable that lists tools to load at the start of every conversation instead of on demand (comma-separated tool names). */
+export const ALWAYS_LOAD_ENV = "ENGRAM_MCP_ALWAYS_LOAD";
+
+/**
+ * `_meta` for a tool definition: `{ "anthropic/alwaysLoad": true }` when the tool is named in {@link ALWAYS_LOAD_ENV},
+ * nothing otherwise. Claude Code defers MCP tool definitions and fetches one when it searches for it; this key asks
+ * it to have the definition in context from the first turn. Off by default: it is a cost on every conversation (the
+ * tool's whole description is loaded whether or not the tool is used), so it is for people who want that trade. Read at
+ * server creation, so the value comes from the environment the client launched `egr-mcp` with.
+ */
+function alwaysLoadMeta(tool: string): { _meta: Record<string, unknown> } | Record<string, never> {
+  const wanted = (process.env[ALWAYS_LOAD_ENV] ?? "")
+    .split(",")
+    .map((n) => n.trim().toLowerCase())
+    .filter((n) => n.length > 0);
+  return wanted.includes(tool) ? { _meta: { "anthropic/alwaysLoad": true } } : {};
+}
+
+/**
  * Register EngramGraph's tools on an MCP server backed by a graph.
  *
  * `graph` is either a {@link GraphSource} (the stdio server passes a
@@ -142,7 +180,7 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
   const source: GraphSource = "use" in graph ? graph : fixedGraph(graph);
   const server = new McpServer(
     { name: "engramgraph", version: EGR_VERSION },
-    source.readOnly ? { instructions: READ_ONLY_INSTRUCTIONS } : undefined,
+    { instructions: source.readOnly ? `${ROUTING_INSTRUCTIONS}\n\n${READ_ONLY_INSTRUCTIONS}` : ROUTING_INSTRUCTIONS },
   );
   const manifestPath = opts.manifestPath;
 
@@ -421,18 +459,22 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
         "`path` limits the search to files under a directory or file, relative to the directory given to `egr index` (the form of the file paths in the answer). `limit` (default " + DEFAULT_EXPLORE_LIMIT + ") is the number of symbols listed, at most " + MAX_EXPLORE_LIMIT + ". The WHOLE answer stays within `maxChars` (default " + DEFAULT_EXPLORE_MAX_CHARS + ", minimum 400 and maximum " + MAX_EXPLORE_MAX_CHARS + ": a value outside that range is clamped, not an error); " +
         "when it does not fit, source is left out from the least relevant symbol first and `notExpanded` names everything left out — `truncated: true` means look there. " +
         "`status: \"no-match\"` means no symbol or file path carried the words (not that the code does not exist). A symbol with no `snippet` carries a `snippetNote` saying why (file not known, moved, or changed since it was indexed). " +
-        "`next` lists point queries (`call_chain`) to continue from the symbols found. A topic with no searchable word, or an empty graph, is an error result.",
+        "Test code (`*_test.go`, `*.test.*`, `*.spec.*`, `test/`, `tests/`, `__tests__/`) is left out and only counted in `testsLeftOut`, because tests repeat the topic's words and crowd out the code they test; pass `includeTests: true` to list them like any other code. " +
+        "Symbols with a very generic name (`has`, `get`, `save` ...) or in build/tool configuration files are ranked low and marked with `noise`. " +
+        "`next` lists point queries (`call_chain`) to continue from the symbols found, never from test code or `noise`. A topic with no searchable word, or an empty graph, is an error result.",
       inputSchema: {
         topic: z.string().min(1),
         path: z.string().min(1).optional(),
         limit: z.number().int().positive().optional(),
         maxChars: z.number().int().positive().optional(),
+        includeTests: z.boolean().optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      ...alwaysLoadMeta("explore"),
     },
-    async ({ topic, path, limit, maxChars }) => {
+    async ({ topic, path, limit, maxChars, includeTests }) => {
       try {
-        return ok(await source.use((conn) => explore(conn, { topic, path, limit: limit ?? DEFAULT_EXPLORE_LIMIT, maxChars, manifestPath })));
+        return ok(await source.use((conn) => explore(conn, { topic, path, limit: limit ?? DEFAULT_EXPLORE_LIMIT, maxChars, includeTests, manifestPath })));
       } catch (e) {
         return failFrom(e);
       }

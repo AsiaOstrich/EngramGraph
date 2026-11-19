@@ -268,7 +268,7 @@ indexer sees but `egr` deliberately skips), `definitionsResolved` /
 matched but resolution came back at zero, the human-readable output adds a
 `WARNING` line rather than silently reporting an all-zero result as success.
 
-### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]`
+### `explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--include-tests] [--json]`
 
 When you don't have a symbol name yet (how does X work / where is Y handled), run this first, before grep (XSPEC-531). Every other
 query needs a name you already have (a function, a spec id); this takes the
@@ -298,7 +298,9 @@ an error: `--limit 100` lists 50 symbols, `--max-chars 100` is raised to 400 and
 `--max-chars 500000` is lowered to 200000 (`--json` says which in `maxChars`). When the answer does not fit, source is left out from the least
 relevant symbol first, then symbols, and a `Not expanded` section names what was
 left out (`--json`: `notExpanded`, with `truncated: true`). Nothing is cut
-silently. The last section, `Next:`, gives point queries (`egr callers <name>`) to continue with.
+silently. The last section, `Next:`, gives point queries (`egr callers <name>`) to continue with, never from test code or from a symbol that was ranked low as noise.
+
+**Test code is left out by default** (`*_test.go`, `*.test.*`, `*.spec.*`, and files under `test/`, `tests/`, `__tests__/`, `__test__/`, `testdata/`): tests repeat the words of the feature they test, so they out-score the code and take the room. They are neither listed nor used to walk the calls, and the answer says how many were left out (`--json`: `testsLeftOut`). `--include-tests` lists them like any other code. Functions with a very generic name (`has`, `get`, `save`, `error`, `config`, `init`, `new` ...) and functions in build/tool configuration files (`vite.config.*`, `*.config.*`, `scripts/`) have their rank cut to a tenth (`--json`: `noise`) and are still listed when there is room. **Both rules can catch more than you expect:** `start`, `run` and `open` are on the generic list, and a `testdata/` directory counts as test code, so when a symbol you expected is missing, look at `testsLeftOut` and `noise`. The full rules are `isTestPath` and `GENERIC_NAMES` in `src/code-graph/explore.ts`, and in the `explore` row of [MCP.md](./MCP.md). The output ends its listing with one sentence (`--json`: `note`): each snippet is the file's own text starting at that line (up to 40 lines, to the next definition), not the whole file, and what was not shown is named under `Not expanded`.
 
 `NO MATCH` (`--json`: `status: "no-match"`, exit `0`) means no symbol or file
 path carried the words. It is not the same as "the code does not do this": the
