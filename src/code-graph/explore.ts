@@ -304,7 +304,7 @@ export interface ExploreOptions {
   includeTests?: boolean;
   /**
    * How the caller spells the switch above, so the hint in the answer ("pass ... to list them") can be typed as written.
-   * Default `includeTests` (the MCP argument); the CLI passes `--include-tests`.
+   * Default `includeTests: true` (the MCP argument, as it is typed); the CLI passes `--include-tests`.
    */
   includeTestsFlag?: string;
   /** The graph's parse-health manifest: gives the index roots (where the source is) and the index health. Without it no source can be shown. */
@@ -713,7 +713,7 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
   const stems = [...new Set(words.map(stemOf))];
 
   const includeTests = opts.includeTests === true;
-  const includeTestsFlag = opts.includeTestsFlag ?? "`includeTests`";
+  const includeTestsFlag = opts.includeTestsFlag ?? "`includeTests: true`";
   const { seeds, total, testMatches } = await findSeeds(conn, stems, opts.path, includeTests);
   const frame = { topic, keywords: words, matches: { total, seeds: seeds.length }, maxChars } as const;
 

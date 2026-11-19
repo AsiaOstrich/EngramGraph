@@ -202,7 +202,7 @@ describe("explore ranking: test code is left out of the answer unless asked for"
     for (const n of data.next) expect(TEST_NAMES.some((t) => n.includes(t)), n).toBe(false);
     // Not silent: the count is in the answer and the note names the switch.
     expect(data.testsLeftOut, raw).toBeGreaterThanOrEqual(3);
-    expect(data.note).toMatch(/pass `includeTests` to list them/);
+    expect(data.note).toMatch(/pass `includeTests: true` to list them/);
     // The note says what a snippet is, and that it is not the whole file.
     expect(data.note).toMatch(/starting at that line \(up to 40 lines/);
     expect(data.note).toMatch(/not the whole file/);
