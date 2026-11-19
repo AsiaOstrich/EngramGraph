@@ -6,7 +6,7 @@
  * ## Why it exists
  *
  * Every other query needs a name the asker does not have yet (`call_chain` a function, `impact_analysis` a spec id,
- * `related` a node id). In the #91 trial an assistant asked how something works used none of them in 16 runs and went
+ * `related` a node id). Asked how something works, an assistant used none of them and went
  * to grep. This takes the sentence.
  *
  * ## What it does, with no model
@@ -25,7 +25,7 @@
  *  5. Read the source of each symbol from the file, between its recorded start line and the next definition in that
  *     file (at most {@link MAX_SNIPPET_LINES} lines).
  *
- * ## What the ranking is told NOT to trust (XSPEC-531 follow-up, #91 replays of gin and excalidraw)
+ * ## What the ranking is told NOT to trust (XSPEC-531 follow-up; replays of a how-does-it-work question on gin and excalidraw)
  *
  * Replaying real questions on two real projects showed the answer's limited room going to code that is near the
  * words but is not the answer:
@@ -302,6 +302,11 @@ export interface ExploreOptions {
    * ({@link ExploreResult.testsLeftOut}), because they repeat the topic's words and crowd out the code they test.
    */
   includeTests?: boolean;
+  /**
+   * How the caller spells the switch above, so the hint in the answer ("pass ... to list them") can be typed as written.
+   * Default `includeTests` (the MCP argument); the CLI passes `--include-tests`.
+   */
+  includeTestsFlag?: string;
   /** The graph's parse-health manifest: gives the index roots (where the source is) and the index health. Without it no source can be shown. */
   manifestPath?: string;
   /** How the caller will print the result; the size limit is checked with it. Default: pretty JSON, which is what the MCP tool returns. */
@@ -669,11 +674,15 @@ function withNoise(sym: ExploreSymbol, noise: NoiseKind | undefined): ExploreSym
   return noise ? { ...sym, rank: sym.rank * NOISE_FACTOR, noise } : sym;
 }
 
-/** What the answer says about how to read it. The first sentence is the point: the source shown is the file's own text. */
-function readingNote(testsLeftOut: number): string {
+/**
+ * What the answer says about how to read it. The first sentence is the point: a snippet is the file's own text, but a
+ * slice of it (from the symbol's line to the next definition, at most {@link MAX_SNIPPET_LINES} lines, and only what
+ * fits), not the whole file, and it is read from disk now, so a file edited since indexing can differ from the index.
+ */
+function readingNote(testsLeftOut: number, includeTestsFlag: string): string {
   return (
-    "Each snippet is the file's own text at that line, so reading it is the same as opening the file there; what was not shown is named under notExpanded." +
-    (testsLeftOut > 0 ? ` ${testsLeftOut} test function(s) were left out on purpose; pass includeTests to list them.` : "")
+    `Each snippet is the file's own text starting at that line (up to ${MAX_SNIPPET_LINES} lines, to the next definition); it is not the whole file — open the file for the rest. What was not shown is named under notExpanded.` +
+    (testsLeftOut > 0 ? ` ${testsLeftOut} test function(s) were left out on purpose; pass ${includeTestsFlag} to list them.` : "")
   );
 }
 
@@ -704,6 +713,7 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
   const stems = [...new Set(words.map(stemOf))];
 
   const includeTests = opts.includeTests === true;
+  const includeTestsFlag = opts.includeTestsFlag ?? "`includeTests`";
   const { seeds, total, testMatches } = await findSeeds(conn, stems, opts.path, includeTests);
   const frame = { topic, keywords: words, matches: { total, seeds: seeds.length }, maxChars } as const;
 
@@ -715,7 +725,7 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
     const scope = opts.path ? ` under "${opts.path}"` : "";
     const onlyTests =
       testMatches.length > 0
-        ? ` ${testMatches.length} test symbol(s) did match; test code is left out unless \`includeTests\` is set, so repeat the call with it to see them.`
+        ? ` ${testMatches.length} test symbol(s) did match; test code is left out unless ${includeTestsFlag} is set, so repeat the call with it to see them.`
         : "";
     return {
       status: "no-match",
@@ -835,7 +845,7 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
       truncated: dropped.length > 0 || skippedSnippets.length > 0 || hood.capped,
       symbols,
       callPaths: callPathsOf(idsShown(), hood.calls.map(([a, b]) => [a, b] as [string, string]), labels(), rank),
-      ...(withNote ? { note: readingNote(testsLeftOut) } : {}),
+      ...(withNote ? { note: readingNote(testsLeftOut, includeTestsFlag) } : {}),
       ...(testsLeftOut > 0 ? { testsLeftOut } : {}),
       next: topFns.map((s) => (s.file === "(unknown)" ? `call_chain {"symbol": "${s.name}"}` : `call_chain {"symbol": "${s.name}", "file": "${s.file}"}`)),
       ...(ne.symbolsTotal + ne.snippetsTotal + ne.filesTotal > 0 ? { notExpanded: ne } : {}),

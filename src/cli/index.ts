@@ -933,7 +933,7 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
       const measure = values.json
         ? (r: Parameters<typeof formatExplore>[0]) => JSON.stringify(r, null, 2).length + 1
         : (r: Parameters<typeof formatExplore>[0]) => formatExplore(r).length + 1;
-      const r = await explore(conn, { topic, path: values.path, limit, maxChars, includeTests: values["include-tests"] === true, manifestPath: manifestPathForDb(resolveDbPath(loc)), measure });
+      const r = await explore(conn, { topic, path: values.path, limit, maxChars, includeTests: values["include-tests"] === true, includeTestsFlag: "`--include-tests`", manifestPath: manifestPathForDb(resolveDbPath(loc)), measure });
       out(r, values.json, (d) => formatExplore(d as typeof r));
       break;
     }

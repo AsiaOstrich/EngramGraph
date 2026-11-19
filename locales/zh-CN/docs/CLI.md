@@ -210,7 +210,7 @@ egr explore "where is the session token validated" --path src/auth --max-chars 3
 再去掉符号，并用「Not expanded」一节列出被去掉的内容（`--json`：`notExpanded`，并有 `truncated: true`）。
 不会静默截断。最后一节 `Next:` 给出可接着用的点查询（`egr callers <name>`），绝不从测试代码或被当成噪声排后面的符号起算。
 
-**默认不列出测试代码**（`*_test.go`、`*.test.*`、`*.spec.*`，以及 `test/`、`tests/`、`__tests__/` 下的文件）：测试会重复它所测功能的字词，得分因此高过代码、占掉版面。它们既不列出、也不用来沿调用关系往外走，回答会说明略过了几个（`--json`：`testsLeftOut`）。`--include-tests` 则把它们当一般代码列出。名称过于泛用的函数（`has`、`get`、`save`、`error`、`config`、`init`、`new` ……）与构建／工具配置文件中的函数（`vite.config.*`、`*.config.*`、`scripts/`）会排在一般符号之后（`--json`：`noise`），版面有空间时仍会列出。输出的列表之后有一句话（`--json`：`note`）：每个 snippet 都是该文件在那一行的原文，没有显示的内容由 `Not expanded` 列名。
+**默认不列出测试代码**（`*_test.go`、`*.test.*`、`*.spec.*`，以及 `test/`、`tests/`、`__tests__/` 下的文件）：测试会重复它所测功能的字词，得分因此高过代码、占掉版面。它们既不列出、也不用来沿调用关系往外走，回答会说明略过了几个（`--json`：`testsLeftOut`）。`--include-tests` 则把它们当一般代码列出。名称过于泛用的函数（`has`、`get`、`save`、`error`、`config`、`init`、`new` ……）与构建／工具配置文件中的函数（`vite.config.*`、`*.config.*`、`scripts/`）会排在一般符号之后（`--json`：`noise`），版面有空间时仍会列出。输出的列表之后有一句话（`--json`：`note`）：每个 snippet 是该文件从那一行开始的原文（最多 40 行、到下一个定义为止），不是整个文件；没有显示的内容由 `Not expanded` 列名。
 
 `NO MATCH`（`--json`：`status: "no-match"`，退出码 `0`）表示没有任何符号或文件路径含这些字词。这不等于「代码没有做这件事」：
 名称可能用了别的词，或代码根本没有被索引。显示时没有源代码的符号会说明原因：文件位置未知（经 MCP `index_code`

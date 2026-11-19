@@ -202,7 +202,11 @@ describe("explore ranking: test code is left out of the answer unless asked for"
     for (const n of data.next) expect(TEST_NAMES.some((t) => n.includes(t)), n).toBe(false);
     // Not silent: the count is in the answer and the note names the switch.
     expect(data.testsLeftOut, raw).toBeGreaterThanOrEqual(3);
-    expect(data.note).toMatch(/includeTests/);
+    expect(data.note).toMatch(/pass `includeTests` to list them/);
+    // The note says what a snippet is, and that it is not the whole file.
+    expect(data.note).toMatch(/starting at that line \(up to 40 lines/);
+    expect(data.note).toMatch(/not the whole file/);
+    expect(data.note).not.toMatch(/same as opening the file/);
   });
 
   it("lists the test functions again with includeTests, and `next` still never recommends one [explore-adopt-include-tests]", async () => {
@@ -236,9 +240,17 @@ describe("explore ranking: test code is left out of the answer unless asked for"
     const on = runEgr(built.cli, ["explore", QUESTION, "--limit", "50", "--max-chars", "30000", "--include-tests", "--json"], { env: env(), cwd: work });
     expect(on.status, on.stderr).toBe(0);
     expect(names(JSON.parse(on.stdout) as Explored)).toContain("TestRouterHandleRouteRequest");
-    // The text form carries the reading note too.
-    const text = runEgr(built.cli, ["explore", QUESTION], { env: env(), cwd: work });
-    expect(text.stdout).toMatch(/Each snippet is the file's own text/);
+    // The text form carries the reading note too, and its hint spells the switch the way the CLI takes it.
+    const text = runEgr(built.cli, ["explore", QUESTION, "--limit", "50", "--max-chars", "30000"], { env: env(), cwd: work });
+    expect(text.status, text.stderr).toBe(0);
+    expect(text.stdout).toMatch(/Each snippet is the file's own text starting at that line/);
+    expect(text.stdout).toMatch(/pass `--include-tests` to list them/);
+    expect(text.stdout).not.toMatch(/pass `?includeTests/);
+    // So does the message of an answer where only test code matched.
+    const onlyTests = runEgr(built.cli, ["explore", "spec helper", "--path", "__tests__"], { env: env(), cwd: work });
+    expect(onlyTests.status, onlyTests.stderr).toBe(0);
+    expect(onlyTests.stdout).toMatch(/unless `--include-tests` is set/);
+    expect(onlyTests.stdout).not.toMatch(/`includeTests`/);
   });
 });
 
@@ -280,8 +292,13 @@ describe("explore instructions: every server says at initialize which tool to st
   ];
 
   function expectRouting(text: string): void {
-    for (const [tool, when] of ROUTES) expect(text, `no pointer to ${tool}`).toContain(tool);
-    for (const [, when] of ROUTES) expect(text.toLowerCase()).toContain(when.toLowerCase().split(" ").slice(0, 2).join(" "));
+    // Each kind of question and its tool are on the same line: a table whose rows are shuffled would still contain every word.
+    const lines = text.split("\n");
+    for (const [tool, when] of ROUTES) {
+      const row = lines.find((l) => l.toLowerCase().includes(when.toLowerCase()));
+      expect(row, `no line for "${when}"`).toBeDefined();
+      expect(row, `"${when}" does not point at ${tool}`).toContain(`\`${tool}\``);
+    }
     // Out-of-date index: both self-checks are named.
     expect(text).toContain("doctor");
     expect(text).toContain("blindspots");

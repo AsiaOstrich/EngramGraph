@@ -128,7 +128,7 @@ const READ_ONLY_INSTRUCTIONS =
  * What EVERY server tells a client at `initialize`, read-only or writable: which tool to start with for which kind of
  * question, and what to do when the index may be out of date. A tool description is read only when the tool is
  * considered; this is read once, up front, so a question that fits `explore` is not answered by grep because `explore`
- * was never looked at. (Adopted after a 16-run trial in which an assistant asked "how does X work" never called an EGR
+ * was never looked at. (Adopted because an assistant asked "how does X work" never called an EGR
  * tool; the question-to-tool table is the part that was missing.)
  */
 const ROUTING_INSTRUCTIONS =
