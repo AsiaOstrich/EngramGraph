@@ -55,6 +55,16 @@ export const DEFAULT_DEBOUNCE_MS = 500;
 const MAX_LOCK_BACKOFF_MS = 15_000;
 const FIRST_LOCK_BACKOFF_MS = 500;
 
+/**
+ * `--debounce <ms>`: a whole number of milliseconds (at most six digits), or the default when the flag is absent.
+ * Lives here, not in the argument parser, so that the one rule is a function a test can call directly.
+ */
+export function parseDebounceMs(raw: string | undefined): number {
+  if (raw === undefined) return DEFAULT_DEBOUNCE_MS;
+  if (!/^[0-9]{1,6}$/.test(raw)) throw new Error(`--debounce must be a whole number of milliseconds (got "${raw}")`);
+  return Number(raw);
+}
+
 export interface RelevanceOptions {
   /** `--docs`: Markdown files count too. */
   docs: boolean;

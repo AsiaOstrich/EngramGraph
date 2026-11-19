@@ -28,7 +28,7 @@ import { SKIP_DIRS } from "./walk.js";
 import { isLockContention } from "../graph-db/lease.js";
 import { coChange, formatCoChange, undeterminedMessage, DEFAULT_COCHANGE_COMMITS, DEFAULT_COCHANGE_MAX_FILES, DEFAULT_COCHANGE_LIMIT } from "../cochange/index.js";
 import { checkpointOrWarn } from "../graph-db/checkpoint.js";
-import { startWatch, DEFAULT_DEBOUNCE_MS } from "./watch.js";
+import { startWatch, parseDebounceMs } from "./watch.js";
 import type { GraphConnection } from "../graph-db/connection.js";
 
 const HELP = `egr — code + knowledge graph memory CLI
@@ -446,11 +446,7 @@ async function main(): Promise<void> {
   // be the one holding the lock between runs.
   if (cmd === "watch") {
     if (!a1) throw new Error("watch requires a <dir>");
-    let debounceMs = DEFAULT_DEBOUNCE_MS;
-    if (values.debounce !== undefined) {
-      if (!/^[0-9]{1,6}$/.test(values.debounce)) throw new Error(`--debounce must be a whole number of milliseconds (got "${values.debounce}")`);
-      debounceMs = Number(values.debounce);
-    }
+    const debounceMs = parseDebounceMs(values.debounce);
     const w = startWatch({ dir: a1, debounceMs, docs: values.docs, exclude: values.exclude, graph: values.graph, isolation: values.isolation });
     process.on("SIGINT", () => w.stop());
     process.on("SIGTERM", () => w.stop());
