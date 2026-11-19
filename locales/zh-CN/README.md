@@ -263,7 +263,10 @@ EngramGraph 内置一个 MCP server（stdio），让任何支持 MCP 的助手�
 `tools/list` 不含它们，server 的 `instructions` 会写明各自对应的终端命令：`egr index <dir>`、
 `egr index <dir> --docs`、`egr feedback <type> <node-id>`、`egr related <seed-id>`。它们只存在于以可写入连接创建的 server
 （嵌入式使用 `createMcpServer(conn)`）。每个工具都声明了 MCP 标注（`readOnlyHint`／`destructiveHint`／
-`idempotentHint`／`openWorldHint`），让客户端知道它即将执行的是什么。
+`idempotentHint`／`openWorldHint`），让客户端知道它即将执行的是什么。每个 server 的 `instructions` 也会写明“哪种问题先用哪个工具”（“X 怎么运作”用 `explore`、
+“谁调用它”用 `call_chain`，依此类推）；`explore` 默认不列出测试代码（需要时在 MCP 传 `includeTests`、在 CLI 用 `--include-tests`），并把过于泛用的名称与构建配置文件排在后面。
+设置 `ENGRAM_MCP_ALWAYS_LOAD=explore` 可让 Claude Code 从第一轮就加载 `explore`，而不是需要时才加载；默认关闭，
+因为它会让每次对话多加载该工具的定义（细节见 **[docs/MCP.md](./docs/MCP.md)**）。
 
 ```bash
 # Claude Code，使用已安装的包：

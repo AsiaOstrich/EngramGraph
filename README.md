@@ -338,7 +338,14 @@ server's `instructions` name the terminal command for each: `egr index <dir>`,
 They exist only on a server created on a writable connection (embedding
 `createMcpServer(conn)`). Every tool declares MCP annotations
 (`readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`) so a client
-can tell what it's about to run.
+can tell what it's about to run. Every server's `instructions` also say which
+tool to start with for which kind of question (`explore` for "how does X work",
+`call_chain` for "who calls this", and so on); `explore` leaves test code out
+unless you ask (`includeTests`, or `--include-tests` in the CLI) and ranks generic names and build-config files
+low. Setting `ENGRAM_MCP_ALWAYS_LOAD=explore` makes Claude Code load `explore`
+from the first turn instead of on demand; it is off by default because it adds
+the tool's definition to every conversation (details in
+**[docs/MCP.md](./docs/MCP.md)**).
 
 ```bash
 # Claude Code, from an installed package:

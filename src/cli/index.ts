@@ -118,7 +118,7 @@ Commands:
                                   --include-unclustered
   related <node-id> [--depth N] [--limit N]
                                   Nodes important *around* a seed (seeded PageRank approx.)
-  explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--json]
+  explore <topic> [--path <dir-or-file>] [--limit N] [--max-chars N] [--include-tests] [--json]
                                   When you don't have a symbol name yet (how
                                   does X work / where is Y handled), run this
                                   first, before grep: takes a sentence or a few
@@ -136,9 +136,14 @@ Commands:
                                   200000; a value outside that is clamped)
                                   bounds the WHOLE output; what does not fit is
                                   named under "Not expanded", never dropped
-                                  silently. "NO MATCH" means no symbol or path
-                                  carried the words, not that the code does not
-                                  exist. Read-only.
+                                  silently. Test code (*_test.go, *.test.*,
+                                  *.spec.*, test/ and tests/ directories) is
+                                  left out and only counted, and generic names
+                                  (has, get, save, ...) and build/tool config
+                                  files are ranked low; --include-tests lists
+                                  test code like any other. "NO MATCH" means no
+                                  symbol or path carried the words, not that
+                                  the code does not exist. Read-only.
   refs check <path...>            Check file-path/symbol references (in
                                   backticks) inside Markdown files or
                                   directories against the graph + git —
@@ -368,6 +373,7 @@ async function main(): Promise<void> {
       path: { type: "string" },
       "max-chars": { type: "string" },
       debounce: { type: "string" },
+      "include-tests": { type: "boolean" },
     },
   });
 
@@ -985,7 +991,7 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
       const measure = values.json
         ? (r: Parameters<typeof formatExplore>[0]) => JSON.stringify(r, null, 2).length + 1
         : (r: Parameters<typeof formatExplore>[0]) => formatExplore(r).length + 1;
-      const r = await explore(conn, { topic, path: values.path, limit, maxChars, manifestPath: manifestPathForDb(resolveDbPath(loc)), measure });
+      const r = await explore(conn, { topic, path: values.path, limit, maxChars, includeTests: values["include-tests"] === true, includeTestsFlag: "`--include-tests`", manifestPath: manifestPathForDb(resolveDbPath(loc)), measure });
       out(r, values.json, (d) => formatExplore(d as typeof r));
       break;
     }
