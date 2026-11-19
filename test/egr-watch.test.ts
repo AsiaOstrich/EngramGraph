@@ -251,11 +251,11 @@ describe("egr watch: the graph follows the files", () => {
     writeFileSync(
       hook,
       `const fs=require("fs");const log=process.env.EGR_TEST_EXIT_LOG;
-       if(log){const cmd=process.argv[2];fs.appendFileSync(log,JSON.stringify({ev:"start",pid:process.pid,cmd})+"\\n");
-       process.on("exit",(code)=>fs.appendFileSync(log,JSON.stringify({ev:"exit",pid:process.pid,cmd,code})+"\\n"));}`,
+       if(log){const cmd=process.argv[2];fs.appendFileSync(log,JSON.stringify({ev:"start",pid:process.pid,cmd,t:Date.now()})+"\\n");
+       process.on("exit",(code)=>fs.appendFileSync(log,JSON.stringify({ev:"exit",pid:process.pid,cmd,code,t:Date.now()})+"\\n"));}`,
     );
     const env = { ...s.env, EGR_TEST_EXIT_LOG: log, NODE_OPTIONS: `--require=${hook}` };
-    const events = (): Array<{ ev: string; pid: number; cmd: string; code?: number }> =>
+    const events = (): Array<{ ev: string; pid: number; cmd: string; code?: number; t: number }> =>
       existsSync(log)
         ? readFileSync(log, "utf8")
             .split("\n")
@@ -264,11 +264,24 @@ describe("egr watch: the graph follows the files", () => {
         : [];
 
     const w = startWatch({ ...s, env }, ["--debounce", "200"]);
-    const run = await until("the watcher's index run to start", 60_000, () => events().find((e) => e.ev === "start" && e.cmd === "index"));
+    // Poll tightly: the kill has to land while the run is still indexing, and every poll interval is time the run can use up.
+    let run: { ev: string; pid: number; cmd: string; code?: number; t: number } | undefined;
+    for (const end = Date.now() + 60_000; !run && Date.now() < end; ) {
+      run = events().find((e) => e.ev === "start" && e.cmd === "index");
+      if (!run) await sleep(5);
+    }
+    if (!run) throw new Error("timed out waiting for the watcher's index run to start");
     // Only the watcher is killed. Its pipe to the run (stdout and stderr) is closed with it, while the run is still indexing.
+    expect(events().some((e) => e.ev === "exit" && e.pid === run!.pid), "the run had already exited before the kill").toBe(false);
     process.kill(w.child.pid!, "SIGKILL");
-    const exited = await until("the orphaned index run to exit", 120_000, () => events().find((e) => e.ev === "exit" && e.pid === run.pid));
-    expect(w.child.exitCode === null ? "SIGKILL" : w.child.signalCode, "the watcher died by the kill").toBe("SIGKILL");
+    const killedAt = Date.now();
+    const exitOf = (): { ev: string; pid: number; cmd: string; code?: number; t: number } | undefined => events().find((e) => e.ev === "exit" && e.pid === run!.pid);
+    const exited = await until("the orphaned index run to exit", 120_000, exitOf);
+    // The premise of this test is that the run was still going when the watcher died. If it had already ended, the orphan
+    // path was never exercised and a pass would prove nothing: fail (the project must be large enough that this cannot happen).
+    expect(exited.t, "the index run was already over when the watcher was killed: the test did not exercise an orphaned run").toBeGreaterThanOrEqual(killedAt);
+    await until("the killed watcher to be reaped", 10_000, () => (w.child.signalCode !== null || w.child.exitCode !== null ? true : undefined));
+    expect(w.child.signalCode, "the watcher died by the kill").toBe("SIGKILL");
     // It was killed by neither the signal nor a write to the closed pipe: it finished and exited 0.
     expect(exited.code).toBe(0);
 
@@ -303,6 +316,24 @@ describe("egr watch: the graph follows the files", () => {
     expect(again.status, again.stderr).toBe(0);
     expect(again.stdout).toMatch(/incremental: 0 file\(s\) parsed \(0 changed, 0 new\)/);
   }, 120_000);
+
+  it("`egr mcp` is not covered by the closed-output rule: once its stdout reader is gone it ends instead of running on silently [egr-mcp-closed-stdout]", async () => {
+    if (process.platform === "win32") return;
+    const s = scratch();
+    const c = spawn(process.execPath, [built.cli, "mcp"], { cwd: s.work, env: s.env, stdio: ["pipe", "pipe", "pipe"] });
+    cleanups.push(() => c.kill("SIGKILL"));
+    let exited = false;
+    c.on("exit", () => (exited = true));
+    c.stdin!.on("error", () => undefined); // the server may be gone by the time a later write lands
+    c.stdout!.destroy(); // the client hangs up its read side while keeping stdin open: the server's first reply has nowhere to go
+    c.stderr!.resume();
+    c.stdin!.write(
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "closed-stdout", version: "0" } } }) + "\n",
+    );
+    // A server that swallowed the write error would stay up here, stdin still open, serving nobody.
+    await until("egr mcp to end after its stdout reader was closed", 30_000, () => (exited ? true : undefined));
+    expect(c.exitCode, "it ended by itself (an exit status), not by this test's cleanup kill").not.toBeNull();
+  }, 60_000);
 
   it("a second writer can run while `egr watch` is idle: it does not hold the graph between runs [egr-watch-short-hold]", async () => {
     const s = scratch();

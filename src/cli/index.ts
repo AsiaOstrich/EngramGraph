@@ -376,7 +376,7 @@ async function main(): Promise<void> {
   // A one-shot command whose reader has gone (`| head`, a killed `egr watch` that started this run) still finishes: the
   // checkpoint and the exit status come after the printing. See closed-output.ts. Not for the commands that talk to a
   // client or keep running for a reader, where a vanished reader means stop.
-  if (cmd !== "mcp" && cmd !== "serve" && cmd !== "watch") ignoreClosedOutput(); // closed-output-ignore
+  if (cmd !== "mcp" && cmd !== "serve" && cmd !== "watch") ignoreClosedOutput();
 
   if (values.version) return void process.stdout.write(VERSION + "\n");
   if (values.help || !cmd) return void process.stdout.write(HELP + "\n");

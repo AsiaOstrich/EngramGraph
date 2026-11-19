@@ -333,7 +333,8 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   **If you restart the watcher and see `[watch] graph is locked by another writer;
   retry …`, the run the old watcher left behind is still going.** Wait: the new
   watcher retries by itself and carries on once that run ends. How long that
-  takes is how long that one index run takes, nothing more.
+  takes is about how long that one index run takes, plus a retry gap of at most 15 seconds.
+  What happens when the pipe is closed, and with `detached` and Ctrl-C, is not tested on Windows.
 - **Is the index behind right now?** Every answer that reads the parse-health
   manifest — the text of `callers`, `callees`, `implementers`, `implemented-by`,
   `explore`, and `indexHealth` in `explore --json` and in the MCP tools

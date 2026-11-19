@@ -229,7 +229,8 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   此時管線已經關閉；`egr index` 會忽略因此產生的寫入錯誤（管線已關，與 `egr index … | head` 相同），
   照常把寫入前日誌（WAL）併回圖譜並以 `0` 結束。
   **重新啟動監看器時若看到 `[watch] graph is locked by another writer; retry …`，表示舊監看器留下的那次執行還在跑。**
-  等它結束即可：新的監看器會自己重試，那次執行結束後就繼續。等待的時間只取決於那一次索引本身的耗時。
+  等它結束即可：新的監看器會自己重試，那次執行結束後就繼續。等待的時間約等於那一次索引的耗時，再加上至多 15 秒的重試間隔。
+  管線被關閉的行為，以及 `detached` 與 Ctrl-C 的行為，在 Windows 上未測試。
 - **索引現在落後了嗎？** 凡是讀取 parse-health manifest 的回答——`callers`、`callees`、`implementers`、`implemented-by`、
   `explore` 的文字輸出，以及 `explore --json` 與 MCP 工具 `call_chain`、`implementers`、`implemented_specs`、`explore` 裡的
   `indexHealth`——在有已索引的檔案比索引新時都會說出來：`indexHealth.staleFiles` 是數量，`indexHealth.staleSample`
