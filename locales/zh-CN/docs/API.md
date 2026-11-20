@@ -166,7 +166,9 @@ tree-sitter 将 `.ts` / `.tsx` / `.js` 解析为 `Function` / `Class` / `Module`
   （`org-{orgId}/project-{projectId}/graph.db`）| `GitBranchIsolation`（
   每分支 `<git-common-dir>/engram/<branch>.db`，附 fallback 模型）。
 - **信号来源** — `SignalSource → FeedbackEvent[]`；`GitHistorySignalSource`、
-  `TestExitCodeSignalSource`。类型 `FeedbackEvent`、`FeedbackSignal`。
+  `TestExitCodeSignalSource` 是不产生任何事件的占位实现（请自行提供信号来源，
+  或用 `egr feedback`／MCP `ingest_feedback` 手动输入反馈）。类型 `FeedbackEvent`、
+  `FeedbackSignal`。
 
 ## api — REST（Hono）
 

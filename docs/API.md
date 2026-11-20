@@ -177,7 +177,9 @@ Constants `STEP`, `MIN_CONFIDENCE`, `MAX_CONFIDENCE` are exported.
   (`org-{orgId}/project-{projectId}/graph.db`) | `GitBranchIsolation` (
   per-branch `<git-common-dir>/engram/<branch>.db`, with a fallback model).
 - **Signal source** — `SignalSource → FeedbackEvent[]`; `GitHistorySignalSource`,
-  `TestExitCodeSignalSource`. Types `FeedbackEvent`, `FeedbackSignal`.
+  `TestExitCodeSignalSource` are placeholders that return no events (supply your
+  own source, or enter feedback with `egr feedback` / MCP `ingest_feedback`).
+  Types `FeedbackEvent`, `FeedbackSignal`.
 
 ## api — REST (Hono)
 

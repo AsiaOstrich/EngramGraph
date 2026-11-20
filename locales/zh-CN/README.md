@@ -14,14 +14,15 @@ status: complete
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](https://nodejs.org)
 
-> 开源的**代码 + 知识图谱记忆引擎**，融合
-> [SAGE](https://arxiv.org/abs/2605.12061) 自演化图谱记忆与
-> CodeGraph 结构化代码理解。
+> 开源的**代码 + 知识图谱记忆引擎**，结合 CodeGraph 结构化代码理解，
+> 以及参照 [SAGE](https://arxiv.org/abs/2605.12061) 自演化图谱记忆设计的
+> 置信度反馈层（有反馈时能让排序更准；目前没有自动反馈来源）。
 
 **许可：** MIT · **运行环境：** Node.js ≥ 22 · **图数据库：** [Kuzu](https://kuzudb.github.io/)（嵌入式、Cypher）· **无需 LLM**（确定性）· **可完全离线使用**——`god-nodes`／`communities`／`related` 所需的图算法扩展，在 Windows x64、Linux x64 与 macOS 上会随包一起安装
 
-EngramGraph 是通用引擎。默认行为（“单一 repo + 通用 markdown + git 信号”）对任何项目
-开箱即用；项目专属行为则通过可插拔的 adapter 提供。
+EngramGraph 是通用引擎。默认行为（“单一 repo + 通用 markdown”）对任何项目
+开箱即用；项目专属行为则通过可插拔的 adapter 提供。SAGE 置信度反馈目前要手动输入
+（`egr feedback`／MCP `ingest_feedback`），尚未内置自动信号来源。
 
 ## 为什么用图谱？
 
@@ -301,7 +302,7 @@ egr refs check MEMORY.md
 | 层级 | 内容 | 对外可用性 |
 |------|------|------------|
 | **通用 Core** | CodeGraph（tree-sitter → 图谱）、SAGE 演化、Kuzu 抽象、REST/MCP/Embedded 模式、node-sdk | 零项目专属依赖 |
-| **可插拔 Adapter（接口）** |（1）知识来源（2）隔离模型（3）SAGE 信号来源 | Core 提供接口 + 一个通用默认 |
+| **可插拔 Adapter（接口）** |（1）知识来源（2）隔离模型（3）SAGE 信号来源 | Core 提供接口；（1）（2）有默认，（3）内置的信号来源是不产生事件的占位实现 |
 
 ### 三个 adapter
 
@@ -312,7 +313,8 @@ egr refs check MEMORY.md
    默认：`SingleRepoIsolation`（单一 `graph.db`，无 org 概念）。
    可选：`OrgProjectIsolation`（`org-{orgId}/project-{projectId}/graph.db`）。
 3. **SAGE 信号来源** — `SignalSource → FeedbackEvent[]`。
-   默认：`GitHistorySignalSource`、`TestExitCodeSignalSource`。
+   `GitHistorySignalSource` 与 `TestExitCodeSignalSource` 是占位实现，不会产生任何事件；
+   请自行提供信号来源，或用 `egr feedback`／MCP `ingest_feedback` 手动输入反馈。
 
 ## 图谱 schema
 
@@ -343,6 +345,9 @@ repository 里已经存在的 spec／decision 文档。
       + `IMPACTS` / `SUPERSEDES` 边
 - [x] **Phase 4** — SAGE 演化层：置信度反馈（`STEP` 0.25、下限 0.1）、
       `topByConfidence`、`rankedImpact`
+- [ ] **Phase 4b** — 自动信号来源，以及在真实项目上证明置信度排序胜过简单基准：
+      排序的改善已在手工构建、附人工反馈的测试图上验证；两次在真实决策记录历史
+      （2026 年 11 月）上的回放，找到的过时事件太少，无法公平检验，因此暂缓
 - [x] **Phase 5** — REST 路由（`/graph/call-chain`、`/graph/impact-analysis`、
       `/graph/ingest`）、MCP server（5 工具）、独立 `egr` CLI
 
