@@ -24,7 +24,7 @@ import {
  *     signals as a default, or call Phase 4b "in progress".
  *  2. Doc-vs-code: the placeholders still return []. If someone implements
  *     either class, the "no automatic source ships" sentences in all three
- *     READMEs and the four API docs become false and MUST be revisited — this
+ *     READMEs and the three API docs become false and MUST be revisited — this
  *     test then fails on purpose. Update the docs first, then this test.
  */
 
@@ -38,9 +38,13 @@ describe("docs do not promise an automatic SAGE signal source", () => {
   for (const rel of [...READMES, ...API_DOCS]) {
     it(`${rel} does not name the placeholder signal sources as defaults`, () => {
       const text = read(rel);
-      // "Default: `GitHistorySignalSource`" / "預設：`..." / "默认：`..." (also fullwidth/ASCII colon, optional spaces)
-      const asDefault =
-        /(?:Defaults?|預設|默认|默認)\s*[:：]\s*`(?:GitHistorySignalSource|TestExitCodeSignalSource)/i;
+      // "Default: `GitHistorySignalSource`" / "預設：`..." / "默认：`..." (any colon, optional spaces),
+      // plus "By default, `GitHistorySignalSource`" and "defaults to `GitHistorySignalSource`".
+      const names = "`?(?:GitHistorySignalSource|TestExitCodeSignalSource)";
+      const asDefault = new RegExp(
+        "(?:(?:Defaults?|預設|默认|默認)\\s*[:：]\\s*|by default,?\\s*|defaults?\\s+to\\s*|預設為\\s*|默认为\\s*)" + names,
+        "i",
+      );
       expect(text).not.toMatch(asDefault);
     });
   }
@@ -65,10 +69,35 @@ describe("docs do not promise an automatic SAGE signal source", () => {
       expect(m![0]).not.toMatch(/in progress|進行中|进行中/i);
     });
 
-    it(`${rel} says feedback is entered by hand and no automatic source ships`, () => {
+    it(`${rel} says near the top that no automatic feedback source ships`, () => {
       const text = read(rel);
-      expect(text).toContain("`egr feedback`");
-      expect(text).toContain("`ingest_feedback`");
+      // Everything before the first "## " heading = tagline + defaults paragraph.
+      const top = text.slice(0, text.search(/^## /m));
+      expect(top, `${rel}: no top section`).not.toBe("");
+      expect(top).toMatch(/no automatic|沒有自動|尚未內建自動|没有自动|尚未内置自动/);
+    });
+  }
+
+  // Every paragraph / list item that tells the reader how to enter feedback via
+  // `ingest_feedback` must also say that tool needs a writable connection: the
+  // standard `egr mcp` stdio server is read-only (src/mcp/server.ts, docs/MCP.md).
+  const blocks = (text: string): string[] => text.split(/\n\s*\n|\n(?=- |\d+\. )/);
+  const WRITABLE = /writable|可寫入|可写入/;
+
+  for (const rel of [...READMES, ...API_DOCS]) {
+    it(`${rel} names the placeholders as placeholders in the same paragraph`, () => {
+      const hits = blocks(read(rel)).filter((b) => b.includes("GitHistorySignalSource"));
+      expect(hits.length, `${rel}: GitHistorySignalSource not mentioned`).toBeGreaterThan(0);
+      for (const b of hits) expect(b).toMatch(/placeholder|佔位|占位/);
+    });
+
+    it(`${rel} qualifies ingest_feedback as writable-connection-only when offered for entering feedback`, () => {
+      const hits = blocks(read(rel)).filter((b) => /egr feedback/.test(b) && b.includes("ingest_feedback"));
+      expect(hits.length, `${rel}: no "enter feedback" paragraph found`).toBeGreaterThan(0);
+      for (const b of hits) {
+        expect(b).toMatch(WRITABLE);
+        expect(b).toMatch(/read-only|唯讀|只读/);
+      }
     });
   }
 

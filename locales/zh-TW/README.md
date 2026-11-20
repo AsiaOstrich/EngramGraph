@@ -16,13 +16,14 @@ status: complete
 
 > 開源的**程式碼 + 知識圖譜記憶引擎**，結合 CodeGraph 結構化程式碼理解，
 > 以及參照 [SAGE](https://arxiv.org/abs/2605.12061) 自演化圖譜記憶設計的
-> 信心度回饋層（有回饋時能讓排序更準；目前沒有自動回饋來源）。
+> 信心度回饋層（在人工建構的測試圖上，有回饋時排序更準；目前沒有自動回饋來源）。
 
 **授權：** MIT · **執行環境：** Node.js ≥ 22 · **圖譜資料庫：** [Kuzu](https://kuzudb.github.io/)（嵌入式、Cypher）· **無需 LLM**（確定性）· **可完全離線使用**——`god-nodes`／`communities`／`related` 所需的圖演算法擴充，在 Windows x64、Linux x64 與 macOS 上會隨套件一起安裝
 
 EngramGraph 是通用引擎。預設行為（「單一 repo + 通用 markdown」）對任何專案
-開箱即用；專案專屬行為則透過可插拔的 adapter 提供。SAGE 信心度回饋目前要手動輸入
-（`egr feedback`／MCP `ingest_feedback`），尚未內建自動訊號來源。
+開箱即用；專案專屬行為則透過可插拔的 adapter 提供。SAGE 信心度回饋目前要手動輸入：
+終端機的 `egr feedback`，或可寫入（嵌入式）MCP 連線的 `ingest_feedback`——一般唯讀的
+`egr mcp` 不提供這個工具。尚未內建自動訊號來源。
 
 ## 為什麼要用圖譜？
 
@@ -314,7 +315,8 @@ egr refs check MEMORY.md
    可選：`OrgProjectIsolation`（`org-{orgId}/project-{projectId}/graph.db`）。
 3. **SAGE 訊號來源** — `SignalSource → FeedbackEvent[]`。
    `GitHistorySignalSource` 與 `TestExitCodeSignalSource` 是佔位實作，不會產生任何事件；
-   請自行提供訊號來源，或用 `egr feedback`／MCP `ingest_feedback` 手動輸入回饋。
+   請自行提供訊號來源，或手動輸入回饋：終端機的 `egr feedback`，或可寫入（嵌入式）MCP 連線的
+   `ingest_feedback`——一般唯讀的 `egr mcp` 不提供這個工具。
 
 ## 圖譜 schema
 

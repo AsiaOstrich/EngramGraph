@@ -178,7 +178,9 @@ Constants `STEP`, `MIN_CONFIDENCE`, `MAX_CONFIDENCE` are exported.
   per-branch `<git-common-dir>/engram/<branch>.db`, with a fallback model).
 - **Signal source** — `SignalSource → FeedbackEvent[]`; `GitHistorySignalSource`,
   `TestExitCodeSignalSource` are placeholders that return no events (supply your
-  own source, or enter feedback with `egr feedback` / MCP `ingest_feedback`).
+  own source, or enter feedback with `egr feedback` in a terminal, or
+  `ingest_feedback` on a writable (embedded) MCP connection — the standard
+  read-only `egr mcp` server does not offer it).
   Types `FeedbackEvent`, `FeedbackSignal`.
 
 ## api — REST (Hono)

@@ -8,16 +8,18 @@
 
 > Open-source **code + knowledge graph memory engine**, combining CodeGraph
 > structural code understanding with a confidence-feedback layer modelled on
-> [SAGE](https://arxiv.org/abs/2605.12061) self-evolving graph memory (shown to
-> improve ranking when feedback is supplied; no automatic feedback source ships
-> yet).
+> [SAGE](https://arxiv.org/abs/2605.12061) self-evolving graph memory (on a
+> hand-built test graph, ranking improves when feedback is supplied; no automatic
+> feedback source ships yet).
 
 **License:** MIT · **Runtime:** Node.js ≥ 22 · **Graph DB:** [Kuzu](https://kuzudb.github.io/) (embedded, Cypher) · **No LLM required** (deterministic) · **Works offline** — the graph-algorithm extension behind `god-nodes` / `communities` / `related` is installed with the package on Windows x64, Linux x64 and macOS ([details](#troubleshooting-misleading-native-binary-errors))
 
 EngramGraph is a general-purpose engine. The defaults ("single repo + generic
 markdown") work out of the box for any project; project-specific behaviour is
-supplied through pluggable adapters. SAGE confidence feedback is entered by hand
-(`egr feedback` / MCP `ingest_feedback`); no automatic signal source ships yet.
+supplied through pluggable adapters. SAGE confidence feedback is entered by hand:
+`egr feedback` in a terminal, or `ingest_feedback` on a writable (embedded) MCP
+connection — the standard read-only `egr mcp` server does not offer it. No
+automatic signal source ships yet.
 
 ## Why a graph?
 
@@ -401,7 +403,8 @@ Full extraction rule and examples: **[docs/CLI.md](./docs/CLI.md)**.
 3. **SAGE signal source** — `SignalSource → FeedbackEvent[]`.
    `GitHistorySignalSource` and `TestExitCodeSignalSource` are placeholders that
    return no events; supply your own source, or enter feedback with
-   `egr feedback` / MCP `ingest_feedback`.
+   `egr feedback` in a terminal, or `ingest_feedback` on a writable (embedded)
+   MCP connection — the standard read-only `egr mcp` server does not offer it.
 
 ## Graph schema
 
