@@ -14,14 +14,16 @@ status: complete
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](https://nodejs.org)
 
-> 開源的**程式碼 + 知識圖譜記憶引擎**，融合
-> [SAGE](https://arxiv.org/abs/2605.12061) 自演化圖譜記憶與
-> CodeGraph 結構化程式碼理解。
+> 開源的**程式碼 + 知識圖譜記憶引擎**，結合 CodeGraph 結構化程式碼理解，
+> 以及參照 [SAGE](https://arxiv.org/abs/2605.12061) 自演化圖譜記憶設計的
+> 信心度回饋層（在人工建構的測試圖上，有回饋時排序更準；目前沒有自動回饋來源）。
 
 **授權：** MIT · **執行環境：** Node.js ≥ 22 · **圖譜資料庫：** [Kuzu](https://kuzudb.github.io/)（嵌入式、Cypher）· **無需 LLM**（確定性）· **可完全離線使用**——`god-nodes`／`communities`／`related` 所需的圖演算法擴充，在 Windows x64、Linux x64 與 macOS 上會隨套件一起安裝
 
-EngramGraph 是通用引擎。預設行為（「單一 repo + 通用 markdown + git 訊號」）對任何專案
-開箱即用；專案專屬行為則透過可插拔的 adapter 提供。
+EngramGraph 是通用引擎。預設行為（「單一 repo + 通用 markdown」）對任何專案
+開箱即用；專案專屬行為則透過可插拔的 adapter 提供。SAGE 信心度回饋目前要手動輸入：
+終端機的 `egr feedback`，或可寫入（嵌入式）MCP 連線的 `ingest_feedback`——一般唯讀的
+`egr mcp` 不提供這個工具。尚未內建自動訊號來源。
 
 ## 為什麼要用圖譜？
 
@@ -301,7 +303,7 @@ egr refs check MEMORY.md
 | 層級 | 內容 | 對外可用性 |
 |------|------|------------|
 | **通用 Core** | CodeGraph（tree-sitter → 圖譜）、SAGE 演化、Kuzu 抽象、REST/MCP/Embedded 模式、node-sdk | 零專案專屬相依 |
-| **可插拔 Adapter（介面）** |（1）知識來源（2）隔離模型（3）SAGE 訊號來源 | Core 提供介面 + 一個通用預設 |
+| **可插拔 Adapter（介面）** |（1）知識來源（2）隔離模型（3）SAGE 訊號來源 | Core 提供介面；（1）（2）有預設，（3）內建的訊號來源是不產生事件的佔位實作 |
 
 ### 三個 adapter
 
@@ -312,7 +314,9 @@ egr refs check MEMORY.md
    預設：`SingleRepoIsolation`（單一 `graph.db`，無 org 概念）。
    可選：`OrgProjectIsolation`（`org-{orgId}/project-{projectId}/graph.db`）。
 3. **SAGE 訊號來源** — `SignalSource → FeedbackEvent[]`。
-   預設：`GitHistorySignalSource`、`TestExitCodeSignalSource`。
+   `GitHistorySignalSource` 與 `TestExitCodeSignalSource` 是佔位實作，不會產生任何事件；
+   請自行提供訊號來源，或手動輸入回饋：終端機的 `egr feedback`，或可寫入（嵌入式）MCP 連線的
+   `ingest_feedback`——一般唯讀的 `egr mcp` 不提供這個工具。
 
 ## 圖譜 schema
 
@@ -343,6 +347,9 @@ egr refs check MEMORY.md
       + `IMPACTS` / `SUPERSEDES` 邊
 - [x] **Phase 4** — SAGE 演化層：信心度回饋（`STEP` 0.25、下限 0.1）、
       `topByConfidence`、`rankedImpact`
+- [ ] **Phase 4b** — 自動訊號來源，以及在真實專案上證明信心度排序勝過簡單基準：
+      排序的改善已在手工建立、附人工回饋的測試圖上驗證；兩次在真實決策紀錄歷史
+      （2026 年 11 月）上的回放，找到的過時事件太少，無法公平檢驗，因此暫緩
 - [x] **Phase 5** — REST 路由（`/graph/call-chain`、`/graph/impact-analysis`、
       `/graph/ingest`）、MCP server（5 工具）、獨立 `egr` CLI
 

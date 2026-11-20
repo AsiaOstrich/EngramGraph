@@ -6,15 +6,20 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](https://nodejs.org)
 
-> Open-source **code + knowledge graph memory engine**, fusing
-> [SAGE](https://arxiv.org/abs/2605.12061) self-evolving graph memory with
-> CodeGraph structural code understanding.
+> Open-source **code + knowledge graph memory engine**, combining CodeGraph
+> structural code understanding with a confidence-feedback layer modelled on
+> [SAGE](https://arxiv.org/abs/2605.12061) self-evolving graph memory (on a
+> hand-built test graph, ranking improves when feedback is supplied; no automatic
+> feedback source ships yet).
 
 **License:** MIT · **Runtime:** Node.js ≥ 22 · **Graph DB:** [Kuzu](https://kuzudb.github.io/) (embedded, Cypher) · **No LLM required** (deterministic) · **Works offline** — the graph-algorithm extension behind `god-nodes` / `communities` / `related` is installed with the package on Windows x64, Linux x64 and macOS ([details](#troubleshooting-misleading-native-binary-errors))
 
 EngramGraph is a general-purpose engine. The defaults ("single repo + generic
-markdown + git signals") work out of the box for any project; project-specific
-behaviour is supplied through pluggable adapters.
+markdown") work out of the box for any project; project-specific behaviour is
+supplied through pluggable adapters. SAGE confidence feedback is entered by hand:
+`egr feedback` in a terminal, or `ingest_feedback` on a writable (embedded) MCP
+connection — the standard read-only `egr mcp` server does not offer it. No
+automatic signal source ships yet.
 
 ## Why a graph?
 
@@ -385,7 +390,7 @@ Full extraction rule and examples: **[docs/CLI.md](./docs/CLI.md)**.
 | Layer | Contents | External usability |
 |-------|----------|--------------------|
 | **Generic Core** | CodeGraph (tree-sitter → graph), SAGE evolution, Kuzu abstraction, REST/MCP/Embedded modes, node-sdk | Zero project-specific dependency |
-| **Pluggable Adapters (interfaces)** | (1) knowledge source (2) isolation model (3) SAGE signal source | Core ships interface + a generic default |
+| **Pluggable Adapters (interfaces)** | (1) knowledge source (2) isolation model (3) SAGE signal source | Core ships the interfaces; defaults for (1) and (2), while the bundled signal sources for (3) are placeholders that return no events |
 
 ### The three adapters
 
@@ -398,7 +403,8 @@ Full extraction rule and examples: **[docs/CLI.md](./docs/CLI.md)**.
 3. **SAGE signal source** — `SignalSource → FeedbackEvent[]`.
    `GitHistorySignalSource` and `TestExitCodeSignalSource` are placeholders that
    return no events; supply your own source, or enter feedback with
-   `egr feedback` / MCP `ingest_feedback`.
+   `egr feedback` in a terminal, or `ingest_feedback` on a writable (embedded)
+   MCP connection — the standard read-only `egr mcp` server does not offer it.
 
 ## Graph schema
 
@@ -434,7 +440,10 @@ structure, and the spec/decision documents your repository already contains.
 - [x] **Phase 4** — SAGE evolution layer mechanics: confidence feedback (`STEP` 0.25,
       floor 0.1), `topByConfidence`, `rankedImpact`
 - [ ] **Phase 4b** — automatic signal sources, and evidence that confidence
-      ranking beats simple baselines (in progress)
+      ranking beats simple baselines on real projects: the ranking gain is
+      shown on a hand-built test graph with supplied feedback; two replays on
+      real decision-record histories (Nov 2026) found too few staleness events
+      for a fair test, so this is on hold
 - [x] **Phase 5** — REST routes (`/graph/call-chain`, `/graph/impact-analysis`,
       `/graph/ingest`), MCP server (5 tools), standalone `egr` CLI
 
