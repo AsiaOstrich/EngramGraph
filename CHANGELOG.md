@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-22
+
+> **Stable Release**: the same content as 0.16.0-beta.2 below, which passed the Windows release verification (run 44991211685, installing 0.16.0-beta.2 from npm). It brings `egr explore` / MCP `explore`, `egr watch` and `indexHealth.staleFiles` (see 0.16.0-beta.1), and the documentation fix of 0.16.0-beta.2. Behavior changes: `explore` leaves test code out by default, and every MCP server now sends `instructions`. Known issue: on macOS arm64 a fresh install may build without Dart support (see 0.16.0-beta.2).
+
 ## [0.16.0-beta.2] - 2026-11-22
 
 *Preview on the `next` dist-tag. Documentation only on top of 0.16.0-beta.1, so that 0.16.0 can be published from the same content after the Windows release verification: the README (three languages) and `docs/API.md` say plainly that no automatic SAGE feedback source ships, and a test pins that wording.*
