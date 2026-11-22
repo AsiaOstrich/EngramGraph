@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0-beta.2] - 2026-11-22
+
+*Preview on the `next` dist-tag. Documentation only on top of 0.16.0-beta.1, so that 0.16.0 can be published from the same content after the Windows release verification: the README (three languages) and `docs/API.md` say plainly that no automatic SAGE feedback source ships, and a test pins that wording.*
+
+### Changed
+
+- **The README and `docs/API.md` (English, Traditional Chinese, Simplified Chinese) now say plainly that EngramGraph ships no automatic source of SAGE feedback** (PR #33). SAGE confidence feedback is entered by hand: `egr feedback` in a terminal, or `ingest_feedback` on a writable (embedded) MCP connection; the standard read-only `egr mcp` server does not offer it, and the bundled signal sources are placeholders that return no events. `test/signal-source-docs.test.ts` pins this wording. No code, command or output changes.
+
+### Known issue
+
+- **On macOS arm64, a fresh `npm install` may build EngramGraph without Dart support** (#278 in the planning tracker). `@vokturz/tree-sitter-dart` has no prebuilt binary for darwin-arm64, so it compiles with node-gyp and that build can fail on a current Xcode and Python; it is an optional dependency, so the install finishes and every other language works. This predates 0.16.0. Windows builds it from source successfully.
+
 ## [0.16.0-beta.1] - 2026-11-20
 
 *Preview on the `next` dist-tag. New since 0.15.1: `egr explore` / MCP `explore` (one call for "how does X work"), `egr watch` and `indexHealth.staleFiles`. Behavior changes: `explore` leaves test code out by default, and every MCP server now sends `instructions`.*
