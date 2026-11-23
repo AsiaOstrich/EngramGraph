@@ -98,6 +98,8 @@ jobs:
     outputs:
       package-spec: ${{ steps.resolve.outputs.package-spec }}
     steps:
+      # The wait loop is a script in this repository (see the step below).
+      - uses: actions/checkout@v4
       - name: Determine target version and wait for npm registry propagation
         id: resolve
         shell: bash
@@ -137,33 +139,18 @@ jobs:
           # job had to out-wait the whole publish run, which it could not do —
           # see the header. Do not raise this number to "fix" a missing
           # package; look at the publish run.)
-          ATTEMPTS=20
-          echo "Waiting for $SPEC to be resolvable on the npm registry..."
-          for i in $(seq 1 "$ATTEMPTS"); do
-            if npm view "$SPEC" version >/dev/null 2>&1; then
-              echo "Found $SPEC on npm registry after ~$(( (i - 1) * 15 ))s."
-              echo "package-spec=$SPEC" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "  attempt $i/$ATTEMPTS: not yet available, waiting 15s..."
-            sleep 15
-          done
-
-          # TELL THE FAILURES APART (XSPEC-365 R6).
           #
-          # "the package is not on the registry" and "a platform cannot install
-          # it" must not surface as the same red. A publish that FAILED never
-          # gets here (publish-not-succeeded above reports it). Reaching this
-          # point means either publish.yml succeeded but the registry has not
-          # served the version after $(( ATTEMPTS * 15 / 60 )) minutes, or a
-          # manual run asked for a version that does not exist. No platform was
-          # tested either way, so nothing about platform support follows.
-          echo "::error title=Version not visible on npm — NO platform was tested::" \
-            "$SPEC did not appear on the npm registry within $(( ATTEMPTS * 15 / 60 )) minutes" \
-            "(event: $EVENT_NAME). The matrix below did not run, so this release is UNVERIFIED" \
-            "rather than broken. If this was a workflow_run, publish.yml reported success:" \
-            "check npm's registry status; if it was a manual run, check the version you typed."
-          exit 1
+          # WHAT THE POLL ASKS: whether the package FILE downloads, not whether
+          # the version is listed. The registry lists a version before it serves
+          # its tarball: on 0.16.0 the old `npm view <spec> version` check passed,
+          # `npm install` then got a 404 for engramgraph-0.16.0.tgz, and all four
+          # platforms went red without ever being tested (run 44994199862).
+          # The loop, the "NO platform was tested" message and the $GITHUB_OUTPUT
+          # write live in scripts/wait-for-npm-package.sh so that
+          # test/wait-for-npm-package.test.ts can run them against a fake npm and
+          # a fake curl. (Which is why this job checks the repository out.)
+          export WAIT_ATTEMPTS=20 WAIT_INTERVAL=15
+          exec bash scripts/wait-for-npm-package.sh "$SPEC"
 
   # NOTE: intentionally does NOT include macos-13 (Intel Mac). GitHub's
   # hosted Intel Mac runners currently have severe queue-capacity issues —
