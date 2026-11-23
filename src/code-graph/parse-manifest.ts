@@ -44,6 +44,7 @@ import { createRequire } from "node:module";
 import { renameSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 
 import type { FileParseHealth } from "./parse-health.js";
+import { graphVersionAfterWrite } from "./egr-version.js";
 
 /**
  * The tree-sitter grammar packages whose resolved versions fingerprint the
@@ -184,6 +185,13 @@ export interface ParseManifest {
   egrVersion: string;
   /** Resolved tree-sitter grammar package versions (staleness fingerprint). */
   grammarVersions: Record<string, string>;
+  /**
+   * The NEWEST egr version that has written this graph's index data (dev-platform #309; see
+   * `egr-version.ts`). Unlike `egrVersion` it is never lowered by an older egr's write — only a
+   * `--clean` (which rebuilds the manifest from nothing) resets it. Absent on a manifest an earlier egr
+   * wrote: "unknown, older".
+   */
+  graphEgrVersion?: string;
   /** Per-index-root sections, keyed by absolute root — see module doc. */
   runs: Record<string, ManifestRun>;
 }
@@ -218,7 +226,7 @@ export function upsertRun(
     ...(incrementalToken ? { incrementalToken } : {}),
     ...(rootLabel ? { rootLabel } : {}),
   };
-  return { egrVersion, grammarVersions: grammarVersions(), runs };
+  return { egrVersion, grammarVersions: grammarVersions(), graphEgrVersion: graphVersionAfterWrite(prev?.graphEgrVersion, egrVersion), runs };
 }
 
 /** Every file across every root's section — the whole-graph view (R2 SSOT). */

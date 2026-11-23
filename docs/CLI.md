@@ -37,7 +37,7 @@ The directory is created on demand and the schema is ensured on every open
 
 ## Commands
 
-### `index <dir> [--docs] [--clean] [--scip <path>] [--incremental [--changed-from <git-ref>]]`
+### `index <dir> [--docs] [--clean [--allow-downgrade]] [--scip <path>] [--incremental [--changed-from <git-ref>]]`
 
 Recursively indexes source files under `<dir>` into the **code graph**
 (tree-sitter → `Function` / `Class` / `Module` nodes + cross-file `CALLS`).
@@ -83,6 +83,19 @@ only the `supersedes` field makes a `SUPERSEDES` edge).
 - `--clean`: drop the graph's data before indexing. Indexing is otherwise an
   upsert (MERGE) that never deletes, so a node removed from the code lingers;
   `--clean` rebuilds from scratch to prune it.
+- **A graph written by a newer egr.** The graph's parse-health manifest
+  (`<graph>.parse-manifest.json`) records the newest egr version that has written
+  it (`graphEgrVersion`; versions compare as semver, so `0.16.0-beta.2` is older
+  than `0.16.0`). When that is newer than the egr you run, every `egr` command that
+  opens the graph prints a warning on stderr (the MCP server does not) (stdout, and `--json`, stay the
+  answer alone), and `--clean` is **refused before anything is changed**: it
+  empties the graph and rebuilds it with the egr that is running, which resets the
+  SAGE `confidence` the newer egr kept, and a re-index does not bring that back.
+  Upgrade egr, or add `--allow-downgrade` to rebuild anyway (the confidence is
+  reset, and the record becomes the running egr). An older egr's plain or
+  `--incremental` write goes ahead with the warning and does not lower the record.
+  A graph with no record (built by an earlier egr, or its manifest is gone) is
+  treated as unknown and older: never warned about, never refused.
 - `--incremental`: parse only the files whose **content** changed since the last
   `--incremental` index, and write only the difference. Changed means a different
   sha256 of the source text — not mtime, which a grammar upgrade or a
@@ -106,8 +119,11 @@ only the `supersedes` field makes a `SUPERSEDES` edge).
   `--incremental` run; the state file was written by an older egr whose state
   format differs (`incremental state was written by an older egr (state version
   1, now 2)`; a newer egr's file says `newer`, and a file that is damaged says it
-  could not be read); egr or a tree-sitter grammar version differs from the one
-  that wrote the state (so a grammar upgrade re-parses everything); the graph was
+  could not be read); egr is NEWER than the one that wrote the state, or a
+  tree-sitter grammar version differs (so a grammar upgrade re-parses everything;
+  an OLDER egr than the one that wrote the state carries on from it, with the
+  warning above and `stateWrittenByNewerEgr` in `--json`, instead of parsing
+  everything again); the graph was
   indexed again without `--incremental` since (the state is tied to the
   manifest by a token); the graph holds fewer files than the state remembers; or
   the graph was built by an older egr from roots that share a relative path (see

@@ -19,7 +19,8 @@ import type { RefCheckResult } from "./refs-check.js";
 import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
 import { readIndexHealth, staleNote, describeDefinitionScope, explore, formatExplore, DEFAULT_EXPLORE_LIMIT, DEFAULT_EXPLORE_MAX_CHARS, type IndexHealth } from "../code-graph/index.js";
-import { manifestPathForDb } from "../code-graph/parse-manifest.js";
+import { manifestPathForDb, readManifest } from "../code-graph/parse-manifest.js";
+import { newerGraphVersion, newerGraphWarning } from "../code-graph/egr-version.js";
 import { formatLint } from "../knowledge-graph/lint.js";
 import { unresolvedIdClusters, type DocIdConflict, type ReplacedDocument } from "../knowledge-graph/parser.js";
 import { callResolutionHint, knowledgeNamingHint } from "./index-hints.js";
@@ -37,13 +38,15 @@ const HELP = `egr — code + knowledge graph memory CLI
 Usage: egr <command> [args] [options]
 
 Commands:
-  index <dir> [--docs] [--clean] [--scip <path>] [--exclude <glob>]...
+  index <dir> [--docs] [--clean [--allow-downgrade]] [--scip <path>] [--exclude <glob>]...
               [--incremental [--changed-from <git-ref>]]
                                   Index source (.ts/.js/.cs/.py/.go/.java/
                                   .kt/.rs/.cpp/.rb/.php/.dart) into the code
                                   graph;
                                   --docs also indexes .md; --clean drops the
-                                  graph first (prunes deleted nodes); --scip
+                                  graph first (prunes deleted nodes; refused
+                                  when a NEWER egr wrote the graph — see
+                                  "Graph written by a newer egr" below); --scip
                                   <path> additionally overlays a pre-generated
                                   SCIP index (a .scip file YOU produce with an
                                   external indexer, e.g. 'scip-dotnet index'
@@ -233,6 +236,14 @@ Excluding paths: egr index <dir> --exclude <glob> [--exclude <glob> ...]
   "/logs/"), or write "//logs/" or "logs/"; a pattern that starts with a Git
   install path and matched nothing is reported with this reason.
 
+Graph written by a newer egr: the graph's parse-health manifest records the newest egr
+  that wrote it. When that is newer than the egr you run, every command that opens the
+  graph prints a warning on stderr, and "egr index --clean" is refused before anything is
+  changed: a rebuild by the older egr resets the SAGE confidence the newer one kept, and a
+  re-index does not bring it back. Upgrade egr, or add --allow-downgrade to rebuild anyway.
+  A graph with no record (built by an earlier egr) is never warned about or refused.
+  Versions compare as semver: 0.16.0-beta.2 is older than 0.16.0.
+
 Incremental index: egr index <dir> --incremental [--changed-from <git-ref>]
   Parses only the files whose content (sha256, not mtime) changed since the last
   --incremental index, and writes only the difference: nodes and edges of changed
@@ -242,8 +253,9 @@ Incremental index: egr index <dir> --incremental [--changed-from <git-ref>]
   equals "egr index <dir> --clean" on the same sources. The summary line
   "incremental: N file(s) parsed ..." says what was really parsed.
   Indexed in full (with the reason printed): the first --incremental run, a
-  changed egr or tree-sitter grammar version, a graph that was indexed again
-  without --incremental, or nodes an older egr wrote for one relative path of two roots.
+  newer egr or a changed tree-sitter grammar version (an OLDER egr than the one that
+  wrote the state carries on from it and says so; it does not parse everything again),
+  a graph that was indexed again without --incremental, or nodes an older egr wrote for one relative path of two roots.
   A graph built earlier by plain "egr index" runs may hold leftovers a plain
   index never prunes; start from an empty graph or add --clean for an exact state.
   --changed-from <ref> says "the graph describes <ref>": files "git diff <ref>"
@@ -337,6 +349,15 @@ function healthNote(h: IndexHealth | null): string {
 }
 
 /**
+ * Say so when the graph about to be used was written by a NEWER egr (dev-platform #309). stderr, so `--json` output
+ * stays parseable; once per process, because the command opens the graph once.
+ */
+function warnIfGraphIsNewer(dbPath: string): void {
+  const newer = newerGraphVersion(readManifest(manifestPathForDb(dbPath)), VERSION);
+  if (newer !== null) process.stderr.write(newerGraphWarning(newer, VERSION) + "\n");
+}
+
+/**
  * The writable connection this process opened, once it has one. `main().catch` below uses it:
  * a command that fails after it has written (an `index` whose `--scip` file is missing, say)
  * must not leave what it wrote only in the write-ahead log.
@@ -360,6 +381,7 @@ async function main(): Promise<void> {
       graph: { type: "string" },
       isolation: { type: "string" },
       clean: { type: "boolean" },
+      "allow-downgrade": { type: "boolean" },
       scip: { type: "string" },
       exclude: { type: "string", multiple: true },
       "dry-run": { type: "boolean" },
@@ -586,6 +608,7 @@ async function main(): Promise<void> {
   // Long-running commands manage their own lifecycle (no exit).
   if (cmd === "mcp") return startMcpStdio(resolveDbPath(loc));
   if (cmd === "serve") {
+    warnIfGraphIsNewer(resolveDbPath(loc));
     const conn = await openGraph(loc);
     openedForWriting = conn;
     // `serve` runs until it is stopped, and `POST /graph/ingest` writes. Stopping it with Ctrl-C or
@@ -624,6 +647,7 @@ async function main(): Promise<void> {
   }
 
   // Data commands: open graph, run, print, exit.
+  warnIfGraphIsNewer(resolveDbPath(loc));
   const conn = await openGraph(loc, { readOnly: READ_ONLY_COMMANDS.has(cmd) });
   if (!conn.readOnly) openedForWriting = conn;
   // Set by a command whose RESULT is a failure verdict although it ran fine
@@ -635,7 +659,7 @@ async function main(): Promise<void> {
       // The parse-health manifest (XSPEC-334 R1b) lives beside this graph's DB
       // file; derive its path from the same resolution the connection used.
       const manifestPath = manifestPathForDb(resolveDbPath(loc));
-      const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean, scip: values.scip, manifestPath, exclude: values.exclude, incremental: values.incremental, changedFrom: values["changed-from"] });
+      const r = await cmdIndex(conn, { dir: a1, docs: values.docs, clean: values.clean, scip: values.scip, manifestPath, exclude: values.exclude, incremental: values.incremental, changedFrom: values["changed-from"], allowDowngrade: values["allow-downgrade"] });
       out(r, values.json, (d) => {
         const s = d as Awaited<ReturnType<typeof cmdIndex>>;
         // The counts carry their denominator (XSPEC-373 R1): `0 specs` alone
@@ -830,7 +854,8 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
             ? `\nincremental: indexed in full — ${inc.reason}; ${inc.reparsed} file(s) parsed, state saved for the next run`
             : `\nincremental: ${inc.reparsed} file(s) parsed (${inc.changed} changed, ${inc.added} new), ${inc.reused} reused unchanged, ${inc.removed} removed; ` +
               `graph updated: ${inc.nodesRemoved} node(s) and ${inc.edgesRemoved} edge(s) removed, ${inc.edgesWritten} edge(s) written` +
-              (inc.changedFrom !== undefined ? ` (changed files from git diff ${inc.changedFrom})` : "")
+              (inc.changedFrom !== undefined ? ` (changed files from git diff ${inc.changedFrom})` : "") +
+              (inc.stateWrittenByNewerEgr !== undefined ? ` — the remembered facts were written by egr ${inc.stateWrittenByNewerEgr}, newer than this egr ${VERSION}; carried on from them instead of parsing everything again` : "")
           : "";
         // Roots that share a relative path (XSPEC-508 R6): the second one's files carry a root-qualified id.
         const rq = s.rootQualifiedIds;

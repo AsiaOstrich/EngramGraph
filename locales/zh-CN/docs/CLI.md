@@ -42,7 +42,7 @@ egr <command> [args] [options]
 
 ## 命令
 
-### `index <dir> [--docs] [--clean] [--scip <path>] [--incremental [--changed-from <git-ref>]]`
+### `index <dir> [--docs] [--clean [--allow-downgrade]] [--scip <path>] [--incremental [--changed-from <git-ref>]]`
 
 递归将 `<dir>` 下的源代码索引进**代码图谱**（tree-sitter → `Function` / `Class` /
 `Module` 节点 + 跨文件 `CALLS`）。加上 `--docs` 时，也会把 `*.md` 索引进**知识图谱**
@@ -56,6 +56,13 @@ egr <command> [args] [options]
   （例如 `packages/`）会和其他目录一样被索引。
 - `--clean`：索引前先清空图谱数据。索引本是 upsert（MERGE）从不删除，代码里被移除的节点
   会残留；`--clean` 从头重建以清掉它。
+- **较新版 egr 写过的图。** 图旁边的解析健康 manifest（`<graph>.parse-manifest.json`）会记录写过这张图的
+  最新 egr 版本（`graphEgrVersion`；版本按 semver 比较，所以 `0.16.0-beta.2` 比 `0.16.0` 旧）。
+  当它比你正在运行的 egr 新，每个打开这张图的 `egr` 命令都会在 stderr 打印警告（MCP 服务器不会）（stdout 与 `--json` 仍只有答案），
+  而 `--clean` 会在**改动任何东西之前被拒绝**：它会清空图并用当前运行的 egr 重建，较新版 egr 保留的 SAGE
+  `confidence` 会被重置，重新索引也找不回来。请升级 egr，或加 `--allow-downgrade` 仍要重建
+  （confidence 会重置，记录改为当前的 egr）。较旧版 egr 的普通写入或 `--incremental` 写入会照常进行并打印警告，
+  不会把记录调低。没有记录的图（旧版 egr 建的，或 manifest 不见了）视为“未知、较旧”：不警告，也不拒绝。
 - `--incremental`：只重新解析自上次 `--incremental` 索引后**内容**有变的文件，只写入差异。
   “有变”指源码的 sha256 不同，不看 mtime（升级 grammar 或保留时间戳的 checkout 不会动 mtime）。
   结果与对同一份源码执行 `egr index <dir> --clean` 的图相同（节点与边都相同）；被删除、改名离开、
@@ -67,8 +74,9 @@ egr <command> [args] [options]
   就地更新，所以 SAGE 的 `confidence` 会保留。摘要会说明做了什么：`incremental: 4 file(s) parsed
   (3 changed, 1 new), 5 reused unchanged, 1 removed; …`（`--json` 为 `incremental.reparsed` 等字段）。
   在 egr 自己的 repo（210 个文件）上，全量重建约 26 秒，改 3 个文件后的增量索引约 0.4 秒。
-  **下列情况会改为全量索引，并打印原因**：第一次 `--incremental`；egr 或 tree-sitter grammar 版本与写入状态时不同
-  （所以升级 grammar 会全部重新解析）；之后有人不加 `--incremental` 又索引过这张图（状态以 token 绑在 manifest 上）；
+  **下列情况会改为全量索引，并打印原因**：第一次 `--incremental`；egr 比写入状态的版本**新**，或 tree-sitter grammar 版本不同
+  （所以升级 grammar 会全部重新解析；egr 比写入状态的版本**旧**时，会接着用该状态，打印上面的警告，
+  `--json` 有 `stateWrittenByNewerEgr`，不会全部重新解析）；之后有人不加 `--incremental` 又索引过这张图（状态以 token 绑在 manifest 上）；
   图里的文件比状态记得的少；或这张图是旧版 egr 用“相对路径相同的多个 root”建的（见下方“同一张图的多个 root”）。
   不加 `--incremental` 的 `egr index` 行为与以前完全相同。不能与 `--scip` 并用（会拒绝）；`--docs` 仍会索引全部文档。
   若图是早先用普通 `egr index` 建的，可能留有普通索引从不清除、状态也不知道的残留：请从空图开始，

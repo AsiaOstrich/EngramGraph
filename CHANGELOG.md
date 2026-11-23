@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The cross-platform check after a release waited for the version listing but not for the package file** (dev-platform #307). On 0.16.0 the wait passed, `npm install` then got a 404 for the tarball, and all four platforms went red without having been tested. The wait (`scripts/wait-for-npm-package.sh`) now ends only when the URL from `npm view <spec> dist.tarball` answers a HEAD request; if it runs out it reports "NO platform was tested", not a broken platform. Release workflow only; no change to the package.
+- **An older egr no longer quietly empties a graph a newer egr wrote** (dev-platform #309). The graph's parse-health manifest now records the newest egr version that wrote it (`graphEgrVersion`; semver order, a pre-release is older than its release). When that is newer than the egr you run, every `egr` command that opens the graph warns on stderr, and `egr index --clean` is refused before anything is changed, because the rebuild would reset the SAGE confidence the newer egr kept and a re-index does not bring it back. `--allow-downgrade` rebuilds anyway. A graph with no record (built by an earlier egr) is never warned about or refused. `egr index --incremental` now parses everything again only when egr is NEWER than the one that wrote the state; an older egr carries on from the state with a warning (`stateWrittenByNewerEgr` in `--json`) instead of rebuilding on every switch between versions.
+
 ## [0.16.0] - 2026-11-22
 
 > **Stable Release**: the same content as 0.16.0-beta.2 below, which passed the Windows release verification (run 44991211685, installing 0.16.0-beta.2 from npm). It brings `egr explore` / MCP `explore`, `egr watch` and `indexHealth.staleFiles` (see 0.16.0-beta.1), and the documentation fix of 0.16.0-beta.2. Behavior changes: `explore` leaves test code out by default, and every MCP server now sends `instructions`. Known issue: on macOS arm64 a fresh install may build without Dart support (see 0.16.0-beta.2).

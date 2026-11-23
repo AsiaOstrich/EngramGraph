@@ -72,6 +72,7 @@ import { compileExcludes, type ExcludeMatcher } from "./exclude.js";
 import { msysPathConversionHint } from "./index-hints.js";
 import { canonicalFilePath, toPosixPath } from "../code-graph/path-utils.js";
 import { checkRefs, type RefCheckResult } from "./refs-check.js";
+import { cleanRefusedMessage, newerGraphVersion } from "../code-graph/egr-version.js";
 import { ALGO_BACKED_COMMAND_LIST, describeAlgoSource, type AlgoSource } from "../structural-memory/algo-extension.js";
 import { unavailableGrammars } from "../code-graph/grammar-registry.js";
 import { GRAMMARS, compiledFromSourceOn, currentPlatform } from "../../language-support.js";
@@ -194,6 +195,11 @@ export interface IncrementalSummary {
   edgesWritten: number;
   /** The `--changed-from` ref, when given. */
   changedFrom?: string;
+  /**
+   * Set on an `incremental` run when the remembered facts were written by a NEWER egr than this one
+   * (dev-platform #309): this older egr carried on from them instead of parsing everything again.
+   */
+  stateWrittenByNewerEgr?: string;
 }
 
 /**
@@ -428,6 +434,7 @@ async function indexCodeIncrementally(
   // 1. Can the remembered facts be used?
   let prev: RootState | undefined;
   let reason: string | undefined;
+  let olderEgr: string | undefined;
   if (!statePath) {
     reason = "no manifest path was given, so there is nowhere to keep the incremental state";
   } else if (clean) {
@@ -441,6 +448,7 @@ async function indexCodeIncrementally(
     const usable = usableState({ root, manifest, state: found.state, stateProblem: found.problem, egrVersion: EGR_VERSION });
     if (usable.ok) {
       prev = usable.prev;
+      olderEgr = usable.olderEgr;
       const rows = await conn.query("MATCH (m:Module) RETURN count(m) AS c");
       if (Number(rows[0]?.c ?? 0) < Object.keys(prev.files).length) {
         reason = "the graph holds fewer files than the incremental state remembers (it was emptied or replaced)";
@@ -510,6 +518,7 @@ async function indexCodeIncrementally(
       removed: removedPaths.length,
       ...delta,
       ...(changedFrom !== undefined ? { changedFrom } : {}),
+      ...(olderEgr !== undefined ? { stateWrittenByNewerEgr: olderEgr } : {}),
     },
   };
 }
@@ -578,6 +587,11 @@ export async function cmdIndex(
     incremental?: boolean;
     /** With `incremental`: take the list of changed files from `git diff <ref>` instead of hashing every file. */
     changedFrom?: string;
+    /**
+     * Let `clean` empty a graph a NEWER egr wrote. Without it that is refused (dev-platform #309): the
+     * rebuild would reset the SAGE confidence the newer egr kept, and it does not come back.
+     */
+    allowDowngrade?: boolean;
   },
 ): Promise<IndexResultSummary> {
   if (opts.changedFrom !== undefined && !opts.incremental) {
@@ -591,6 +605,15 @@ export async function cmdIndex(
   // Taken before any file is read: a file edited after this moment may be read before its edit, and the manifest
   // section says so (`startedAt`), which is what `indexHealth.staleFiles` compares file times with.
   const startedAt = new Date().toISOString();
+  // BEFORE the graph is touched: `--clean` by an older egr over a graph a newer one wrote is refused unless the
+  // caller said it means it (dev-platform #309). The record is the manifest's `graphEgrVersion`; none = never refused.
+  if (opts.clean && opts.manifestPath) {
+    const newer = newerGraphVersion(readManifest(opts.manifestPath), EGR_VERSION);
+    if (newer !== null) {
+      if (!opts.allowDowngrade) throw new Error(cleanRefusedMessage(newer, EGR_VERSION));
+      process.stderr.write(`[egr] warning: --allow-downgrade: rebuilding a graph egr ${newer} wrote with the older egr ${EGR_VERSION}; its SAGE confidence is reset\n`);
+    }
+  }
   if (opts.clean) await clearGraph(conn); // drop existing data so deleted nodes are pruned
   if (opts.scip) await assertCallsSchemaHasProvenanceColumns(conn);
   // `detectShebangScripts: true` (XSPEC-414 R4 OQ2) only on the CODE walk —
