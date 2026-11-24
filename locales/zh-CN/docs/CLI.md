@@ -58,11 +58,17 @@ egr <command> [args] [options]
   会残留；`--clean` 从头重建以清掉它。
 - **较新版 egr 写过的图。** 图旁边的解析健康 manifest（`<graph>.parse-manifest.json`）会记录写过这张图的
   最新 egr 版本（`graphEgrVersion`；版本按 semver 比较，所以 `0.16.0-beta.2` 比 `0.16.0` 旧）。
-  当它比你正在运行的 egr 新，每个打开这张图的 `egr` 命令都会在 stderr 打印警告（MCP 服务器不会）（stdout 与 `--json` 仍只有答案），
-  而 `--clean` 会在**改动任何东西之前被拒绝**：它会清空图并用当前运行的 egr 重建，较新版 egr 保留的 SAGE
-  `confidence` 会被重置，重新索引也找不回来。请升级 egr，或加 `--allow-downgrade` 仍要重建
-  （confidence 会重置，记录改为当前的 egr）。较旧版 egr 的普通写入或 `--incremental` 写入会照常进行并打印警告，
+  当它比你正在运行的 egr 新，每个打开这张图的 `egr` 命令都会在 stderr 打印警告（MCP server 不会；stdout 与 `--json` 仍只有答案）。
+  警告开头是 `[egr] warning: this graph was last written by egr <版本>, which is newer than this egr <版本>`，
+  结尾是 `Upgrade egr (npm install -g engramgraph@latest) to work with this graph.`
+  而 `--clean` 会在**改动任何东西之前被拒绝**
+  （`--clean refused: this graph was last written by egr <版本>, newer than this egr <版本>` ... `The graph was not emptied.`）：
+  它会清空图并用当前运行的 egr 重建，较新版 egr 保留的 SAGE
+  `confidence` 会被重置，重新索引也找不回来。请升级 egr（`npm install -g engramgraph@latest`）；若仍要重建，加上 `--allow-downgrade`
+  （confidence 会重置，记录改为当前的 egr）。不加 `--clean` 时 `--allow-downgrade` 没有作用。较旧版 egr 的普通写入或 `--incremental` 写入会照常进行并打印警告，
   不会把记录调低。没有记录的图（旧版 egr 建的，或 manifest 不见了）视为“未知、较旧”：不警告，也不拒绝。
+- **这次运行有没有结束？** `egr index` 会在同一个 manifest 里记下每次运行怎么结束；某个根目录的上一次运行失败或没有结束时，
+  查询会说出来。这不只给 `egr watch` 的用户：见下方 `watch` 的“上一次索引有没有结束？”。
 - `--incremental`：只重新解析自上次 `--incremental` 索引后**内容**有变的文件，只写入差异。
   “有变”指源码的 sha256 不同，不看 mtime（升级 grammar 或保留时间戳的 checkout 不会动 mtime）。
   结果与对同一份源码执行 `egr index <dir> --clean` 的图相同（节点与边都相同）；被删除、改名离开、
@@ -164,7 +170,7 @@ egr index . --scip index.scip
 - 若图数据库的 `CALLS`（或 `Function`/`Class`）表是在像这次
   `provider`/`confidence` 列这样的 schema 变动之前创建的，任何**以写入模式**
   打开这个数据库的 `egr` 命令（例如 `index`、`feedback`、`related`、`god-nodes`；
-  只读查询与 MCP 服务器不会迁移）一打开它，就会**自动、非破坏性地**迁移：通过 `ALTER TABLE ... ADD`
+  只读查询与 MCP server 不会迁移）一打开它，就会**自动、非破坏性地**迁移：通过 `ALTER TABLE ... ADD`
   就地补上缺的列（已有行的其他属性都保留），动手改之前会先 checkpoint 再把
   数据库文件备份到 `.pre-migration-backup` 附属文件（不会覆盖已有的备份）；
   旁边另有一个小文件 `.pre-migration-backup.pending-columns`，记录这份备份涵盖哪些
@@ -251,10 +257,12 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   （MCP server 会把答案复用 1 秒）。
 - **上一次索引有没有结束？** `egr index` 在同一个 manifest 里写记录（`indexAttempts`，每个索引根目录一条）：
   运行开始时写一条，结束时再写一条，是 `succeeded`，或 `failed` 加原因。查询读取 manifest 时，若某个根目录的上一次运行
-  **没有**好好结束，就会说出来：`⚠ the last index run of /work/proj (started 2026-11-24T06:30:00.000Z) failed: <原因> — …
-  run \`egr index /work/proj\` again`；若那次运行只写了开始、没有结束（进程被杀、机器断电、终端被关），则是
-  `… wrote no ending: it was stopped before it finished — …`。JSON 里是 `indexHealth.lastIndexAttempts`
-  （`root`、`outcome: "failed" | "interrupted"`、`startedAt`、`error`、`fix`）。它只陈述发生了什么，不判断图谱是否过旧。
+  **没有**好好结束，就会说出来：
+  `` ⚠ the last index run of /work/proj (started 2026-11-24T06:30:00.000Z) failed: <原因> — … run `egr index /work/proj` again ``；
+  若那次运行只写了开始、没有结束（进程被杀、机器断电、终端被关），则是
+  `… wrote no ending: it was stopped before it finished — …`。JSON 里是 `indexHealth.lastIndexAttempts`，
+  每个这样的根目录一条：`root`、`outcome`（`"failed"` 或 `"interrupted"`）、`startedAt`、`fix`；
+  只有 `failed` 另有 `finishedAt` 与 `error`（`interrupted` 没有结束时间，也没有原因）。它只陈述发生了什么，不判断图谱是否过旧。
   进程还活着的运行视为进行中，不会被报告。上一次成功的图谱，以及旧版 egr 写的 manifest（没有记录），都不会多出任何东西：
   **没有这一行，不等于上一次一定成功**，只表示没有任何记录说它没成功。记录由 `egr index` 自己写，所以 post-commit hook、
   开 shell、`egr watch` 与手动运行都覆盖。图谱被别的写入者锁住时不会写（那次运行根本没开始）；manifest 写不进去时只会在

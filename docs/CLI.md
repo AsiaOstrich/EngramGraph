@@ -87,15 +87,25 @@ only the `supersedes` field makes a `SUPERSEDES` edge).
   (`<graph>.parse-manifest.json`) records the newest egr version that has written
   it (`graphEgrVersion`; versions compare as semver, so `0.16.0-beta.2` is older
   than `0.16.0`). When that is newer than the egr you run, every `egr` command that
-  opens the graph prints a warning on stderr (the MCP server does not) (stdout, and `--json`, stay the
-  answer alone), and `--clean` is **refused before anything is changed**: it
+  opens the graph prints a warning on stderr (the MCP server does not; stdout, and
+  `--json`, stay the answer alone). The warning starts `[egr] warning: this graph was
+  last written by egr <version>, which is newer than this egr <version>`, and ends
+  `Upgrade egr (npm install -g engramgraph@latest) to work with this graph.`
+  `--clean` is **refused before anything is changed**
+  (`--clean refused: this graph was last written by egr <version>, newer than this
+  egr <version>` ... `The graph was not emptied.`): it
   empties the graph and rebuilds it with the egr that is running, which resets the
   SAGE `confidence` the newer egr kept, and a re-index does not bring that back.
-  Upgrade egr, or add `--allow-downgrade` to rebuild anyway (the confidence is
-  reset, and the record becomes the running egr). An older egr's plain or
+  Upgrade egr (`npm install -g engramgraph@latest`), or add `--allow-downgrade` to
+  rebuild anyway (the confidence is reset, and the record becomes the running egr).
+  `--allow-downgrade` does nothing without `--clean`. An older egr's plain or
   `--incremental` write goes ahead with the warning and does not lower the record.
   A graph with no record (built by an earlier egr, or its manifest is gone) is
   treated as unknown and older: never warned about, never refused.
+- **Did the run end?** `egr index` records how each run ends in the same manifest,
+  and a query says so when a root's last run failed or never finished. It is not
+  only for `egr watch` users: see "Did the last index run end?" under `watch`
+  below.
 - `--incremental`: parse only the files whose **content** changed since the last
   `--incremental` index, and write only the difference. Changed means a different
   sha256 of the source text — not mtime, which a grammar upgrade or a
@@ -371,14 +381,15 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
 - **Did the last index run end?** `egr index` writes a record into the same manifest
   (`indexAttempts`, one entry per index root) when a run starts and another when it
   ends: `succeeded`, or `failed` with the reason. A query that reads the manifest
-  says so when a root's last run did **not** end well: `⚠ the last index run of
-  /work/proj (started 2026-11-24T06:30:00.000Z) failed: <reason> — … run \`egr index
-  /work/proj\` again`, or, for a run that wrote a start and no ending (its process
-  was killed, the machine lost power, the terminal was closed), `… wrote no ending:
-  it was stopped before it finished — …`. In JSON this is
-  `indexHealth.lastIndexAttempts` (`root`, `outcome: "failed" | "interrupted"`,
-  `startedAt`, `error`, `fix`). It states what happened, not whether the graph is
-  old. A run whose process is still alive is in progress and is not reported. A
+  says so when a root's last run did **not** end well:
+  `` ⚠ the last index run of /work/proj (started 2026-11-24T06:30:00.000Z) failed: <reason> — … run `egr index /work/proj` again ``,
+  or, for a run that wrote a start and no ending (its process
+  was killed, the machine lost power, the terminal was closed),
+  `… wrote no ending: it was stopped before it finished — …`. In JSON this is
+  `indexHealth.lastIndexAttempts`, one entry per such root: `root`, `outcome`
+  (`"failed"` or `"interrupted"`), `startedAt`, `fix`, and, for `failed` only,
+  `finishedAt` and `error` (an `interrupted` run has no end time and no reason). It
+  states what happened, not whether the graph is old. A run whose process is still alive is in progress and is not reported. A
   graph whose last run succeeded, and a manifest an earlier egr wrote (no record),
   add nothing: **the absence of this line is not proof that the last run
   succeeded**, only that nothing recorded says it did not. The record is written by
