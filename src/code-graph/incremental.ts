@@ -347,6 +347,8 @@ export function deriveGraph(facts: readonly FileFacts[]): DerivedGraph {
 /** What applying a delta did, for the summary. */
 export interface DeltaStats {
   nodesRemoved: number;
+  /** Function, class and module nodes the graph did not have before (a changed file's existing nodes are not counted). */
+  nodesAdded: number;
   edgesRemoved: number;
   edgesWritten: number;
 }
@@ -395,7 +397,10 @@ export async function applyDelta(
 ): Promise<DeltaStats> {
   const before = deriveGraph(prev);
   const after = deriveGraph(next);
-  const stats: DeltaStats = { nodesRemoved: 0, edgesRemoved: 0, edgesWritten: 0 };
+  const stats: DeltaStats = { nodesRemoved: 0, nodesAdded: 0, edgesRemoved: 0, edgesWritten: 0 };
+  for (const [now, was] of [[after.functions, before.functions], [after.classes, before.classes], [after.modules, before.modules]] as const) {
+    for (const id of now) if (!was.has(id)) stats.nodesAdded += 1;
+  }
 
   const gone = (a: Set<string>, b: Set<string>): string[] => [...a].filter((id) => !b.has(id));
   const goneFns = gone(before.functions, after.functions);

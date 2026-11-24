@@ -105,9 +105,20 @@ const STOP_WORDS: ReadonlySet<string> = new Set([
   "tell", "show", "explain", "find", "get", "gets",
 ]);
 
+/** One character of a script written without spaces between words. */
+const CJK = "[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}]";
+const CJK_ANYWHERE = new RegExp(CJK, "u");
+const CJK_THEN_OTHER = new RegExp(`(${CJK})((?!${CJK})[\\p{L}\\p{N}])`, "gu");
+const OTHER_THEN_CJK = new RegExp(`((?!${CJK})[\\p{L}\\p{N}])(${CJK})`, "gu");
+
 /** Lower-cased words of `text`: split at non-letters, camelCase boundaries and the end of a run of capitals (`HTTPRequest` -> `http`, `request`). */
 function splitWords(text: string): string[] {
   return text
+    // A run of Chinese, Japanese or Korean characters has no spaces to split at and no dictionary here, but where it
+    // meets Latin letters or digits the boundary is certain: `處理login流程` is `處理`, `login`, `流程`. Names go through
+    // the same function, so both sides agree.
+    .replace(CJK_THEN_OTHER, "$1 $2")
+    .replace(OTHER_THEN_CJK, "$1 $2")
     .replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2")
     .replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2")
     .split(/[^\p{L}\p{N}]+/u)
@@ -728,6 +739,11 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
     // "No match" is the answer a file that was added or edited after the last index produces, so the graph being
     // behind its files must be said here too. Only that: no result files were found to scope blindspots to.
     const behind = readIndexHealth(opts.manifestPath, []);
+    // Names in code are mostly English, so a question in Chinese, Japanese or Korean finding nothing is the usual case,
+    // and the way out is a different search, not a different spelling of the same words.
+    const englishHint = CJK_ANYWHERE.test(topic)
+      ? " The question contains Chinese, Japanese or Korean words, but names in code are mostly English: search again with English keywords (for example the English name of the thing you are looking for)."
+      : "";
     const onlyTests =
       testMatches.length > 0
         ? ` ${testMatches.length} test symbol(s) did match; test code is left out unless ${includeTestsFlag} is set, so repeat the call with it to see them.`
@@ -742,7 +758,7 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
       ...(testMatches.length > 0 ? { testsLeftOut: testMatches.length } : {}),
       message:
         `No symbol or file path matched the words (${words.join(", ")})${scope}. This is not the same as "the code does not do this": ` +
-        `the name may use other words, or the code may not be indexed. Try synonyms or a name you saw in a file, or lower the scope.${onlyTests}`,
+        `the name may use other words, or the code may not be indexed. Try synonyms or a name you saw in a file, or lower the scope.${englishHint}${onlyTests}`,
       ...(behind?.staleFiles || behind?.lastIndexAttempts?.length ? { indexHealth: behind } : {}),
     };
   }

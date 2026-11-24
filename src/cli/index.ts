@@ -853,7 +853,7 @@ excluded: "${b.pattern}" — ${b.nothingMatched ? `nothing matched; check the pa
           ? inc.mode === "full"
             ? `\nincremental: indexed in full — ${inc.reason}; ${inc.reparsed} file(s) parsed, state saved for the next run`
             : `\nincremental: ${inc.reparsed} file(s) parsed (${inc.changed} changed, ${inc.added} new), ${inc.reused} reused unchanged, ${inc.removed} removed; ` +
-              `graph updated: ${inc.nodesRemoved} node(s) and ${inc.edgesRemoved} edge(s) removed, ${inc.edgesWritten} edge(s) written` +
+              `graph updated: ${inc.nodesRemoved} node(s) and ${inc.edgesRemoved} edge(s) removed, ${inc.nodesAdded} node(s) added, ${inc.edgesWritten} edge(s) written` +
               (inc.changedFrom !== undefined ? ` (changed files from git diff ${inc.changedFrom})` : "") +
               (inc.stateWrittenByNewerEgr !== undefined ? ` — the remembered facts were written by egr ${inc.stateWrittenByNewerEgr}, newer than this egr ${VERSION}; carried on from them instead of parsing everything again` : "")
           : "";

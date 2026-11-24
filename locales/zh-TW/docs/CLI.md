@@ -206,10 +206,10 @@ egr index . --scip index.scip
 ```bash
 egr watch .                        # 放在終端機或行程管理員底下一直跑
 egr watch ./src --debounce 1000 --exclude "generated/**"
-# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index proj --incremental
+# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index . --incremental
 # [watch] index done (initial): incremental: indexed in full — the first --incremental run; 210 file(s) parsed, state saved for the next run
 # [watch] ready
-# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: ...
+# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: 0 node(s) and 0 edge(s) removed, 0 node(s) added, 3 edge(s) written
 ```
 
 - **什麼會觸發一次執行。** 變動的檔案是 `egr index` 會讀的：有原始碼副檔名的檔案、**沒有**副檔名的檔案
@@ -288,7 +288,8 @@ egr explore "where is the session token validated" --path src/auth --max-chars 3
 **預設不列出測試程式碼**（`*_test.go`、`*.test.*`、`*.spec.*`，以及 `test/`、`tests/`、`__tests__/`、`__test__/`、`testdata/` 下的檔案）：測試會重複它所測功能的字詞，分數因此高過程式碼、佔掉版面。它們既不列出、也不用來沿呼叫關係往外走，回答會說明略過了幾個（`--json`：`testsLeftOut`）。`--include-tests` 則把它們當一般程式碼列出。名稱過於泛用的函式（`has`、`get`、`save`、`error`、`config`、`init`、`new` ⋯⋯）與建置／工具設定檔中的函式（`vite.config.*`、`*.config.*`、`scripts/`）排名會降為原本的十分之一（`--json`：`noise`），版面有空間時仍會列出。**這兩條規則可能抓得比你預期的多：** `start`、`run`、`open` 在泛用名稱清單裡，`testdata/` 目錄算測試程式碼，所以預期中的符號不見時，先看 `testsLeftOut` 與 `noise`。完整規則是 `src/code-graph/explore.ts` 的 `isTestPath` 與 `GENERIC_NAMES`，也寫在 [MCP.md](./MCP.md) 的 `explore` 那一列。輸出的列表之後有一句話（`--json`：`note`）：每個 snippet 是該檔案從那一行開始的原文（最多 40 行、到下一個定義為止），不是整個檔案；沒有顯示的內容由 `Not expanded` 列名。
 
 `NO MATCH`（`--json`：`status: "no-match"`，結束碼 `0`）表示沒有任何符號或檔案路徑含這些字詞。這不等於「程式碼沒有做這件事」：
-名稱可能用了別的字，或程式碼根本沒有被索引。顯示時沒有原始碼的符號會說明原因：檔案位置未知（經 MCP `index_code`
+名稱可能用了別的字，或程式碼根本沒有被索引。問句含中文、日文或韓文字元時，訊息還會說程式碼裡的名稱多半是英文，請改用英文關鍵字再查；
+這些文字沒有斷詞，連續的一段仍算一個字詞，只在它與拉丁字母或數字相接處切開（`解析parseInvoice流程` 會以 `解析`、`parse`、`invoice`、`流程` 搜尋）。顯示時沒有原始碼的符號會說明原因：檔案位置未知（經 MCP `index_code`
 填入的圖沒有索引根目錄）、已被移動，或索引之後已被修改（請重新執行 `egr index`）。主題沒有可搜尋的字詞、圖中沒有程式碼，
 或 `--limit`／`--max-chars` 不合法，結束碼為 `1`。
 

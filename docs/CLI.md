@@ -299,10 +299,10 @@ difference). Runs until you stop it (Ctrl-C, or SIGTERM where the platform has o
 ```bash
 egr watch .                        # leave it running in a terminal, or under a process manager
 egr watch ./src --debounce 1000 --exclude "generated/**"
-# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index proj --incremental
+# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index . --incremental
 # [watch] index done (initial): incremental: indexed in full — the first --incremental run; 210 file(s) parsed, state saved for the next run
 # [watch] ready
-# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: ...
+# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: 0 node(s) and 0 edge(s) removed, 0 node(s) added, 3 edge(s) written
 ```
 
 - **What starts a run.** A change to a file `egr index` would read: a source
@@ -427,7 +427,12 @@ silently. The last section, `Next:`, gives point queries (`egr callers <name>`) 
 
 `NO MATCH` (`--json`: `status: "no-match"`, exit `0`) means no symbol or file
 path carried the words. It is not the same as "the code does not do this": the
-name may use other words, or the code may not be indexed. A symbol shown without
+name may use other words, or the code may not be indexed. When the question
+contains Chinese, Japanese or Korean characters the message also says that names in
+code are mostly English and to search again with English keywords; there is no
+word segmentation for those scripts, so a run of them stays one word, and it is cut
+only where it meets Latin letters or digits (`解析parseInvoice流程` is searched as
+`解析`, `parse`, `invoice`, `流程`). A symbol shown without
 source says why: the file is not known (a graph filled through MCP `index_code`
 has no index root), it has moved, or it has changed since it was indexed (run
 `egr index` again). A topic with no searchable word, an empty graph, or a bad

@@ -193,6 +193,8 @@ export interface IncrementalSummary {
   removed: number;
   /** Graph writes the difference needed. `edgesRemoved` does not count edges that went with a removed node (DETACH DELETE). */
   nodesRemoved: number;
+  /** Function, class and module nodes that were not in the graph before. */
+  nodesAdded: number;
   edgesRemoved: number;
   edgesWritten: number;
   /** The `--changed-from` ref, when given. */
@@ -477,6 +479,7 @@ async function indexCodeIncrementally(
         added: extraction.parsed,
         removed: 0,
         nodesRemoved: 0,
+        nodesAdded: 0,
         edgesRemoved: 0,
         edgesWritten: 0,
         ...(changedFrom !== undefined ? { changedFrom } : {}),
