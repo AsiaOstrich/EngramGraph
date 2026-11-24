@@ -249,6 +249,16 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   監看器會索引它，但沒有東西先把它算進來），以及被修改的 Markdown 文件（文件不在 manifest 裡）。
   只被 touch 而內容沒變的檔案會一直算到下一次執行，因為那次執行比對的是雜湊。檢查的成本是每個已索引檔案一次 `stat`
   （MCP server 會把答案重用 1 秒）。
+- **上一次索引有沒有結束？** `egr index` 在同一個 manifest 裡寫紀錄（`indexAttempts`，每個索引根目錄一筆）：
+  執行開始時寫一筆，結束時再寫一筆，是 `succeeded`，或 `failed` 加原因。查詢讀取 manifest 時，若某個根目錄的上一次執行
+  **沒有**好好結束，就會說出來：`⚠ the last index run of /work/proj (started 2026-11-24T06:30:00.000Z) failed: <原因> — …
+  run \`egr index /work/proj\` again`；若那次執行只寫了開始、沒有結束（行程被殺、機器斷電、終端機被關），則是
+  `… wrote no ending: it was stopped before it finished — …`。JSON 裡是 `indexHealth.lastIndexAttempts`
+  （`root`、`outcome: "failed" | "interrupted"`、`startedAt`、`error`、`fix`）。它只陳述發生了什麼，不判斷圖譜是否過舊。
+  行程還活著的執行視為進行中，不會被報告。上一次成功的圖譜，以及舊版 egr 寫的 manifest（沒有紀錄），都不會多出任何東西：
+  **沒有這一行，不等於上一次一定成功**，只表示沒有任何紀錄說它沒成功。紀錄由 `egr index` 自己寫，所以 post-commit hook、
+  開 shell、`egr watch` 與手動執行都涵蓋。圖譜被別的寫入者鎖住時不會寫（那次執行根本沒開始）；manifest 寫不進去時只會在
+  stderr 出現警告，索引不會因此失敗。
 - **限制。** 它使用 Node 的 `fs.watch` 搭配 `recursive`。每次執行都會雜湊每個檔案，所以在非常大的目錄樹上，
   一次執行的成本是讀完整棵樹的成本，而不是改動本身的成本。**未在 Windows 上測試**；檔案被其他程式占用時的行為未驗證。
 

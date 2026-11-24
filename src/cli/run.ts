@@ -48,7 +48,9 @@ import {
   readManifest,
   summarize,
   upsertRun,
+  withIndexAttempt,
   writeManifest,
+  type IndexAttempt,
   type ParseHealthSummary,
 } from "../code-graph/parse-manifest.js";
 import {
@@ -614,6 +616,50 @@ export async function cmdIndex(
       process.stderr.write(`[egr] warning: --allow-downgrade: rebuilding a graph egr ${newer} wrote with the older egr ${EGR_VERSION}; its SAGE confidence is reset\n`);
     }
   }
+  // From here on the run touches the graph, so from here on it is on record (DEC-108 D1): a start before anything is
+  // written, an ending when it stops either way. The checks above are refusals before any work, not attempts.
+  return recordIndexAttempt(opts, startedAt, () => indexBody(conn, opts, startedAt));
+}
+
+type CmdIndexOptions = Parameters<typeof cmdIndex>[1];
+
+/**
+ * Write the attempt record around one index run (DEC-108 D1): `started` before `run` begins, `succeeded` or `failed`
+ * with the reason after it. This is the one place the three outcomes are produced; every trigger (a terminal, a
+ * post-commit hook, a shell start, `egr watch`) reaches it through `cmdIndex`.
+ *
+ * Writing the record must never be what makes an index fail: a manifest that cannot be written is said on stderr and
+ * the run goes on. A manifest that exists but cannot be read is left alone — replacing a file whose content is unknown
+ * with a fresh one would erase whatever it held.
+ */
+async function recordIndexAttempt(opts: CmdIndexOptions, startedAt: string, run: () => Promise<IndexResultSummary>): Promise<IndexResultSummary> {
+  const manifestPath = opts.manifestPath;
+  const root = resolve(opts.dir);
+  const write = (attempt: Omit<IndexAttempt, "startedAt" | "pid" | "egrVersion">): void => {
+    if (!manifestPath) return;
+    try {
+      const current = readManifest(manifestPath);
+      if (current === null && existsSync(manifestPath)) {
+        throw new Error("the manifest exists but cannot be read");
+      }
+      writeManifest(manifestPath, withIndexAttempt(current, root, { ...attempt, startedAt, pid: process.pid, egrVersion: EGR_VERSION }, EGR_VERSION));
+    } catch (err) {
+      process.stderr.write(`[egr] warning: the index attempt record was not written (${err instanceof Error ? err.message : String(err)}); the index itself is not affected\n`);
+    }
+  };
+  write({ status: "started" });
+  try {
+    const result = await run();
+    write({ status: "succeeded", finishedAt: new Date().toISOString() });
+    return result;
+  } catch (err) {
+    const reason = (err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 500);
+    write({ status: "failed", finishedAt: new Date().toISOString(), error: reason });
+    throw err;
+  }
+}
+
+async function indexBody(conn: GraphConnection, opts: CmdIndexOptions, startedAt: string): Promise<IndexResultSummary> {
   if (opts.clean) await clearGraph(conn); // drop existing data so deleted nodes are pruned
   if (opts.scip) await assertCallsSchemaHasProvenanceColumns(conn);
   // `detectShebangScripts: true` (XSPEC-414 R4 OQ2) only on the CODE walk —
@@ -672,7 +718,9 @@ export async function cmdIndex(
       dir: opts.dir,
       root,
       codeFiles: idFiles,
-      manifest: prevManifest,
+      // A manifest with no section at all is the one the attempt record starts a graph's first run with
+      // (DEC-108 D1): the graph has not been indexed before, which is what "no manifest" says.
+      manifest: prevManifest && Object.keys(prevManifest.runs).length === 0 ? null : prevManifest,
       manifestPath: opts.manifestPath,
       clean: opts.clean === true,
       changedFrom: opts.changedFrom,

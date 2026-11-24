@@ -61,7 +61,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 
 import type { GraphConnection } from "../graph-db/connection.js";
-import { readIndexHealth, staleNote, type IndexHealth } from "./index-health.js";
+import { attemptNote, readIndexHealth, staleNote, type IndexHealth } from "./index-health.js";
 import { MCP_INDEX_ROOT, readManifest, type ParseManifest } from "./parse-manifest.js";
 import { toPosixPath } from "./path-utils.js";
 
@@ -633,6 +633,7 @@ export function formatExplore(r: ExploreResult): string {
   lines.push(`explore "${r.topic}": ${r.status === "no-match" ? "NO MATCH" : `${r.symbols.length} symbol(s)`}${r.keywords.length ? ` — words: ${r.keywords.join(", ")}` : ""}`);
   if (r.message) lines.push(r.message);
   if (r.indexHealth?.staleFiles) lines.push(staleNote(r.indexHealth));
+  if (r.indexHealth?.lastIndexAttempts?.length) lines.push(attemptNote(r.indexHealth));
   if (r.indexHealth?.unavailable) lines.push(`⚠ index health unknown: the parse-health manifest could not be read (${r.indexHealth.unavailable}) — this result is unannotated, not verified`);
   else if (r.indexHealth?.possiblyIncomplete) lines.push(`⚠ possibly incomplete: ${r.indexHealth.blindspotsTotal ?? r.indexHealth.blindspots?.length ?? 0} file(s) near this result parsed partially/failed (see \`egr blindspots\`)`);
   if (r.symbols.length > 0) {
@@ -742,7 +743,7 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
       message:
         `No symbol or file path matched the words (${words.join(", ")})${scope}. This is not the same as "the code does not do this": ` +
         `the name may use other words, or the code may not be indexed. Try synonyms or a name you saw in a file, or lower the scope.${onlyTests}`,
-      ...(behind?.staleFiles ? { indexHealth: behind } : {}),
+      ...(behind?.staleFiles || behind?.lastIndexAttempts?.length ? { indexHealth: behind } : {}),
     };
   }
 

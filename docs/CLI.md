@@ -368,6 +368,24 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   changed Markdown document (documents are not in the manifest). A file that was
   touched without a change counts until the next run, which compares hashes.
   The check costs one `stat` per indexed file (the MCP server reuses the answer for 1 s).
+- **Did the last index run end?** `egr index` writes a record into the same manifest
+  (`indexAttempts`, one entry per index root) when a run starts and another when it
+  ends: `succeeded`, or `failed` with the reason. A query that reads the manifest
+  says so when a root's last run did **not** end well: `⚠ the last index run of
+  /work/proj (started 2026-11-24T06:30:00.000Z) failed: <reason> — … run \`egr index
+  /work/proj\` again`, or, for a run that wrote a start and no ending (its process
+  was killed, the machine lost power, the terminal was closed), `… wrote no ending:
+  it was stopped before it finished — …`. In JSON this is
+  `indexHealth.lastIndexAttempts` (`root`, `outcome: "failed" | "interrupted"`,
+  `startedAt`, `error`, `fix`). It states what happened, not whether the graph is
+  old. A run whose process is still alive is in progress and is not reported. A
+  graph whose last run succeeded, and a manifest an earlier egr wrote (no record),
+  add nothing: **the absence of this line is not proof that the last run
+  succeeded**, only that nothing recorded says it did not. The record is written by
+  `egr index` itself, so a post-commit hook, a shell start, `egr watch` and a
+  manual run are all covered. It is not written when the graph is locked by another
+  writer (the run never starts), and a manifest that cannot be written only
+  produces a warning on stderr; the index does not fail because of it.
 - **Limits.** It uses Node's `fs.watch` with `recursive`. Every run hashes every
   file, so on a very large tree a run costs what reading the tree costs, not
   what the change costs. **Not tested on Windows**; what happens there when

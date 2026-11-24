@@ -18,7 +18,7 @@ import { cmdIndex, cmdCallersAnswer, cmdCalleesAnswer, cmdImplementers, cmdImple
 import type { RefCheckResult } from "./refs-check.js";
 import { asConfidenceLabel } from "../sage/index.js";
 import { toPosixPath } from "../code-graph/path-utils.js";
-import { readIndexHealth, staleNote, describeDefinitionScope, explore, formatExplore, DEFAULT_EXPLORE_LIMIT, DEFAULT_EXPLORE_MAX_CHARS, type IndexHealth } from "../code-graph/index.js";
+import { attemptNote, readIndexHealth, staleNote, describeDefinitionScope, explore, formatExplore, DEFAULT_EXPLORE_LIMIT, DEFAULT_EXPLORE_MAX_CHARS, type IndexHealth } from "../code-graph/index.js";
 import { manifestPathForDb, readManifest } from "../code-graph/parse-manifest.js";
 import { newerGraphVersion, newerGraphWarning } from "../code-graph/egr-version.js";
 import { formatLint } from "../knowledge-graph/lint.js";
@@ -342,7 +342,7 @@ function healthNote(h: IndexHealth | null): string {
     return `\n⚠ index health unknown: the parse-health manifest could not be read (${h.unavailable}) — this result is unannotated, not verified`;
   }
   // A graph that is behind its files says so first: it applies to every answer, not only the ones near a blindspot.
-  const behind = h?.staleFiles ? `\n${staleNote(h)}` : "";
+  const behind = (h?.staleFiles ? `\n${staleNote(h)}` : "") + (h?.lastIndexAttempts?.length ? `\n${attemptNote(h)}` : "");
   if (!h?.possiblyIncomplete) return behind;
   const n = h.blindspotsTotal ?? h.blindspots?.length ?? 0;
   return `${behind}\n⚠ possibly incomplete: ${n} file(s) near this result parsed partially/failed (see \`egr blindspots\`)`;

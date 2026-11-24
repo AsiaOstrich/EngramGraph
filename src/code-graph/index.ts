@@ -1,7 +1,7 @@
 export { extractCodeGraph, extractProject, extractProjectDetailed, moduleIdOf } from "./extractor.js";
 export type { Extraction, ProjectExtraction, DetailedProjectExtraction, FileFacts, RawCall } from "./extractor.js";
 export { indexFile, indexProject } from "./indexer.js";
-export { computeIndexHealth, readIndexHealth, staleNote, type IndexHealth } from "./index-health.js";
+export { attemptNote, computeIndexHealth, readIndexHealth, staleNote, type IndexAttemptProblem, type IndexHealth } from "./index-health.js";
 export { scanStaleFiles, clearStaleScanCache, STALE_SCAN_TTL_MS, type StaleScan } from "./stale-files.js";
 export {
   NotInGraphError,

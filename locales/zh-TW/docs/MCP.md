@@ -152,7 +152,7 @@ server，例如嵌入式使用的 `createMcpServer(conn)`。原因與各自對�
 **程式碼查詢上的 `indexHealth`。** `call_chain`、`implementers`、`implemented_specs` 與 `explore` 在答案背後的圖譜有話要說時，
 會加上 `indexHealth` 欄位，沒有就不加（解析乾淨且是最新的圖譜不會多出這個欄位）：答案靠近解析不完全或失敗的檔案時，是
 `possiblyIncomplete`（加 `blindspots`）；已索引的檔案**比索引新**或已從磁碟消失、使答案可能描述的是它們的舊內容時，是
-`staleFiles`（加 `staleSample`，最多 20 個名稱）。`staleFiles` 算的是整張圖譜，不只這個答案；它看不到索引之後才建立的檔案。`indexHealth` 現在也可能出現在解析乾淨的圖譜上，所以判斷完整性要看 `possiblyIncomplete`，不要看 `indexHealth` 在不在。
+`staleFiles`（加 `staleSample`，最多 20 個名稱）。`staleFiles` 算的是整張圖譜，不只這個答案；它看不到索引之後才建立的檔案。`indexHealth` 現在也可能出現在解析乾淨的圖譜上，所以判斷完整性要看 `possiblyIncomplete`，不要看 `indexHealth` 在不在。`lastIndexAttempts`（`root`、`outcome: "failed" | "interrupted"`、`startedAt`、`error`、`fix`）列出上一次 `egr index` 執行失敗、或只寫了開始而沒有結束的根目錄；它只陳述這個事實與該跑的指令，不說圖譜過舊。上一次成功的圖譜不會多出任何東西，所以沒有它不能證明那次執行成功。
 請跑 `egr index <dir> --incremental`，或在終端機讓 `egr watch <dir>` 一直執行（它在每次變動後重跑那個索引，並且與這個 server 並存：
 圖譜只在索引執行進行中才被持有）。見 [CLI.md](./CLI.md) 的 `watch`。
 

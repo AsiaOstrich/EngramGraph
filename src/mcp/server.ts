@@ -131,6 +131,7 @@ const READ_ONLY_INSTRUCTIONS =
  */
 const INDEX_HEALTH_NOTE =
   "The answer may carry `indexHealth`. `indexHealth.staleFiles` is how many indexed files were changed on disk after the last index (or are gone), counted for the whole graph, not for this answer: the answer may describe their old content, so re-run `egr index <dir> --incremental` (or keep `egr watch <dir>` running) before relying on it. " +
+  "`indexHealth.lastIndexAttempts` lists roots whose last `egr index` run failed or started and never ended; each carries the command to run (`fix`). " +
   "To judge whether the answer is complete read `indexHealth.possiblyIncomplete`, not whether `indexHealth` is present.";
 
 /**
