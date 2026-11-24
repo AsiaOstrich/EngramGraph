@@ -257,7 +257,7 @@ const app = createServer({ connection: conn });   // Hono app；路由在 /graph
 EngramGraph 內附一個 MCP server（stdio），讓任何支援 MCP 的助理都能把它當成程式碼 + 知識圖譜使用。
 無 LLM、確定性、**免 Docker**。共有 15 個工具，分兩組，而且**stdio server（`egr-mcp`、`egr mcp`）是唯讀的，
 只列出會讀取的 11 個**——圖譜查詢（`call_chain`、`impact_analysis`、`implementers`、`implemented_specs`，以及 `explore`：
-輸入「它怎麼轉送請求」這類白話問題，一次回傳相符的符號、呼叫路徑與原始碼；還沒有符號名稱時，先於 grep 呼叫它）、
+輸入「它怎麼轉送請求」這類白話問題，一次回傳相符的符號、呼叫路徑、原始碼，以及改了它們會影響誰（呼叫者與測試）；還沒有符號名稱時，先於 grep 呼叫它）、
 診斷（`blindspots`、`signatures`、`doctor`）、一個 Markdown 引用查核員（`refs_check`，DEC-115，見下），
 一個找出「一起改過的檔案」的 git 歷史查詢（`cochange`，XSPEC-514——它讀 git，不讀圖），
 以及一個文件一致性檢查（`lint`，DEC-140——它讀 Markdown，不讀圖）。

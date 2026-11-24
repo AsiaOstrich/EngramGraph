@@ -279,7 +279,8 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
 1. **名称或文件路径**与字词匹配的符号（camelCase、snake_case 与复数会被折叠，「how」「does」这类疑问词会被丢掉）；
 2. 它们调用与被调用的函数，向外两层，以匹配处为起点用 seeded PageRank 排序；
 3. 所列符号之间的调用路径（`ServeHTTP → handleHTTPRequest → Next`）；
-4. 每个符号的源代码，从记录的行号读到该文件下一个定义之前（最多 40 行）。
+4. 每个符号的源代码，从记录的行号读到该文件下一个定义之前（最多 40 行）；
+5. 最相关的几个符号，**改了它会影响谁**（`Impact` 区块）：直接调用它的函数，以及能走到它的测试。
 
 ```bash
 egr explore "how does it route requests through its middleware chain"
@@ -292,6 +293,8 @@ egr explore "where is the session token validated" --path src/auth --max-chars 3
 `--max-chars 500000` 被降到 200000（`--json` 的 `maxChars` 写明实际用了多少）。放不下时，先从最不相关的符号开始去掉源代码，
 再去掉符号，并用「Not expanded」一节列出被去掉的内容（`--json`：`notExpanded`，并有 `truncated: true`）。
 不会静默截断。最后一节 `Next:` 给出可接着用的点查询（`egr callers <name>`），绝不从测试代码或被当成噪声排后面的符号起算。
+
+**Impact：改了一个符号会影响谁**（dev-platform #266）。前五个既不是测试代码、也没有被当成噪声排后面的符号，回答里会有一个 `Impact` 区块，分两份清单，查法与 `egr callers` 和 MCP 工具 `call_chain` 相同：`callers` 是直接调用该符号的函数（不含测试代码），`tests` 是测试文件里能走到它的函数，最多向外 3 层调用，自己直接调用它的排前面。测试文件里不只有测试函数：测试会经过的辅助函数也会列出。每一条写成 `name (file:line)`，`line` 是定义开始的行号。`--json` 把它放在符号的 `impact`：`{ "callers": ["ServeHTTP (gin.go:21)"], "callersTotal": 1, "tests": ["TestEngineServeRunsMiddleware (gin_test.go:9)", ...], "testsTotal": 3 }`，清单被截短时才有 `fullList`，内容是能拿到完整清单的 `call_chain` 调用；文本输出则是一行 `full list: egr callers <name> --depth 3 --file <file>`。清单最多 5 条，版面不够时更少；`callersTotal` 与 `testsTotal` 永远是完整数量，文本输出以 `(+N more)` 表示。这一节最多占用 `--max-chars` 在不含源代码的回答之后剩下版面的 40%，其余留给源代码；放不下的符号会在「Not expanded」写成 `impact left out for: ...`（`--json`：`notExpanded.impact`，并有 `impactTotal`），完整内容用 `egr callers <name> --depth 3` 取得（`--json`：名称有列出时，`notExpanded.impactFullList` 是同一个查询的 `call_chain` 调用）。**不论有没有 `--include-tests`，测试都会列出**：那个开关只决定测试代码要不要当成符号列出。`callers: none found in the graph` 是调用关系边的说法，不是「没有人调用」的证明：经由接口、回调函数或反射的调用没有边；而在 JavaScript 与 TypeScript，写在匿名回调（vitest、jest 的 `it("...", () => { ... })`）里的调用没有可挂上的调用者，所以这样写的测试常常找不到。
 
 **默认不列出测试代码**（`*_test.go`、`*.test.*`、`*.spec.*`，以及 `test/`、`tests/`、`__tests__/`、`__test__/`、`testdata/` 下的文件）：测试会重复它所测功能的字词，得分因此高过代码、占掉版面。它们既不列出、也不用来沿调用关系往外走，回答会说明略过了几个（`--json`：`testsLeftOut`）。`--include-tests` 则把它们当一般代码列出。名称过于泛用的函数（`has`、`get`、`save`、`error`、`config`、`init`、`new` ……）与构建／工具配置文件中的函数（`vite.config.*`、`*.config.*`、`scripts/`）排名会降为原来的十分之一（`--json`：`noise`），版面有空间时仍会列出。**这两条规则可能抓得比你预期的多：** `start`、`run`、`open` 在泛用名称清单里，`testdata/` 目录算测试代码，所以预期中的符号不见时，先看 `testsLeftOut` 与 `noise`。完整规则是 `src/code-graph/explore.ts` 的 `isTestPath` 与 `GENERIC_NAMES`，也写在 [MCP.md](./MCP.md) 的 `explore` 那一行。输出的列表之后有一句话（`--json`：`note`）：每个 snippet 是该文件从那一行开始的原文（最多 40 行、到下一个定义为止），不是整个文件；没有显示的内容由 `Not expanded` 列名。
 

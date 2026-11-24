@@ -198,7 +198,10 @@ describe("explore ranking: test code is left out of the answer unless asked for"
     // ...and none of the test functions is, nor anything from a test file.
     for (const n of TEST_NAMES) expect(names(data), raw).not.toContain(n);
     for (const s of data.symbols) expect(isTestPath(s.file), `${s.name} is from ${s.file}`).toBe(false);
-    expect(raw).not.toContain("server_test.go");
+    // A test file may be named in a symbol's `impact` (the tests a change reaches: that is what the section is for,
+    // see explore-impact.test.ts), but nowhere else in the answer.
+    const elsewhere = JSON.stringify({ symbols: data.symbols.map(({ impact: _impact, ...rest }: Record<string, unknown>) => rest), callPaths: (data as unknown as { callPaths: string[] }).callPaths, next: data.next });
+    expect(elsewhere).not.toContain("server_test.go");
     for (const n of data.next) expect(TEST_NAMES.some((t) => n.includes(t)), n).toBe(false);
     // Not silent: the count is in the answer and the note names the switch.
     expect(data.testsLeftOut, raw).toBeGreaterThanOrEqual(3);

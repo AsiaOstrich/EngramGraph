@@ -330,7 +330,8 @@ it as a code + knowledge graph. Zero LLM, deterministic, **no Docker**. It has
 read-only: it lists the 11 that read** — the graph queries (`call_chain`,
 `impact_analysis`, `implementers`, `implemented_specs`, and `explore`, which
 takes a plain-language question such as "how does it route requests" and
-returns the matching symbols, their call paths and their source in one answer;
+returns the matching symbols, their call paths, their source and who is
+affected if you change them (callers and tests) in one answer;
 call it first, before grep, when you do not yet have a symbol name), diagnostics
 (`blindspots`, `signatures`, `doctor`), a Markdown reference checker
 (`refs_check`, DEC-115 — see below) and a git-history query for files that
