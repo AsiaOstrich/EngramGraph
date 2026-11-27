@@ -268,7 +268,8 @@ EngramGraph 内置一个 MCP server（stdio），让任何支持 MCP 的助手�
 `idempotentHint`／`openWorldHint`），让客户端知道它即将执行的是什么。每个 server 的 `instructions` 也会写明“哪种问题先用哪个工具”（“X 怎么运作”用 `explore`、
 “谁调用它”用 `call_chain`，依此类推）；`explore` 默认不列出测试代码（需要时在 MCP 传 `includeTests`、在 CLI 用 `--include-tests`），并把过于泛用的名称与构建配置文件排在后面。
 从 0.17 起，`explore` 默认会要求 Claude Code 从第一轮就加载它，而不是需要时才加载（`_meta` 的 `anthropic/alwaysLoad`）：
-延后加载时，在一个项目上 8 次里有 0 次调用它；从第一轮加载时，8 次全部调用。代价是它的定义（约 3,200 字符）会出现在每次对话里；
+延后加载时，在一个项目上 8 次里有 0 次调用它；从第一轮加载时，8 次全部调用。样本是一个项目、两题、一种模型与一个 Claude Code 版本，
+只证明助手看得到 `explore` 时会用它，不证明答案更好。代价是它的定义（约 3,200 字符）会出现在每次对话里，且每次作答比延后加载多 0.10 美元（约 16%）与 0.02 美元（约 5%）；
 设置 `ENGRAM_MCP_ALWAYS_LOAD=none` 可以关掉（证据、限制与关掉的代价见 **[docs/MCP.md](./docs/MCP.md)**）。
 
 ```bash

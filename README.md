@@ -350,8 +350,11 @@ tool to start with for which kind of question (`explore` for "how does X work",
 unless you ask (`includeTests`, or `--include-tests` in the CLI) and ranks generic names and build-config files
 low. Since 0.17 `explore` asks Claude Code to load it from the first turn instead of
 on demand (`_meta` `anthropic/alwaysLoad`): with it deferred, 0 of 8 runs on one
-project called it; with it loaded, 8 of 8 did. The cost is that its definition
-(about 3,200 characters) is in every conversation; set
+project called it; with it loaded, 8 of 8 did. That is one project, two
+questions, one model and one Claude Code version, and it shows the assistant uses
+`explore` when it can see it, not that its answers are better. The cost is that its
+definition (about 3,200 characters) is in every conversation, and a run cost 0.10
+USD (about 16%) and 0.02 USD (about 5%) more than with it deferred. Set
 `ENGRAM_MCP_ALWAYS_LOAD=none` to turn it off (evidence, limits and what turning
 it off costs in **[docs/MCP.md](./docs/MCP.md)**).
 
