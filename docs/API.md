@@ -83,7 +83,8 @@ stable across re-indexing — `file#outer.helper`, `file#Class.method`.
 - `indexProject(conn, files: ProjectFile[]): Promise<ProjectIndexResult>` —
   index a whole repo (cross-file CALLS). `ProjectIndexResult = { files,
   functions, classes, calls, ambiguous, unresolved }` (ambiguous = callee name
-  matched > 1 function; unresolved = matched none — both skipped).
+  matched > 1 function and the caller's imports did not pick one; unresolved =
+  matched none — both skipped).
 
 `ProjectFile = { path, source, language? }`; `language` is inferred from the
 path extension when omitted.

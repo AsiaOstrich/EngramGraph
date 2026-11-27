@@ -242,8 +242,8 @@ describe("usableState: the reasons a remembered state is refused (XSPEC-508 R6)"
       { manifest: manifestWith({ incrementalToken: "t1" }), state: stateWith({ ...rootState(facts, "t1"), grammarVersions: { "tree-sitter": "1" } }) },
       "parser fingerprint differs",
     ],
-    ["no state, and the file was written by an older egr", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "older", version: 1 } }, "written by an older egr (state version 1, now 2)"],
-    ["no state, and the file was written by a newer egr", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "newer", version: 3 } }, "written by a newer egr (state version 3, now 2)"],
+    ["no state, and the file was written by an older egr", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "older", version: 1 } }, `written by an older egr (state version 1, now ${STATE_VERSION})`],
+    ["no state, and the file was written by a newer egr", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "newer", version: STATE_VERSION + 1 } }, `written by a newer egr (state version ${STATE_VERSION + 1}, now ${STATE_VERSION})`],
     ["no state, because the file could not be read", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "unreadable" } }, "could not be read"],
   ] as const)("refuses %s", (_name, input, reason) => {
     const r = usableState({ root: "/r", egrVersion: "9.9.9", ...input });

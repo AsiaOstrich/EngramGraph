@@ -12,8 +12,10 @@
  * {@link extractCodeGraph} resolves CALLS within a single file. For a whole
  * repository, {@link extractProject} resolves CALLS *across* files using a
  * global name index with the policy: same-file match wins (lexical shadowing),
- * else a unique global match, else the call is left unresolved (precision over
- * recall — import-aware resolution is future work).
+ * else a unique global match, else — when the name matches several definitions —
+ * the one the caller's own imports name (`import-resolve.ts`, Python and
+ * TypeScript / JavaScript; decision 736A), else the call is left unresolved
+ * (precision over recall: an import that does not pick exactly one is not guessed).
  *
  * CALLS also fires when a known function is passed **by reference** as a
  * direct argument to some other call (e.g. Fastify's
@@ -49,6 +51,8 @@ import type {
 import { tagsQuerySourceFor } from "./queries/index.js";
 import { toPosixPath } from "./path-utils.js";
 import { collectComments, findEnclosingFunction, qualifyFunctions, runTagQuery } from "./tag-query-engine.js";
+import { extractImportBindings, type ImportBinding } from "./import-bindings.js";
+import { buildImportIndex, resolveByImport } from "./import-resolve.js";
 import { measureErrorSpan, type FileParseHealth } from "./parse-health.js";
 import { errorSignatures } from "./error-signature.js";
 import {
@@ -187,10 +191,18 @@ const PROVIDER = "tree-sitter";
  * `CALLS_CONFIDENCE`'s module doc (above) for what each tier means and why
  * they are scored differently.
  */
-export type CallResolutionTier = "same-file" | "cross-file-unique";
+export type CallResolutionTier = "same-file" | "import" | "cross-file-unique";
 
+/**
+ * `import` (decision 736A): the name matched several definitions and the caller's own imports named exactly one.
+ * Hand-picked like the other two: below same-file (the call and its target sit in one file), above
+ * cross-file-unique (which only knows that nothing else has the name) — an import is stated evidence about this
+ * call site, a unique name is only the absence of competitors — and below SCIP's 0.9 so a real semantic resolver
+ * can still upgrade it.
+ */
 const CALLS_CONFIDENCE: Record<CallResolutionTier, number> = {
   "same-file": 0.8,
+  import: 0.7,
   "cross-file-unique": 0.5,
 };
 
@@ -312,6 +324,11 @@ export interface RawCall {
   callee: string;
   /** File the call appears in (for same-file shadowing during resolution). */
   file: string;
+  /**
+   * What the callee was called on: absent for a bare call, the dotted receiver text for `a.b.f()`, `"?"` for a
+   * receiver that is not a plain name chain. Only Python / TypeScript / JavaScript / Go set it (see `receiverOf`).
+   */
+  receiver?: string;
 }
 
 /**
@@ -341,6 +358,8 @@ export interface Extraction {
   rawCalls: RawCall[];
   /** Unresolved module-relationship references (XSPEC-414 R2/R4). Empty for every language that doesn't capture `@reference.import`. */
   rawImports: RawImport[];
+  /** What the file imports, as names (decision 736A); empty except for Python / TypeScript / JavaScript. See `import-bindings.ts`. */
+  importBindings: ImportBinding[];
   /**
    * This file's bare function name → id, for the functions the rest of the file (and other
    * files) can reach by that name. A function declared INSIDE another function is not in it: it
@@ -543,7 +562,7 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     // inside a class body but outside any method, was silently dropped.
     // Finding no enclosing function reproduces that gate exactly.
     const enclosing = findEnclosingFunction(functions, call.node);
-    if (enclosing) rawCalls.push({ from: enclosing.id, callee: call.name, file: idPath });
+    if (enclosing) rawCalls.push({ from: enclosing.id, callee: call.name, file: idPath, ...(call.receiver !== undefined ? { receiver: call.receiver } : {}) });
   }
 
   // `// implements XSPEC-NNN` / `/* implements SPEC-NNN */` — a file-level
@@ -569,7 +588,9 @@ export function collectExtraction(source: string, opts: ExtractOptions): Extract
     });
   }
 
-  return { nodes, defines, implementsEdges, rawCalls, rawImports, names, nested, errorNodes, errorExtent, sourceExtent: source.length, signatures };
+  const importBindings = extractImportBindings(language, tree.rootNode);
+
+  return { nodes, defines, implementsEdges, rawCalls, rawImports, importBindings, names, nested, errorNodes, errorExtent, sourceExtent: source.length, signatures };
 }
 
 /**
@@ -744,8 +765,13 @@ export interface FileFacts {
   names: Array<[string, string]>;
   /** Functions declared inside another function, as {@link Extraction.nested}. Absent in state an older egr wrote. */
   nested?: Array<[string, string]>;
-  /** Unresolved calls aggregated per (caller id, callee name): `[from, callee, how many call sites]`. */
-  calls: Array<[string, string, number]>;
+  /**
+   * Unresolved calls aggregated per (caller id, callee name, receiver): `[from, callee, how many call sites, receiver?]`.
+   * The receiver is absent for a bare call and in state an older egr wrote; see {@link RawCall.receiver}.
+   */
+  calls: Array<[string, string, number] | [string, string, number, string]>;
+  /** What the file imports, as names (decision 736A). Absent when it imports nothing a binding can describe, and in state an older egr wrote. */
+  bindings?: ImportBinding[];
   /** Cleaned `#include`/`source` targets, unresolved. */
   imports: string[];
   /** The parse-health record this file contributes to the manifest. */
@@ -759,12 +785,12 @@ export function moduleIdOf(f: Pick<FileFacts, "path" | "moduleId">): string {
 
 /** Reduce a per-file {@link Extraction} to the {@link FileFacts} resolution needs. */
 export function factsOf(ex: Extraction, language: SupportedLanguage, health: FileParseHealth, path: string, hash?: string, moduleId?: string): FileFacts {
-  const callCounts = new Map<string, [string, string, number]>();
+  const callCounts = new Map<string, [string, string, number] | [string, string, number, string]>();
   for (const c of ex.rawCalls) {
-    const key = `${c.from}\u0000${c.callee}`;
+    const key = `${c.from}\u0000${c.callee}\u0000${c.receiver === undefined ? "" : `.${c.receiver}`}`;
     const hit = callCounts.get(key);
     if (hit) hit[2] += 1;
-    else callCounts.set(key, [c.from, c.callee, 1]);
+    else callCounts.set(key, c.receiver === undefined ? [c.from, c.callee, 1] : [c.from, c.callee, 1, c.receiver]);
   }
   return {
     path,
@@ -777,6 +803,7 @@ export function factsOf(ex: Extraction, language: SupportedLanguage, health: Fil
     names: [...ex.names.entries()],
     ...(ex.nested.length > 0 ? { nested: ex.nested } : {}),
     calls: [...callCounts.values()],
+    ...(ex.importBindings.length > 0 ? { bindings: ex.importBindings } : {}),
     imports: ex.rawImports.map((i) => i.target),
     health,
   };
@@ -786,7 +813,7 @@ export function factsOf(ex: Extraction, language: SupportedLanguage, health: Fil
 export interface ResolvedEdges {
   calls: GraphEdge[];
   imports: GraphEdge[];
-  /** Call sites (not edges) skipped because the callee name matched >1 function. */
+  /** Call sites (not edges) skipped because the callee name matched >1 function and the caller's imports did not pick one. */
   ambiguous: number;
   /** Call sites skipped because the callee name matched no function. */
   unresolved: number;
@@ -798,6 +825,8 @@ export interface ResolvedEdges {
  *
  *  - a call resolves to a same-file definition first (lexical shadowing),
  *  - else to the one definition of that name in the whole batch,
+ *  - else, when several definitions carry the name, to the one the caller's imports name
+ *    (`import-resolve.ts`: only ever one of those candidates, never a guess),
  *  - else it is dropped (ambiguous / unresolved: precision over recall).
  *
  * Pure: the same facts always give the same edges, in the same order. The
@@ -825,11 +854,12 @@ export function resolveFacts(facts: readonly FileFacts[]): ResolvedEdges {
     }
   }
 
+  const importIndex = buildImportIndex(facts);
   const resolved: Array<{ from: string; to: string; tier: CallResolutionTier; count: number }> = [];
   let ambiguous = 0;
   let unresolved = 0;
   for (const f of facts) {
-    for (const [from, callee, count] of f.calls) {
+    for (const [from, callee, count, receiver] of f.calls) {
       // Same file first: a function declared in the caller (or a function around it), then the file's own names.
       const local = resolveInFile(from, callee, localByFile.get(f.path) ?? new Map(), nestedByFile.get(f.path) ?? []);
       if (local) {
@@ -845,7 +875,10 @@ export function resolveFacts(facts: readonly FileFacts[]): ResolvedEdges {
         // cross-file tier (see CALLS_CONFIDENCE's module doc).
         resolved.push({ from, to: [...ids][0]!, tier: "cross-file-unique", count });
       } else {
-        ambiguous += count;
+        // Several definitions carry this name and none is in the caller's file: the caller's imports may name one.
+        const viaImport = resolveByImport(importIndex, f, receiver, callee, ids);
+        if (viaImport) resolved.push({ from, to: viaImport, tier: "import", count });
+        else ambiguous += count;
       }
     }
   }

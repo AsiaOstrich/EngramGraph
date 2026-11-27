@@ -126,8 +126,15 @@ egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 ```
 
 輸出計數：`files`、`functions`、`classes`、`calls`，以及 `ambiguous`（被呼叫名稱比對到
-> 1 個函式——略過）與 `unresolved`（比對不到——略過）；加上 `--docs` 時還有
+> 1 個函式，且呼叫端的 import 也挑不出其中一個——略過）與 `unresolved`（比對不到——略過）；加上 `--docs` 時還有
 `specs` / `decisions` / `impacts` / `supersedes` / `relates` / `decisionRelates`。
+
+名稱比對到多個函式時，由呼叫端自己的 import 決定（0.17 起；Python、TypeScript、JavaScript）：
+`from a.util import render`、`import b.util as bu` 後的 `bu.render()`、`import { render } from "./a"`
+都會把這次呼叫連到那個模組裡的 `render`，並沿著 `__init__.py` 與 barrel `index.ts` 的再匯出找下去。
+這種邊的 `confidence` 是 0.7（同檔 0.8、全專案唯一名稱 0.5）。import 挑不出唯一定義時——
+套件在 repo 之外、變數上的 `obj.render()`、兩個互相衝突的 import、`tsconfig` 路徑別名——
+這次呼叫仍然是 `ambiguous`，不猜。Go 與其他語言不在範圍內。
 
 #### `--scip <path>` —— 疊加 SCIP 索引以提升 CALLS 精確度
 

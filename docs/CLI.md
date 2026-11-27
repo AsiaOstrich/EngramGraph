@@ -128,7 +128,7 @@ only the `supersedes` field makes a `SUPERSEDES` edge).
   **It indexes in full instead — and prints the reason — when** it is the first
   `--incremental` run; the state file was written by an older egr whose state
   format differs (`incremental state was written by an older egr (state version
-  1, now 2)`; a newer egr's file says `newer`, and a file that is damaged says it
+  1, now 3)`; a newer egr's file says `newer`, and a file that is damaged says it
   could not be read); egr is NEWER than the one that wrote the state, or a
   tree-sitter grammar version differs (so a grammar upgrade re-parses everything;
   an OLDER egr than the one that wrote the state carries on from it, with the
@@ -211,8 +211,18 @@ egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 ```
 
 Output counts: `files`, `functions`, `classes`, `calls`, plus `ambiguous`
-(callee name matched > 1 function — skipped) and `unresolved` (callee matched
-none — skipped); with `--docs`, `specs` / `decisions` / `impacts` / `supersedes` / `relates` / `decisionRelates`.
+(callee name matched > 1 function and the caller's imports did not pick one —
+skipped) and `unresolved` (callee matched none — skipped); with `--docs`, `specs` / `decisions` / `impacts` / `supersedes` / `relates` / `decisionRelates`.
+
+When a name matches more than one function, the caller's own imports decide
+(since 0.17; Python, TypeScript and JavaScript): `from a.util import render`,
+`import b.util as bu` then `bu.render()` and `import { render } from "./a"` tie
+the call to the `render` of that module, following `__init__.py` and barrel
+`index.ts` re-exports. Such an edge has `confidence` 0.7 (a same-file edge 0.8,
+a name that is unique project-wide 0.5). When the imports do not name exactly
+one definition — a package outside the repo, `obj.render()` on a variable, two
+conflicting imports, a `tsconfig` path alias — the call stays `ambiguous` and
+is not guessed. Go and the other languages are not covered.
 
 #### `--scip <path>` — overlay a SCIP index for higher-precision CALLS
 
