@@ -154,18 +154,28 @@ const ROUTING_INSTRUCTIONS =
   "`doctor` says whether the index exists, is current, and belongs to this checkout; `blindspots` lists the files that did not parse fully, which makes answers near them possibly incomplete. " +
   "A result that carries `possiblyIncomplete` or `truncated: true` says so itself — read that before relying on the list.";
 
-/** The environment variable that lists tools to load at the start of every conversation instead of on demand (comma-separated tool names). */
+/**
+ * The environment variable that lists the tools to load at the start of every conversation instead of on demand
+ * (comma-separated tool names). Unset means the default list, {@link ALWAYS_LOAD_DEFAULT}; any value that is set
+ * replaces the default, so `none` (or an empty value) turns every up-front load off.
+ */
 export const ALWAYS_LOAD_ENV = "ENGRAM_MCP_ALWAYS_LOAD";
 
+/** The tools loaded up front when {@link ALWAYS_LOAD_ENV} is not set. Only `explore`; every other tool stays deferred. */
+export const ALWAYS_LOAD_DEFAULT = "explore";
+
 /**
- * `_meta` for a tool definition: `{ "anthropic/alwaysLoad": true }` when the tool is named in {@link ALWAYS_LOAD_ENV},
- * nothing otherwise. Claude Code defers MCP tool definitions and fetches one when it searches for it; this key asks
- * it to have the definition in context from the first turn. Off by default: it is a cost on every conversation (the
- * tool's whole description is loaded whether or not the tool is used), so it is for people who want that trade. Read at
- * server creation, so the value comes from the environment the client launched `egr-mcp` with.
+ * `_meta` for a tool definition: `{ "anthropic/alwaysLoad": true }` when the tool is named in {@link ALWAYS_LOAD_ENV}
+ * (or, when that is not set, in {@link ALWAYS_LOAD_DEFAULT}), nothing otherwise. Claude Code defers MCP tool
+ * definitions and fetches one when it searches for it; this key asks it to have the definition in context from the
+ * first turn. **On by default for `explore` since 0.17**: with it deferred, an assistant asked "how does X work" never
+ * searched for `explore` (0 of 8 runs called it); with it loaded, 8 of 8 did (one project, eight runs each; see
+ * docs/MCP.md for the cost and the limits of that sample). It is still a cost on every conversation (the tool's whole description is loaded
+ * whether or not the tool is used), so it can be turned off with `ENGRAM_MCP_ALWAYS_LOAD=none`. Read at server
+ * creation, so the value comes from the environment the client launched `egr-mcp` with.
  */
 function alwaysLoadMeta(tool: string): { _meta: Record<string, unknown> } | Record<string, never> {
-  const wanted = (process.env[ALWAYS_LOAD_ENV] ?? "")
+  const wanted = (process.env[ALWAYS_LOAD_ENV] ?? ALWAYS_LOAD_DEFAULT)
     .split(",")
     .map((n) => n.trim().toLowerCase())
     .filter((n) => n.length > 0);

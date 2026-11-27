@@ -22,7 +22,7 @@ import { runEgr } from "./helpers/run-egr.js";
  *  - Ranking: the answer's room went to test functions (gin: 7 of 12) and to generic names / build config files
  *    (excalidraw: `has`, `save`, `error`, `config`) instead of the code the question was about.
  *  - Instructions: the server tells every client, at `initialize`, which tool to start with for which kind of question.
- *  - alwaysLoad: `explore` is loaded at the start of a conversation only when the user turns that on.
+ *  - alwaysLoad: `explore` is loaded at the start of a conversation by default (0.17; measured 8 of 8 runs call it, against 0 of 8 when it is deferred); the user can turn it off.
  *
  * Every case goes through the BUILT entry points (the stdio MCP server and the `egr` CLI, as child processes, on a
  * graph that `egr index` built from the fixture below), and reads the effect back from what they return. The helper
@@ -342,7 +342,7 @@ describe("explore instructions: every server says at initialize which tool to st
   });
 });
 
-describe("explore alwaysLoad: explore is loaded at the start of a conversation only when the setting says so", () => {
+describe("explore alwaysLoad: explore is loaded at the start of a conversation unless the setting turns it off", () => {
   type ListedTool = { name: string; _meta?: Record<string, unknown> };
 
   async function listed(extraEnv: Record<string, string>): Promise<ListedTool[]> {
@@ -354,24 +354,31 @@ describe("explore alwaysLoad: explore is loaded at the start of a conversation o
     }
   }
 
-  it("a default server lists explore with no alwaysLoad marker [explore-adopt-always-load-off]", async () => {
+  it("a default server (no environment variable) lists explore with `anthropic/alwaysLoad: true` [explore-adopt-always-load-default-on]", async () => {
+    expect(ALWAYS_LOAD_ENV).toBe("ENGRAM_MCP_ALWAYS_LOAD");
     const tools = await listed({});
+    const explore = tools.find((t) => t.name === "explore")!;
+    expect(explore).toBeDefined();
+    expect(explore._meta?.["anthropic/alwaysLoad"]).toBe(true);
+  });
+
+  it("with ENGRAM_MCP_ALWAYS_LOAD=none, explore carries no alwaysLoad marker, and no tool does [explore-adopt-always-load-off]", async () => {
+    const tools = await listed({ ENGRAM_MCP_ALWAYS_LOAD: "none" });
     const explore = tools.find((t) => t.name === "explore")!;
     expect(explore).toBeDefined();
     expect(explore._meta?.["anthropic/alwaysLoad"]).toBeUndefined();
     expect(JSON.stringify(tools)).not.toContain("alwaysLoad");
   });
 
-  it("with ENGRAM_MCP_ALWAYS_LOAD=explore, explore (and only explore) carries `anthropic/alwaysLoad: true` [explore-adopt-always-load-on]", async () => {
-    expect(ALWAYS_LOAD_ENV).toBe("ENGRAM_MCP_ALWAYS_LOAD");
-    const tools = await listed({ ENGRAM_MCP_ALWAYS_LOAD: "explore" });
-    const explore = tools.find((t) => t.name === "explore")!;
-    expect(explore._meta?.["anthropic/alwaysLoad"]).toBe(true);
-    for (const t of tools.filter((x) => x.name !== "explore")) expect(t._meta?.["anthropic/alwaysLoad"], t.name).toBeUndefined();
+  it("by default only explore carries the marker: every other tool is deferred as before [explore-adopt-always-load-others-off]", async () => {
+    const tools = await listed({});
+    const others = tools.filter((x) => x.name !== "explore");
+    expect(others.length).toBeGreaterThan(5);
+    for (const t of others) expect(t._meta?.["anthropic/alwaysLoad"], t.name).toBeUndefined();
   });
 
-  it("an empty or unrelated value leaves it off, and a list or different case still turns it on [explore-adopt-always-load-parse]", async () => {
-    for (const off of ["", "call_chain", "   "]) {
+  it("a value that is set replaces the default: empty or unrelated turns explore off, a list or different case turns it on [explore-adopt-always-load-parse]", async () => {
+    for (const off of ["", "call_chain", "   ", "none", "NONE", "off"]) {
       const explore = (await listed({ ENGRAM_MCP_ALWAYS_LOAD: off })).find((t) => t.name === "explore")!;
       expect(explore._meta?.["anthropic/alwaysLoad"], `value "${off}"`).toBeUndefined();
     }

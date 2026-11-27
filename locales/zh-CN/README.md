@@ -267,8 +267,9 @@ EngramGraph 内置一个 MCP server（stdio），让任何支持 MCP 的助手�
 （嵌入式使用 `createMcpServer(conn)`）。每个工具都声明了 MCP 标注（`readOnlyHint`／`destructiveHint`／
 `idempotentHint`／`openWorldHint`），让客户端知道它即将执行的是什么。每个 server 的 `instructions` 也会写明“哪种问题先用哪个工具”（“X 怎么运作”用 `explore`、
 “谁调用它”用 `call_chain`，依此类推）；`explore` 默认不列出测试代码（需要时在 MCP 传 `includeTests`、在 CLI 用 `--include-tests`），并把过于泛用的名称与构建配置文件排在后面。
-设置 `ENGRAM_MCP_ALWAYS_LOAD=explore` 可让 Claude Code 从第一轮就加载 `explore`，而不是需要时才加载；默认关闭，
-因为它会让每次对话多加载该工具的定义（细节见 **[docs/MCP.md](./docs/MCP.md)**）。
+从 0.17 起，`explore` 默认会要求 Claude Code 从第一轮就加载它，而不是需要时才加载（`_meta` 的 `anthropic/alwaysLoad`）：
+延后加载时，在一个项目上 8 次里有 0 次调用它；从第一轮加载时，8 次全部调用。代价是它的定义（约 3,200 字符）会出现在每次对话里；
+设置 `ENGRAM_MCP_ALWAYS_LOAD=none` 可以关掉（证据、限制与关掉的代价见 **[docs/MCP.md](./docs/MCP.md)**）。
 
 ```bash
 # Claude Code，使用已安装的包：

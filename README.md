@@ -348,10 +348,12 @@ can tell what it's about to run. Every server's `instructions` also say which
 tool to start with for which kind of question (`explore` for "how does X work",
 `call_chain` for "who calls this", and so on); `explore` leaves test code out
 unless you ask (`includeTests`, or `--include-tests` in the CLI) and ranks generic names and build-config files
-low. Setting `ENGRAM_MCP_ALWAYS_LOAD=explore` makes Claude Code load `explore`
-from the first turn instead of on demand; it is off by default because it adds
-the tool's definition to every conversation (details in
-**[docs/MCP.md](./docs/MCP.md)**).
+low. Since 0.17 `explore` asks Claude Code to load it from the first turn instead of
+on demand (`_meta` `anthropic/alwaysLoad`): with it deferred, 0 of 8 runs on one
+project called it; with it loaded, 8 of 8 did. The cost is that its definition
+(about 3,200 characters) is in every conversation; set
+`ENGRAM_MCP_ALWAYS_LOAD=none` to turn it off (evidence, limits and what turning
+it off costs in **[docs/MCP.md](./docs/MCP.md)**).
 
 ```bash
 # Claude Code, from an installed package:
