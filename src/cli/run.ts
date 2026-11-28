@@ -48,7 +48,9 @@ import {
   readManifest,
   summarize,
   upsertRun,
+  withIndexAttempt,
   writeManifest,
+  type IndexAttempt,
   type ParseHealthSummary,
 } from "../code-graph/parse-manifest.js";
 import {
@@ -72,6 +74,7 @@ import { compileExcludes, type ExcludeMatcher } from "./exclude.js";
 import { msysPathConversionHint } from "./index-hints.js";
 import { canonicalFilePath, toPosixPath } from "../code-graph/path-utils.js";
 import { checkRefs, type RefCheckResult } from "./refs-check.js";
+import { cleanRefusedMessage, newerGraphVersion } from "../code-graph/egr-version.js";
 import { ALGO_BACKED_COMMAND_LIST, describeAlgoSource, type AlgoSource } from "../structural-memory/algo-extension.js";
 import { unavailableGrammars } from "../code-graph/grammar-registry.js";
 import { GRAMMARS, compiledFromSourceOn, currentPlatform } from "../../language-support.js";
@@ -190,10 +193,17 @@ export interface IncrementalSummary {
   removed: number;
   /** Graph writes the difference needed. `edgesRemoved` does not count edges that went with a removed node (DETACH DELETE). */
   nodesRemoved: number;
+  /** Function, class and module nodes that were not in the graph before. */
+  nodesAdded: number;
   edgesRemoved: number;
   edgesWritten: number;
   /** The `--changed-from` ref, when given. */
   changedFrom?: string;
+  /**
+   * Set on an `incremental` run when the remembered facts were written by a NEWER egr than this one
+   * (dev-platform #309): this older egr carried on from them instead of parsing everything again.
+   */
+  stateWrittenByNewerEgr?: string;
 }
 
 /**
@@ -428,6 +438,7 @@ async function indexCodeIncrementally(
   // 1. Can the remembered facts be used?
   let prev: RootState | undefined;
   let reason: string | undefined;
+  let olderEgr: string | undefined;
   if (!statePath) {
     reason = "no manifest path was given, so there is nowhere to keep the incremental state";
   } else if (clean) {
@@ -441,6 +452,7 @@ async function indexCodeIncrementally(
     const usable = usableState({ root, manifest, state: found.state, stateProblem: found.problem, egrVersion: EGR_VERSION });
     if (usable.ok) {
       prev = usable.prev;
+      olderEgr = usable.olderEgr;
       const rows = await conn.query("MATCH (m:Module) RETURN count(m) AS c");
       if (Number(rows[0]?.c ?? 0) < Object.keys(prev.files).length) {
         reason = "the graph holds fewer files than the incremental state remembers (it was emptied or replaced)";
@@ -467,6 +479,7 @@ async function indexCodeIncrementally(
         added: extraction.parsed,
         removed: 0,
         nodesRemoved: 0,
+        nodesAdded: 0,
         edgesRemoved: 0,
         edgesWritten: 0,
         ...(changedFrom !== undefined ? { changedFrom } : {}),
@@ -510,6 +523,7 @@ async function indexCodeIncrementally(
       removed: removedPaths.length,
       ...delta,
       ...(changedFrom !== undefined ? { changedFrom } : {}),
+      ...(olderEgr !== undefined ? { stateWrittenByNewerEgr: olderEgr } : {}),
     },
   };
 }
@@ -578,6 +592,11 @@ export async function cmdIndex(
     incremental?: boolean;
     /** With `incremental`: take the list of changed files from `git diff <ref>` instead of hashing every file. */
     changedFrom?: string;
+    /**
+     * Let `clean` empty a graph a NEWER egr wrote. Without it that is refused (dev-platform #309): the
+     * rebuild would reset the SAGE confidence the newer egr kept, and it does not come back.
+     */
+    allowDowngrade?: boolean;
   },
 ): Promise<IndexResultSummary> {
   if (opts.changedFrom !== undefined && !opts.incremental) {
@@ -591,6 +610,59 @@ export async function cmdIndex(
   // Taken before any file is read: a file edited after this moment may be read before its edit, and the manifest
   // section says so (`startedAt`), which is what `indexHealth.staleFiles` compares file times with.
   const startedAt = new Date().toISOString();
+  // BEFORE the graph is touched: `--clean` by an older egr over a graph a newer one wrote is refused unless the
+  // caller said it means it (dev-platform #309). The record is the manifest's `graphEgrVersion`; none = never refused.
+  if (opts.clean && opts.manifestPath) {
+    const newer = newerGraphVersion(readManifest(opts.manifestPath), EGR_VERSION);
+    if (newer !== null) {
+      if (!opts.allowDowngrade) throw new Error(cleanRefusedMessage(newer, EGR_VERSION));
+      process.stderr.write(`[egr] warning: --allow-downgrade: rebuilding a graph egr ${newer} wrote with the older egr ${EGR_VERSION}; its SAGE confidence is reset\n`);
+    }
+  }
+  // From here on the run touches the graph, so from here on it is on record (DEC-108 D1): a start before anything is
+  // written, an ending when it stops either way. The checks above are refusals before any work, not attempts.
+  return recordIndexAttempt(opts, startedAt, () => indexBody(conn, opts, startedAt));
+}
+
+type CmdIndexOptions = Parameters<typeof cmdIndex>[1];
+
+/**
+ * Write the attempt record around one index run (DEC-108 D1): `started` before `run` begins, `succeeded` or `failed`
+ * with the reason after it. This is the one place the three outcomes are produced; every trigger (a terminal, a
+ * post-commit hook, a shell start, `egr watch`) reaches it through `cmdIndex`.
+ *
+ * Writing the record must never be what makes an index fail: a manifest that cannot be written is said on stderr and
+ * the run goes on. A manifest that exists but cannot be read is left alone — replacing a file whose content is unknown
+ * with a fresh one would erase whatever it held.
+ */
+async function recordIndexAttempt(opts: CmdIndexOptions, startedAt: string, run: () => Promise<IndexResultSummary>): Promise<IndexResultSummary> {
+  const manifestPath = opts.manifestPath;
+  const root = resolve(opts.dir);
+  const write = (attempt: Omit<IndexAttempt, "startedAt" | "pid" | "egrVersion">): void => {
+    if (!manifestPath) return;
+    try {
+      const current = readManifest(manifestPath);
+      if (current === null && existsSync(manifestPath)) {
+        throw new Error("the manifest exists but cannot be read");
+      }
+      writeManifest(manifestPath, withIndexAttempt(current, root, { ...attempt, startedAt, pid: process.pid, egrVersion: EGR_VERSION }, EGR_VERSION));
+    } catch (err) {
+      process.stderr.write(`[egr] warning: the index attempt record was not written (${err instanceof Error ? err.message : String(err)}); the index itself is not affected\n`);
+    }
+  };
+  write({ status: "started" });
+  try {
+    const result = await run();
+    write({ status: "succeeded", finishedAt: new Date().toISOString() });
+    return result;
+  } catch (err) {
+    const reason = (err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 500);
+    write({ status: "failed", finishedAt: new Date().toISOString(), error: reason });
+    throw err;
+  }
+}
+
+async function indexBody(conn: GraphConnection, opts: CmdIndexOptions, startedAt: string): Promise<IndexResultSummary> {
   if (opts.clean) await clearGraph(conn); // drop existing data so deleted nodes are pruned
   if (opts.scip) await assertCallsSchemaHasProvenanceColumns(conn);
   // `detectShebangScripts: true` (XSPEC-414 R4 OQ2) only on the CODE walk —
@@ -649,7 +721,9 @@ export async function cmdIndex(
       dir: opts.dir,
       root,
       codeFiles: idFiles,
-      manifest: prevManifest,
+      // A manifest with no section at all is the one the attempt record starts a graph's first run with
+      // (DEC-108 D1): the graph has not been indexed before, which is what "no manifest" says.
+      manifest: prevManifest && Object.keys(prevManifest.runs).length === 0 ? null : prevManifest,
       manifestPath: opts.manifestPath,
       clean: opts.clean === true,
       changedFrom: opts.changedFrom,

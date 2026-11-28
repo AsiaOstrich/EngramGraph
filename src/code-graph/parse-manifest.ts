@@ -44,6 +44,7 @@ import { createRequire } from "node:module";
 import { renameSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 
 import type { FileParseHealth } from "./parse-health.js";
+import { graphVersionAfterWrite } from "./egr-version.js";
 
 /**
  * The tree-sitter grammar packages whose resolved versions fingerprint the
@@ -178,14 +179,50 @@ export interface ManifestRun {
  */
 export const MCP_INDEX_ROOT = "mcp:index_code";
 
+/**
+ * How one `egr index <dir>` run went, as `egr index` itself wrote it (DEC-108 D1).
+ *
+ * It is written twice: `started` before the run touches anything, then `succeeded` or `failed` when the run ends. A
+ * record still saying `started` after its process is gone is a run that was stopped (killed, power cut, closed
+ * terminal) and wrote no ending — something no run can report about itself, and the only way to see it is to look for
+ * the missing ending later.
+ */
+export interface IndexAttempt {
+  status: "started" | "succeeded" | "failed";
+  /** ISO time the run began. */
+  startedAt: string;
+  /** ISO time it ended. Absent while `started`. */
+  finishedAt?: string;
+  /** Why it failed (first line of the error, shortened). Present iff `failed`. */
+  error?: string;
+  /** The process that wrote the record, so a reader can tell a run still in progress from one that was cut short. */
+  pid?: number;
+  /** The egr that ran it. */
+  egrVersion: string;
+}
+
 /** The persisted manifest shape. */
 export interface ParseManifest {
   /** egr package version that produced this manifest. */
   egrVersion: string;
   /** Resolved tree-sitter grammar package versions (staleness fingerprint). */
   grammarVersions: Record<string, string>;
+  /**
+   * The NEWEST egr version that has written this graph's index data (dev-platform #309; see
+   * `egr-version.ts`). Unlike `egrVersion` it is never lowered by an older egr's write — only a
+   * `--clean` (which rebuilds the manifest from nothing) resets it. Absent on a manifest an earlier egr
+   * wrote: "unknown, older".
+   */
+  graphEgrVersion?: string;
   /** Per-index-root sections, keyed by absolute root — see module doc. */
   runs: Record<string, ManifestRun>;
+  /**
+   * The outcome of the LAST `egr index` attempt per absolute root (DEC-108 D1). Deliberately not part of `runs`: a
+   * `runs` key means "this root's files are in the graph" to every reader (`allFiles`, id assignment, `refs check`,
+   * the staleness scan), and a root whose first run failed has none. Absent on a manifest an earlier egr wrote:
+   * "no record", which is not the same as "succeeded".
+   */
+  indexAttempts?: Record<string, IndexAttempt>;
 }
 
 /** `<...>/<name>.db` → `<...>/<name>.parse-manifest.json` (R1b sibling file). */
@@ -218,7 +255,25 @@ export function upsertRun(
     ...(incrementalToken ? { incrementalToken } : {}),
     ...(rootLabel ? { rootLabel } : {}),
   };
-  return { egrVersion, grammarVersions: grammarVersions(), runs };
+  return {
+    egrVersion,
+    grammarVersions: grammarVersions(),
+    graphEgrVersion: graphVersionAfterWrite(prev?.graphEgrVersion, egrVersion),
+    runs,
+    // Carried over: this function rebuilds the object, and what it does not name would be dropped (DEC-108 D1).
+    ...(prev?.indexAttempts ? { indexAttempts: prev.indexAttempts } : {}),
+  };
+}
+
+/**
+ * A copy of `manifest` with `root`'s last attempt replaced by `attempt`; everything else — above all
+ * `graphEgrVersion` and `egrVersion`, which only a write of the graph's data may change — is left exactly as it was.
+ * With no manifest yet (the first index of a graph) the result has no `runs`, so a root whose first run fails is not
+ * mistaken for a root that is in the graph.
+ */
+export function withIndexAttempt(manifest: ParseManifest | null, root: string, attempt: IndexAttempt, egrVersion: string): ParseManifest {
+  const base: ParseManifest = manifest ?? { egrVersion, grammarVersions: grammarVersions(), runs: {} };
+  return { ...base, indexAttempts: { ...(base.indexAttempts ?? {}), [root]: attempt } };
 }
 
 /** Every file across every root's section — the whole-graph view (R2 SSOT). */

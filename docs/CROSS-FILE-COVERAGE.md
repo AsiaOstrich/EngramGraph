@@ -3,10 +3,13 @@
 `egr` resolves a call site's callee name to a specific `Function` node using a
 bare-name heuristic (`extractProject`, `src/code-graph/extractor.ts`):
 a same-file match wins (lexical shadowing), else a globally unique match
-across the whole project, else the call is dropped as ambiguous/unresolved
-(precision over recall — no import-graph resolution, no type inference).
+across the whole project, else — since 0.17, for Python and TypeScript /
+JavaScript only — the definition the caller's own imports name when the name has
+several, else the call is dropped as ambiguous/unresolved (precision over
+recall — no type inference). The numbers below were measured before the import
+step existed.
 
-This heuristic is identical across all 13 non-JS/TS languages `egr` supports
+The bare-name steps are identical across all 13 non-JS/TS languages `egr` supports
 (C#, Python, Go, Java, Kotlin, Rust, C++, C, Ruby, PHP, Dart, Swift, Bash) —
 one tag-query extraction step feeds one shared resolver. "We support language X" without a
 number is an empty claim; this page measures, per language, what fraction of

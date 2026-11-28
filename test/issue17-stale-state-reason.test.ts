@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { STATE_VERSION as NOW } from "../src/code-graph/incremental.js";
 import { buildEgr, type BuiltEgr } from "./helpers/build-cli.js";
 import { runEgr } from "./helpers/run-egr.js";
 
@@ -55,7 +56,7 @@ function indexJson(s: Setup): IncJson {
   return JSON.parse(r.stdout) as IncJson;
 }
 
-/** A project indexed once with --incremental, so a real state file (version 2) exists beside the graph. */
+/** A project indexed once with --incremental, so a real state file (the current version) exists beside the graph. */
 function indexedOnce(label: string): Setup {
   const dir = mkdtempSync(join(scratch, `${label}-`));
   const proj = join(dir, "proj");
@@ -64,7 +65,7 @@ function indexedOnce(label: string): Setup {
   mkdirSync(join(dir, "g"));
   const s: Setup = { dir, proj, db: join(dir, "g", "graph.db"), statePath: join(dir, "g", "graph.incremental-state.json") };
   expect(indexJson(s).incremental.mode).toBe("full");
-  expect(JSON.parse(readFileSync(s.statePath, "utf8")).version).toBe(2);
+  expect(JSON.parse(readFileSync(s.statePath, "utf8")).version).toBe(NOW);
   return s;
 }
 
@@ -82,13 +83,13 @@ describe("issue #17: the reason --incremental gives when a state file exists but
     const r = indexJson(s);
     expect(r.incremental.mode).toBe("full");
     expect(r.incremental.reason).toContain("written by an older egr");
-    expect(r.incremental.reason).toContain("state version 1, now 2");
+    expect(r.incremental.reason).toContain(`state version 1, now ${NOW}`);
     expect(r.incremental.reason).not.toContain("no incremental state yet");
     expect(r.incremental.reason).not.toContain("the state was lost");
     expect(r.incremental.reparsed).toBe(r.code.files); // everything was parsed again
 
     // read back: the state on disk is version 2 now, and the next run uses it
-    expect(JSON.parse(readFileSync(s.statePath, "utf8")).version).toBe(2);
+    expect(JSON.parse(readFileSync(s.statePath, "utf8")).version).toBe(NOW);
     expect(indexJson(s).incremental).toMatchObject({ mode: "incremental", reparsed: 0 });
   });
 
@@ -98,20 +99,20 @@ describe("issue #17: the reason --incremental gives when a state file exists but
 
     const r = run(s, ["index", s.proj, "--incremental"]);
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain("incremental: indexed in full — incremental state was written by an older egr (state version 1, now 2)");
+    expect(r.stdout).toContain(`incremental: indexed in full — incremental state was written by an older egr (state version 1, now ${NOW})`);
     expect(r.stdout).not.toContain("no incremental state yet");
   });
 
   it("a state written by a NEWER egr (a downgrade) says so, with both versions", () => {
     const s = indexedOnce("newer");
-    stateAsWrittenBy(s, 3);
+    stateAsWrittenBy(s, NOW + 1);
 
     const r = indexJson(s);
     expect(r.incremental.mode).toBe("full");
     expect(r.incremental.reason).toContain("written by a newer egr");
-    expect(r.incremental.reason).toContain("state version 3, now 2");
+    expect(r.incremental.reason).toContain(`state version ${NOW + 1}, now ${NOW}`);
     expect(r.incremental.reason).not.toContain("no incremental state yet");
-    expect(JSON.parse(readFileSync(s.statePath, "utf8")).version).toBe(2);
+    expect(JSON.parse(readFileSync(s.statePath, "utf8")).version).toBe(NOW);
   });
 
   it("a damaged state file (not JSON) says it could not be read, not that it is missing", () => {
@@ -122,12 +123,12 @@ describe("issue #17: the reason --incremental gives when a state file exists but
     expect(r.incremental.mode).toBe("full");
     expect(r.incremental.reason).toContain("could not be read");
     expect(r.incremental.reason).not.toContain("no incremental state yet");
-    expect(JSON.parse(readFileSync(s.statePath, "utf8")).version).toBe(2); // repaired
+    expect(JSON.parse(readFileSync(s.statePath, "utf8")).version).toBe(NOW); // repaired
   });
 
   it("a state file of the right version whose roots are not an object is also 'could not be read'", () => {
     const s = indexedOnce("badroots");
-    writeFileSync(s.statePath, JSON.stringify({ version: 2, roots: "nope" }));
+    writeFileSync(s.statePath, JSON.stringify({ version: NOW, roots: "nope" }));
 
     const r = indexJson(s);
     expect(r.incremental.mode).toBe("full");
@@ -144,6 +145,6 @@ describe("issue #17: the reason --incremental gives when a state file exists but
     expect(r.incremental.reason).toContain("no incremental state yet");
     expect(r.incremental.reason).not.toContain("older egr");
     expect(r.incremental.reason).not.toContain("could not be read");
-    expect(JSON.parse(readFileSync(s.statePath, "utf8")).version).toBe(2);
+    expect(JSON.parse(readFileSync(s.statePath, "utf8")).version).toBe(NOW);
   });
 });

@@ -52,8 +52,29 @@
 
 import { statSync, existsSync } from "node:fs";
 
-import { allFiles, isHealthy, readManifest, type ParseManifest } from "./parse-manifest.js";
+import { allFiles, isHealthy, readManifest, type IndexAttempt, type ParseManifest } from "./parse-manifest.js";
 import { scanStaleFiles, type StaleScan } from "./stale-files.js";
+
+/**
+ * An `egr index` run that did not end well (DEC-108 D1). Only these two outcomes are surfaced: a graph whose last run
+ * succeeded says nothing here, like a graph with no blindspots (the field is absent, not "ok").
+ */
+export interface IndexAttemptProblem {
+  /** The index root the run was for (absolute). */
+  root: string;
+  /**
+   * `failed`: the run ended and wrote the reason in `error`. `interrupted`: the run wrote a start and never an end —
+   * its process is gone (killed, power cut, terminal closed), so what it had written is whatever it got to.
+   */
+  outcome: "failed" | "interrupted";
+  startedAt: string;
+  /** Present when `failed`. */
+  finishedAt?: string;
+  /** Present when `failed`: why. */
+  error?: string;
+  /** One line: what to run. */
+  fix: string;
+}
 
 /** Compact index-health surfaced on a query response (present only when there is something to say: blindspots, or files newer than the index). */
 export interface IndexHealth {
@@ -101,6 +122,12 @@ export interface IndexHealth {
   staleFiles?: number;
   /** Up to 20 of those files, as graph ids. Present iff `staleFiles`. The count is the number to report. */
   staleSample?: string[];
+  /**
+   * The roots whose LAST `egr index` run failed, or started and never ended (DEC-108 D1). Absent when every recorded
+   * last run succeeded, and when there is no record (a graph an earlier egr indexed): that is "nothing to report",
+   * not a claim that the run succeeded. States the fact and what to run; says nothing about whether the graph is old.
+   */
+  lastIndexAttempts?: IndexAttemptProblem[];
 }
 
 /** Directory part of a `/`-separated path (`""` for a top-level file). */
@@ -128,7 +155,8 @@ export function computeIndexHealth(manifest: ParseManifest | null, resultFiles: 
   const files = allFiles(manifest);
   const unhealthy = files.filter((f) => !isHealthy(f));
   const staleCount = stale?.count ?? 0;
-  if (unhealthy.length === 0 && staleCount === 0) return null; // healthy, current graph → no field, no noise
+  const attempts = attemptProblems(manifest);
+  if (unhealthy.length === 0 && staleCount === 0 && attempts.length === 0) return null; // healthy, current graph → no field, no noise
 
   let partial = 0;
   let failed = 0;
@@ -150,7 +178,71 @@ export function computeIndexHealth(manifest: ParseManifest | null, resultFiles: 
     health.staleFiles = staleCount;
     health.staleSample = stale.sample;
   }
+  if (attempts.length > 0) health.lastIndexAttempts = attempts;
   return health;
+}
+
+/** True when a process with this id exists. EPERM means it exists and belongs to someone else. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** The command that redoes an index run for `root`, written so it can be pasted (a root with a space is quoted). */
+function reindexCommand(root: string): string {
+  return /\s/.test(root) ? `egr index "${root}"` : `egr index ${root}`;
+}
+
+/**
+ * The roots whose last run failed or never ended. A `started` record whose process is still alive is a run in
+ * progress, not an interrupted one, and is left out; the record carries the pid of the process that wrote it so the
+ * two can be told apart. (A record from another machine's process, or one whose pid was reused, can be misread; the
+ * manifest sits beside the graph on one machine.)
+ */
+function attemptProblems(manifest: ParseManifest): IndexAttemptProblem[] {
+  const out: IndexAttemptProblem[] = [];
+  for (const [root, a] of Object.entries(manifest.indexAttempts ?? {}) as Array<[string, IndexAttempt]>) {
+    if (!a || typeof a !== "object") continue;
+    if (a.status === "failed") {
+      out.push({
+        root,
+        outcome: "failed",
+        startedAt: a.startedAt,
+        ...(a.finishedAt ? { finishedAt: a.finishedAt } : {}),
+        error: a.error ?? "(no reason recorded)",
+        fix: `remove the cause named above, then run \`${reindexCommand(root)}\` again`,
+      });
+    } else if (a.status === "started" && !(typeof a.pid === "number" && processAlive(a.pid))) {
+      out.push({
+        root,
+        outcome: "interrupted",
+        startedAt: a.startedAt,
+        fix: `run \`${reindexCommand(root)}\` again; it was stopped before it wrote an ending`,
+      });
+    }
+  }
+  return out;
+}
+
+const MAX_ATTEMPT_LINES = 3;
+
+/**
+ * The lines that say a root's last index run failed or was cut short, for text output. One line per root (at most
+ * three, then a count). Facts only: when it started, what is recorded, what to run. Empty when there is nothing.
+ */
+export function attemptNote(h: IndexHealth): string {
+  const list = h.lastIndexAttempts ?? [];
+  const lines = list.slice(0, MAX_ATTEMPT_LINES).map((a) =>
+    a.outcome === "failed"
+      ? `⚠ the last index run of ${a.root} (started ${a.startedAt}) failed: ${a.error} — ${a.fix}`
+      : `⚠ the last index run of ${a.root} started ${a.startedAt} and wrote no ending: it was stopped before it finished — ${a.fix}`,
+  );
+  if (list.length > MAX_ATTEMPT_LINES) lines.push(`⚠ ${list.length - MAX_ATTEMPT_LINES} more root(s) whose last index run did not finish (see \`indexHealth.lastIndexAttempts\` in --json)`);
+  return lines.join("\n");
 }
 
 /**

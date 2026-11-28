@@ -257,7 +257,7 @@ const app = createServer({ connection: conn });   // Hono app；路由在 /graph
 EngramGraph 內附一個 MCP server（stdio），讓任何支援 MCP 的助理都能把它當成程式碼 + 知識圖譜使用。
 無 LLM、確定性、**免 Docker**。共有 15 個工具，分兩組，而且**stdio server（`egr-mcp`、`egr mcp`）是唯讀的，
 只列出會讀取的 11 個**——圖譜查詢（`call_chain`、`impact_analysis`、`implementers`、`implemented_specs`，以及 `explore`：
-輸入「它怎麼轉送請求」這類白話問題，一次回傳相符的符號、呼叫路徑與原始碼；還沒有符號名稱時，先於 grep 呼叫它）、
+輸入「它怎麼轉送請求」這類白話問題，一次回傳相符的符號、呼叫路徑、原始碼，以及改了它們會影響誰（呼叫者與測試）；還沒有符號名稱時，先於 grep 呼叫它）、
 診斷（`blindspots`、`signatures`、`doctor`）、一個 Markdown 引用查核員（`refs_check`，DEC-115，見下），
 一個找出「一起改過的檔案」的 git 歷史查詢（`cochange`，XSPEC-514——它讀 git，不讀圖），
 以及一個文件一致性檢查（`lint`，DEC-140——它讀 Markdown，不讀圖）。
@@ -267,8 +267,10 @@ EngramGraph 內附一個 MCP server（stdio），讓任何支援 MCP 的助理�
 （嵌入式使用 `createMcpServer(conn)`）。每個工具都宣告了 MCP 標註（`readOnlyHint`／`destructiveHint`／
 `idempotentHint`／`openWorldHint`），讓用戶端知道它即將執行的是什麼。每個 server 的 `instructions` 也會寫明「哪種問題先用哪個工具」（「X 怎麼運作」用 `explore`、
 「誰呼叫它」用 `call_chain`，依此類推）；`explore` 預設不列出測試程式碼（要的話在 MCP 傳 `includeTests`、在 CLI 用 `--include-tests`），並把過於泛用的名稱與建置設定檔排後面。
-設定 `ENGRAM_MCP_ALWAYS_LOAD=explore` 可讓 Claude Code 從第一輪就載入 `explore`，而不是需要時才載入；預設關閉，
-因為它會讓每次對話多載入該工具的定義（細節見 **[docs/MCP.md](./docs/MCP.md)**）。
+從 0.17 起，`explore` 預設會要求 Claude Code 從第一輪就載入它，而不是需要時才載入（`_meta` 的 `anthropic/alwaysLoad`）：
+延後載入時，在一個專案上 8 次裡有 0 次呼叫它；從第一輪載入時，8 次全部呼叫。樣本是一個專案、兩題、一種模型與一個 Claude Code 版本，
+只證明助理看得到 `explore` 時會用它，不證明答案更好。代價是它的定義（約 3,200 字元）會出現在每次對話裡，且每次作答比延後載入多 0.10 美元（約 16%）與 0.02 美元（約 5%）；
+設定 `ENGRAM_MCP_ALWAYS_LOAD=none` 可以關掉（證據、限制與關掉的代價見 **[docs/MCP.md](./docs/MCP.md)**）。
 
 ```bash
 # Claude Code，使用已安裝的套件：

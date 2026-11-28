@@ -61,9 +61,10 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 
 import type { GraphConnection } from "../graph-db/connection.js";
-import { readIndexHealth, staleNote, type IndexHealth } from "./index-health.js";
+import { attemptNote, readIndexHealth, staleNote, type IndexHealth } from "./index-health.js";
 import { MCP_INDEX_ROOT, readManifest, type ParseManifest } from "./parse-manifest.js";
 import { toPosixPath } from "./path-utils.js";
+import { callers } from "./query.js";
 
 export const DEFAULT_EXPLORE_LIMIT = 12;
 export const MAX_EXPLORE_LIMIT = 50;
@@ -87,6 +88,14 @@ const MAX_PATH_LENGTH = 8;
 const LIST_CAP = 10;
 const MAX_SOURCE_BYTES = 1_500_000;
 const MAX_KEYWORDS = 10;
+/** How many of the listed symbols (from the most relevant, never test code or noise) get an `impact` section. */
+const IMPACT_SYMBOLS = 5;
+/** Most callers and most tests one `impact` section names; the totals are always given. */
+const IMPACT_LIST_CAP = 5;
+/** How many calls away from a symbol a test may be and still count as affected by a change to it (`test -> helper -> A -> B`). */
+export const IMPACT_TEST_DEPTH = 3;
+/** The share of the room left after the frame that the `impact` sections may take; the rest is for source. */
+const IMPACT_SHARE = 0.4;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Words
@@ -105,9 +114,20 @@ const STOP_WORDS: ReadonlySet<string> = new Set([
   "tell", "show", "explain", "find", "get", "gets",
 ]);
 
+/** One character of a script written without spaces between words. */
+const CJK = "[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}]";
+const CJK_ANYWHERE = new RegExp(CJK, "u");
+const CJK_THEN_OTHER = new RegExp(`(${CJK})((?!${CJK})[\\p{L}\\p{N}])`, "gu");
+const OTHER_THEN_CJK = new RegExp(`((?!${CJK})[\\p{L}\\p{N}])(${CJK})`, "gu");
+
 /** Lower-cased words of `text`: split at non-letters, camelCase boundaries and the end of a run of capitals (`HTTPRequest` -> `http`, `request`). */
 function splitWords(text: string): string[] {
   return text
+    // A run of Chinese, Japanese or Korean characters has no spaces to split at and no dictionary here, but where it
+    // meets Latin letters or digits the boundary is certain: `處理login流程` is `處理`, `login`, `流程`. Names go through
+    // the same function, so both sides agree.
+    .replace(CJK_THEN_OTHER, "$1 $2")
+    .replace(OTHER_THEN_CJK, "$1 $2")
     .replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2")
     .replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2")
     .split(/[^\p{L}\p{N}]+/u)
@@ -251,6 +271,25 @@ export interface ExploreSymbol {
   snippet?: string;
   /** Why there is no `snippet` when one could have been shown (file unknown, moved, changed since indexing). */
   snippetNote?: string;
+  /** Who is affected if this symbol changes. Only on the most relevant symbols that are neither test code nor noise, and only when it fits within `maxChars` (else the symbol is named under `notExpanded.impact`). */
+  impact?: Impact;
+}
+
+/**
+ * "What does a change to this function reach" (dev-platform #266), from the same call edges as `call_chain`.
+ * `callers` are the functions that call it directly and are not test code; `tests` are the test functions (any file
+ * `isTestPath` says is a test, whether or not `includeTests` is set) that reach it through up to
+ * {@link IMPACT_TEST_DEPTH} calls, directly calling ones first. The lists are cut to fit; `callersTotal` and
+ * `testsTotal` are the full counts, and `fullList` (only when a list was cut) is the point query that returns it all.
+ */
+export interface Impact {
+  /** `name (file:line)`, the form of `notExpanded.symbols`; the line is where the definition starts, left out when the graph has none. */
+  callers: string[];
+  callersTotal: number;
+  /** Same form as `callers`. */
+  tests: string[];
+  testsTotal: number;
+  fullList?: string;
 }
 
 export interface NotExpanded {
@@ -263,6 +302,11 @@ export interface NotExpanded {
   /** Files imported by, or importing, a seed's file, that were not expanded. */
   files: string[];
   filesTotal: number;
+  /** Listed symbols whose `impact` (callers and affected tests) was left out to stay within the size limit; `call_chain` with `direction: "callers"` gives it. Absent when none. */
+  impact?: string[];
+  impactTotal?: number;
+  /** Only with `impact`, and only while the names are listed: the point query that returns the full impact of any of them (replace `<name>`). */
+  impactFullList?: string;
 }
 
 export interface ExploreResult {
@@ -605,6 +649,68 @@ function callPathsOf(ids: readonly string[], calls: ReadonlyArray<[string, strin
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Impact: who is affected if a symbol changes (dev-platform #266)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** Everything found for one symbol, before it is cut to fit: `callers` and `tests` hold at most {@link IMPACT_LIST_CAP} entries each (with lines), the totals are the full counts. */
+interface ImpactFound {
+  callers: string[];
+  callersTotal: number;
+  tests: string[];
+  testsTotal: number;
+}
+
+/**
+ * The callers and the affected tests of one function, read with {@link callers} — the query `call_chain` and
+ * `egr callers` answer with — so the two never disagree. The walk is the graph's own `CALLS*1..N`; nothing here
+ * re-implements it.
+ *
+ * Test code is excluded from the SYMBOLS of an `explore` answer (the `includeTests` default), but it is exactly
+ * what this section is for: a test that reaches the function is the check that a change to it is safe. So the split
+ * here is by {@link isTestPath} into two lists, and neither list is filtered by `includeTests`.
+ */
+async function findImpact(conn: GraphConnection, ownId: string, name: string, file: string | undefined): Promise<ImpactFound> {
+  const direct = (await callers(conn, name, 1, file)).filter((c) => c.id !== ownId);
+  const reach = (await callers(conn, name, IMPACT_TEST_DEPTH, file)).filter((c) => c.id !== ownId);
+  const directIds = new Set(direct.map((c) => c.id));
+  const callerNodes = direct.filter((c) => !isTestPath(c.file));
+  // Tests that call it themselves come first: when the list is cut, those are the ones most likely to break.
+  const testNodes = reach
+    .filter((c) => isTestPath(c.file))
+    .sort((a, b) => Number(directIds.has(b.id)) - Number(directIds.has(a.id)) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const shownIds = [...callerNodes.slice(0, IMPACT_LIST_CAP), ...testNodes.slice(0, IMPACT_LIST_CAP)].map((c) => c.id);
+  const lineOf = new Map<string, number>();
+  if (shownIds.length > 0) {
+    const rows = await conn.query(`MATCH (n:Function) WHERE n.id IN $ids RETURN n.id AS id, n.start_line AS line`, { ids: shownIds });
+    for (const r of rows) {
+      const line = int(r.line);
+      if (line !== null) lineOf.set(String(r.id), line);
+    }
+  }
+  const ref = (c: { id: string; name: string; file: string }): string => where({ name: c.name, file: c.file, line: lineOf.get(c.id) });
+  return {
+    callers: callerNodes.slice(0, IMPACT_LIST_CAP).map(ref),
+    callersTotal: callerNodes.length,
+    tests: testNodes.slice(0, IMPACT_LIST_CAP).map(ref),
+    testsTotal: testNodes.length,
+  };
+}
+
+/** `found` cut to `n` entries per list, with the pointer to the full list when something was cut. */
+function impactCut(found: ImpactFound, n: number, sym: Pick<ExploreSymbol, "name" | "file">): Impact {
+  const out: Impact = { callers: found.callers.slice(0, n), callersTotal: found.callersTotal, tests: found.tests.slice(0, n), testsTotal: found.testsTotal };
+  if (out.callers.length < out.callersTotal || out.tests.length < out.testsTotal) out.fullList = impactFullList(sym);
+  return out;
+}
+
+/** The point query that lists everything {@link Impact} may have cut (tests included, through {@link IMPACT_TEST_DEPTH} calls). */
+function impactFullList(sym: Pick<ExploreSymbol, "name" | "file">): string {
+  return sym.file === "(unknown)"
+    ? `call_chain {"symbol": "${sym.name}", "direction": "callers", "depth": ${IMPACT_TEST_DEPTH}}`
+    : `call_chain {"symbol": "${sym.name}", "file": "${sym.file}", "direction": "callers", "depth": ${IMPACT_TEST_DEPTH}}`;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // The answer
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -633,6 +739,7 @@ export function formatExplore(r: ExploreResult): string {
   lines.push(`explore "${r.topic}": ${r.status === "no-match" ? "NO MATCH" : `${r.symbols.length} symbol(s)`}${r.keywords.length ? ` — words: ${r.keywords.join(", ")}` : ""}`);
   if (r.message) lines.push(r.message);
   if (r.indexHealth?.staleFiles) lines.push(staleNote(r.indexHealth));
+  if (r.indexHealth?.lastIndexAttempts?.length) lines.push(attemptNote(r.indexHealth));
   if (r.indexHealth?.unavailable) lines.push(`⚠ index health unknown: the parse-health manifest could not be read (${r.indexHealth.unavailable}) — this result is unannotated, not verified`);
   else if (r.indexHealth?.possiblyIncomplete) lines.push(`⚠ possibly incomplete: ${r.indexHealth.blindspotsTotal ?? r.indexHealth.blindspots?.length ?? 0} file(s) near this result parsed partially/failed (see \`egr blindspots\`)`);
   if (r.symbols.length > 0) {
@@ -643,6 +750,17 @@ export function formatExplore(r: ExploreResult): string {
     lines.push("", "Call paths:");
     for (const p of r.callPaths) lines.push(`  ${p}`);
   }
+  const withImpact = r.symbols.filter((s) => s.impact !== undefined);
+  if (withImpact.length > 0) {
+    lines.push("", `Impact (who is affected if a symbol changes; tests are those that reach it through up to ${IMPACT_TEST_DEPTH} calls):`);
+    for (const s of withImpact) {
+      const im = s.impact!;
+      lines.push(`  ${s.name} (${s.file}${s.line ? `:${s.line}` : ""})`);
+      lines.push(`    callers: ${impactRefs(im.callers, im.callersTotal)}`);
+      lines.push(`    tests: ${impactRefs(im.tests, im.testsTotal)}`);
+      if (im.fullList !== undefined) lines.push(`    full list: egr callers ${s.name} --depth ${IMPACT_TEST_DEPTH}${s.file === "(unknown)" ? "" : ` --file ${s.file}`}`);
+    }
+  }
   const withSource = r.symbols.filter((s) => s.snippet !== undefined || s.snippetNote !== undefined);
   if (withSource.length > 0) {
     lines.push("", "Source:");
@@ -652,7 +770,7 @@ export function formatExplore(r: ExploreResult): string {
     }
   }
   const ne = r.notExpanded;
-  if (ne && (ne.symbolsTotal > 0 || ne.snippetsTotal > 0 || ne.filesTotal > 0)) {
+  if (ne && (ne.symbolsTotal > 0 || ne.snippetsTotal > 0 || ne.filesTotal > 0 || (ne.impactTotal ?? 0) > 0)) {
     lines.push("", `Not expanded${r.truncated ? ` (to stay within ${r.maxChars} characters)` : ""}:`);
     // When the names do not fit, say how many are left out; never print a label with an empty list after it.
     const list = (label: string, names: readonly string[], total: number, noun: string): string =>
@@ -660,6 +778,14 @@ export function formatExplore(r: ExploreResult): string {
     if (ne.symbolsTotal > 0) lines.push(list("symbols not listed", ne.symbols, ne.symbolsTotal, "symbols not listed"));
     if (ne.snippetsTotal > 0) lines.push(list("source left out for", ne.snippets, ne.snippetsTotal, "symbols with source left out"));
     if (ne.filesTotal > 0) lines.push(list("neighbouring files (imports)", ne.files, ne.filesTotal, "neighbouring files (imports)"));
+    if ((ne.impactTotal ?? 0) > 0) {
+      const names = ne.impact ?? [];
+      lines.push(
+        names.length > 0
+          ? `  impact left out for: ${names.join(", ")}${(ne.impactTotal ?? 0) > names.length ? ` (+${(ne.impactTotal ?? 0) - names.length} more)` : ""} — full list: egr callers <name> --depth ${IMPACT_TEST_DEPTH} (MCP: call_chain, direction "callers", depth ${IMPACT_TEST_DEPTH})`
+          : `  +${ne.impactTotal} more symbols with impact left out`,
+      );
+    }
   }
   if (r.note) lines.push("", r.note);
   const fnSyms = r.symbols.filter((s) => s.kind === "Function" && isRecommendable(s)).slice(0, 3);
@@ -668,6 +794,13 @@ export function formatExplore(r: ExploreResult): string {
     for (const s of fnSyms) lines.push(`  egr callers ${s.name}  |  egr callees ${s.name}  (add --file ${s.file} if the name is shared)`);
   }
   return lines.join("\n");
+}
+
+/** One side of an impact line: the entries as `name (file:line)`, how many more there are, or why there are none. */
+function impactRefs(refs: readonly string[], total: number): string {
+  if (total === 0) return "none found in the graph";
+  if (refs.length === 0) return `${total} (names left out to stay within the limit)`;
+  return `${refs.join(", ")}${total > refs.length ? ` (+${total - refs.length} more)` : ""}`;
 }
 
 /** `sym` marked as noise, with its rank cut by {@link NOISE_FACTOR}; unchanged when `noise` is undefined. */
@@ -680,9 +813,11 @@ function withNoise(sym: ExploreSymbol, noise: NoiseKind | undefined): ExploreSym
  * slice of it (from the symbol's line to the next definition, at most {@link MAX_SNIPPET_LINES} lines, and only what
  * fits), not the whole file, and it is read from disk now, so a file edited since indexing can differ from the index.
  */
-function readingNote(testsLeftOut: number, includeTestsFlag: string): string {
+function readingNote(testsLeftOut: number, includeTestsFlag: string, withImpact: boolean): string {
   return (
     `Each snippet is the file's own text starting at that line (up to ${MAX_SNIPPET_LINES} lines, to the next definition); it is not the whole file — open the file for the rest. What was not shown is named under notExpanded.` +
+    // "none found" is what the call edges say, not a proof: a call through an interface, a callback or reflection has no edge.
+    (withImpact ? ` impact comes from the graph's call edges: "none found" is not "nobody calls it" when the call goes through an interface, a callback or reflection, and in JavaScript and TypeScript a call inside an anonymous callback such as it(...) has no caller, so tests written that way are often not found.` : "") +
     (testsLeftOut > 0 ? ` ${testsLeftOut} test function(s) were left out on purpose; pass ${includeTestsFlag} to list them.` : "")
   );
 }
@@ -727,6 +862,11 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
     // "No match" is the answer a file that was added or edited after the last index produces, so the graph being
     // behind its files must be said here too. Only that: no result files were found to scope blindspots to.
     const behind = readIndexHealth(opts.manifestPath, []);
+    // Names in code are mostly English, so a question in Chinese, Japanese or Korean finding nothing is the usual case,
+    // and the way out is a different search, not a different spelling of the same words.
+    const englishHint = CJK_ANYWHERE.test(topic)
+      ? " The question contains Chinese, Japanese or Korean words, but names in code are mostly English: search again with English keywords (for example the English name of the thing you are looking for)."
+      : "";
     const onlyTests =
       testMatches.length > 0
         ? ` ${testMatches.length} test symbol(s) did match; test code is left out unless ${includeTestsFlag} is set, so repeat the call with it to see them.`
@@ -741,8 +881,8 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
       ...(testMatches.length > 0 ? { testsLeftOut: testMatches.length } : {}),
       message:
         `No symbol or file path matched the words (${words.join(", ")})${scope}. This is not the same as "the code does not do this": ` +
-        `the name may use other words, or the code may not be indexed. Try synonyms or a name you saw in a file, or lower the scope.${onlyTests}`,
-      ...(behind?.staleFiles ? { indexHealth: behind } : {}),
+        `the name may use other words, or the code may not be indexed. Try synonyms or a name you saw in a file, or lower the scope.${englishHint}${onlyTests}`,
+      ...(behind?.staleFiles || behind?.lastIndexAttempts?.length ? { indexHealth: behind } : {}),
     };
   }
 
@@ -811,6 +951,9 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
   /** The reading note goes only when nothing else is left to cut but the last symbol. */
   let withNote = true;
   const snippetOf = new Map<ExploreSymbol, string>();
+  /** The `impact` each symbol carries in the answer, and the symbols whose impact did not fit (named under `notExpanded.impact`). */
+  const impactOf = new Map<ExploreSymbol, Impact>();
+  const skippedImpact: ExploreSymbol[] = [];
   const health = (): IndexHealth | null =>
     readIndexHealth(opts.manifestPath, [...new Set(shown.map((s) => s.file).filter((f) => f !== "(unknown)"))]);
   const idsShown = (): string[] => shown.filter((s) => s.kind === "Function").map((s) => idOfSymbol.get(s)!);
@@ -833,6 +976,13 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
       snippetsTotal: skippedSnippets.length,
       files: neighbourFiles.slice(0, listCap),
       filesTotal: neighbourFiles.length,
+      ...(skippedImpact.length > 0
+        ? {
+            impact: skippedImpact.slice(0, listCap).map((s) => s.name),
+            impactTotal: skippedImpact.length,
+            ...(listCap > 0 ? { impactFullList: `call_chain {"symbol": "<name>", "direction": "callers", "depth": ${IMPACT_TEST_DEPTH}}` } : {}),
+          }
+        : {}),
     };
     const h = health();
     // Only code worth continuing from: not test code (even when `includeTests` put it in the list) and not noise.
@@ -842,18 +992,20 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
       const sn = snippetOf.get(s);
       if (sn !== undefined) out.snippet = sn;
       else if (noted.has(s)) out.snippetNote = noted.get(s)!;
+      const im = impactOf.get(s);
+      if (im !== undefined) out.impact = im;
       return out;
     });
     return {
       status: "ok",
       ...frame,
-      truncated: dropped.length > 0 || skippedSnippets.length > 0 || hood.capped,
+      truncated: dropped.length > 0 || skippedSnippets.length > 0 || skippedImpact.length > 0 || hood.capped,
       symbols,
       callPaths: callPathsOf(idsShown(), hood.calls.map(([a, b]) => [a, b] as [string, string]), labels(), rank),
-      ...(withNote ? { note: readingNote(testsLeftOut, includeTestsFlag) } : {}),
+      ...(withNote ? { note: readingNote(testsLeftOut, includeTestsFlag, impactOf.size > 0) } : {}),
       ...(testsLeftOut > 0 ? { testsLeftOut } : {}),
       next: topFns.map((s) => (s.file === "(unknown)" ? `call_chain {"symbol": "${s.name}"}` : `call_chain {"symbol": "${s.name}", "file": "${s.file}"}`)),
-      ...(ne.symbolsTotal + ne.snippetsTotal + ne.filesTotal > 0 ? { notExpanded: ne } : {}),
+      ...(ne.symbolsTotal + ne.snippetsTotal + ne.filesTotal + skippedImpact.length > 0 ? { notExpanded: ne } : {}),
       ...(h ? { indexHealth: h } : {}),
     };
   };
@@ -865,6 +1017,9 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
     snippetOf.delete(s);
     const at = skippedSnippets.indexOf(s);
     if (at >= 0) skippedSnippets.splice(at, 1);
+    impactOf.delete(s);
+    const ai = skippedImpact.indexOf(s);
+    if (ai >= 0) skippedImpact.splice(ai, 1);
   };
   // What gives way first: the long lists of names (down to a few), then symbols from the least relevant (keeping one),
   // then the last names; the totals are never cut. Returns false when nothing is left to give.
@@ -892,6 +1047,33 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
     return false;
   };
   while (!fits()) if (!shrink()) return minimalResult(assemble());
+
+  // 1b. impact: who is affected if the most relevant symbols change. It is what an assistant that read this answer once
+  //     needs before it edits, so it is placed before source and takes at most IMPACT_SHARE of the room left; source gets
+  //     the rest. Per symbol, the lists are shortened until the section fits; a symbol whose section cannot fit at all is
+  //     named under notExpanded.impact, with the point query that has it.
+  const impactSymbols = shown.filter((s) => s.kind === "Function" && isRecommendable(s)).slice(0, IMPACT_SYMBOLS);
+  const impactFor = new Map<ExploreSymbol, ImpactFound>();
+  for (const s of impactSymbols) impactFor.set(s, await findImpact(conn, idOfSymbol.get(s)!, s.name, s.file === "(unknown)" ? undefined : s.file));
+  let impactRoom = Math.floor((maxChars - measure(assemble())) * IMPACT_SHARE);
+  for (const s of impactSymbols) {
+    const found = impactFor.get(s)!;
+    const base = measure(assemble());
+    let placed = false;
+    for (const n of [...new Set([IMPACT_LIST_CAP, 3, 1, 0])]) {
+      impactOf.set(s, impactCut(found, n, s));
+      const grew = measure(assemble()) - base;
+      if (base + grew <= maxChars && grew <= impactRoom) {
+        impactRoom -= grew;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      impactOf.delete(s);
+      skippedImpact.push(s);
+    }
+  }
 
   // 2. source. Few, whole-ish snippets beat many cut ones, and the most relevant symbols come first: aim for about
   //    TARGET_SNIPPET_CHARS per snippet, give source to as many symbols as that room allows (at least one), name the rest.
@@ -923,9 +1105,13 @@ export async function explore(conn: GraphConnection, opts: ExploreOptions): Prom
   // 3. the list of what was left out grew while the loop ran; if the frame no longer fits, give up source from the back, then the rest
   while (!fits()) {
     const lastWithSnippet = [...shown].reverse().find((s) => snippetOf.has(s));
+    const lastWithImpact = [...shown].reverse().find((s) => impactOf.has(s));
     if (lastWithSnippet) {
       snippetOf.delete(lastWithSnippet);
       skippedSnippets.push(lastWithSnippet);
+    } else if (lastWithImpact) {
+      impactOf.delete(lastWithImpact);
+      skippedImpact.push(lastWithImpact);
     } else if (!shrink()) {
       return minimalResult(assemble());
     }

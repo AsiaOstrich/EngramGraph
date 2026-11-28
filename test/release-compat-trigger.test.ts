@@ -88,6 +88,14 @@ describe("release-compat-check.yml starts after the publish, not beside it", () 
     expect(job).not.toContain("npm view");
   });
 
+  it("waits through scripts/wait-for-npm-package.sh, and the job checks the repository out so that script exists [dev-platform #307]", () => {
+    const resolve = code(block(COMPAT, "  resolve-version:", 2));
+    expect(resolve).toContain("bash scripts/wait-for-npm-package.sh");
+    expect(resolve).toMatch(/uses: actions\/checkout@/);
+    // The wait is no longer a version-metadata poll written out in the workflow.
+    expect(resolve).not.toMatch(/npm view "\$SPEC" version/);
+  });
+
   it("takes the version from the publish run's tag and never from `latest` on that path", () => {
     const step = code(COMPAT);
     expect(step).toContain("github.event.workflow_run.head_branch");
@@ -125,23 +133,35 @@ interface Run {
   stdout: string;
 }
 
-/** Run the step with a fake `npm view` that answers for `published` specs only, and a fake `sleep`. */
-function runResolve(env: Record<string, string>, published: string[]): Run {
+/**
+ * Run the step with a fake `npm view` and a fake `curl`, and a fake `sleep`.
+ *
+ * `published` = specs whose VERSION the registry lists (`npm view <spec> version` answers);
+ * `downloadable` = the subset whose package file also downloads (`curl --head <tarball>` succeeds).
+ * The two are separate on purpose: the registry lists a version before it serves the file (0.16.0).
+ * `downloadable` defaults to every published spec.
+ */
+function runResolve(env: Record<string, string>, published: string[], downloadable: string[] = published): Run {
   const dir = mkdtempSync(join(tmpdir(), "egr-compat-"));
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   const asked = join(dir, "asked.log");
   const outFile = join(dir, "github_output");
   writeFileSync(outFile, "");
+  // `npm view <spec> <field>`: the version for `version`, the tarball URL for `dist.tarball`.
   writeFileSync(
     join(dir, "npm"),
-    `#!/bin/sh\necho "$2" >> "${asked}"\ncase " ${published.join(" ")} " in *" $2 "*) echo 1.0.0; exit 0;; esac\nexit 1\n`,
+    `#!/bin/sh\necho "$2" >> "${asked}"\ncase " ${published.join(" ")} " in *" $2 "*) if [ "$3" = "dist.tarball" ]; then echo "https://registry.example/$2.tgz"; else echo 1.0.0; fi; exit 0;; esac\nexit 1\n`,
   );
+  // `curl ... <url>`: succeeds only for the files that "download".
+  const okUrls = downloadable.map((s) => `https://registry.example/${s}.tgz`).join(" ");
+  writeFileSync(join(dir, "curl"), `#!/bin/sh\nfor a in "$@"; do U="$a"; done\ncase " ${okUrls} " in *" $U "*) exit 0;; esac\nexit 22\n`);
   writeFileSync(join(dir, "sleep"), "#!/bin/sh\nexit 0\n");
-  chmodSync(join(dir, "npm"), 0o755);
-  chmodSync(join(dir, "sleep"), 0o755);
+  for (const f of ["npm", "curl", "sleep"]) chmodSync(join(dir, f), 0o755);
   writeFileSync(join(dir, "step.sh"), resolveScript());
+  // cwd = the repository root: the step runs `bash scripts/wait-for-npm-package.sh`, as it does after actions/checkout.
   const r = spawnSync("bash", [join(dir, "step.sh")], {
     encoding: "utf8",
+    cwd: ROOT,
     env: { PATH: `${dir}:${process.env.PATH}`, GITHUB_OUTPUT: outFile, INPUT_VERSION: "", EVENT_NAME: "", PUBLISHED_REF: "", ...env },
   });
   const askedLog = (() => {
@@ -189,5 +209,16 @@ describe("release-compat-check.yml resolve step, run for real", () => {
     expect(r.output).toBe("");
     expect(r.asked).toHaveLength(20);
     expect(r.stdout).toContain("NO platform was tested");
+  });
+
+  it("when the version is listed but its package file is 404, fails saying NO platform was tested, not 'platform broken' [dev-platform #307]", () => {
+    // 0.16.0: `npm view <spec> version` answered, the tarball did not. The wait must not stop at the metadata.
+    const r = runResolve({ EVENT_NAME: "workflow_run", PUBLISHED_REF: "v0.16.0" }, ["engramgraph@0.16.0"], []);
+    expect(r.status).toBe(1);
+    expect(r.output).toBe(""); // package-spec was NOT handed to the matrix
+    expect(r.asked).toHaveLength(20);
+    expect(r.stdout).toContain("NO platform was tested");
+    expect(r.stdout).toContain("UNVERIFIED");
+    expect(r.stdout).toContain("does not download yet");
   });
 });

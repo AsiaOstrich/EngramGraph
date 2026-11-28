@@ -61,11 +61,12 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { GraphConnection } from "../graph-db/connection.js";
 import type { GraphEdge, GraphFragment } from "../graph-db/types.js";
 import { writeFragment } from "../graph-db/writer.js";
+import { compareEgrVersions } from "./egr-version.js";
 import { moduleIdOf, resolveFacts, type FileFacts } from "./extractor.js";
 import { grammarVersions, type ParseManifest } from "./parse-manifest.js";
 
 /** Bump when the shape of {@link FileFacts} or the resolution it feeds changes: an old state is then ignored, not misread. */
-export const STATE_VERSION = 2;
+export const STATE_VERSION = 3;
 
 /** One index root's remembered facts. */
 export interface RootState {
@@ -175,15 +176,12 @@ export function fingerprint(egrVersion: string): { egrVersion: string; grammarVe
   return { egrVersion, grammarVersions: grammarVersions() };
 }
 
-function sameFingerprint(
-  a: { egrVersion: string; grammarVersions: Record<string, string> },
-  b: { egrVersion: string; grammarVersions: Record<string, string> },
-): boolean {
-  if (a.egrVersion !== b.egrVersion) return false;
-  const ak = Object.keys(a.grammarVersions).sort();
-  const bk = Object.keys(b.grammarVersions).sort();
+/** The grammar half of the fingerprint: the installed tree-sitter packages, which parse every file. */
+function sameGrammars(a: Record<string, string>, b: Record<string, string>): boolean {
+  const ak = Object.keys(a).sort();
+  const bk = Object.keys(b).sort();
   if (ak.length !== bk.length) return false;
-  return ak.every((k, i) => k === bk[i] && a.grammarVersions[k] === b.grammarVersions[k]);
+  return ak.every((k, i) => k === bk[i] && a[k] === b[k]);
 }
 
 /** Why an `--incremental` run had to index in full. */
@@ -214,7 +212,7 @@ export function usableState(args: {
   /** Why `state` is null, from {@link inspectState}. Left out, a null state reads as "absent". */
   stateProblem?: StateProblem;
   egrVersion: string;
-}): { ok: true; prev: RootState } | { ok: false; reason: FullReason } {
+}): { ok: true; prev: RootState; olderEgr?: string } | { ok: false; reason: FullReason } {
   const { root, manifest, state, stateProblem, egrVersion } = args;
   if (!manifest) return { ok: false, reason: "no parse-health manifest yet (first index of this graph)" };
   const section = manifest.runs[root];
@@ -225,8 +223,21 @@ export function usableState(args: {
   if (!section.incrementalToken || section.incrementalToken !== prev.token) {
     return { ok: false, reason: "the graph was indexed again after the incremental state was written (token mismatch), so the state no longer describes it" };
   }
-  if (!sameFingerprint(fingerprint(egrVersion), prev)) {
+  if (!sameGrammars(grammarVersions(), prev.grammarVersions)) {
     return { ok: false, reason: "egr or a tree-sitter grammar changed since the last index (parser fingerprint differs), so every file is parsed again" };
+  }
+  if (prev.egrVersion !== egrVersion) {
+    // Only a NEWER egr has a reason to parse everything again: its parser may read a file differently.
+    // An OLDER egr (dev-platform #309) is told so and carries on from the facts it finds: indexing in full
+    // would flip-flop every time two versions take turns on one machine, and the newer egr that
+    // eventually runs again reads this state as "an older egr's" (the section is stamped with the running
+    // version below) and parses everything once, which also repairs whatever the older parser read differently.
+    // A version we cannot order (not semver) keeps the old, conservative answer: parse again.
+    const order = compareEgrVersions(egrVersion, prev.egrVersion);
+    if (order === null || order >= 0) {
+      return { ok: false, reason: "egr or a tree-sitter grammar changed since the last index (parser fingerprint differs), so every file is parsed again" };
+    }
+    return { ok: true, prev, olderEgr: prev.egrVersion };
   }
   return { ok: true, prev };
 }
@@ -336,6 +347,8 @@ export function deriveGraph(facts: readonly FileFacts[]): DerivedGraph {
 /** What applying a delta did, for the summary. */
 export interface DeltaStats {
   nodesRemoved: number;
+  /** Function, class and module nodes the graph did not have before (a changed file's existing nodes are not counted). */
+  nodesAdded: number;
   edgesRemoved: number;
   edgesWritten: number;
 }
@@ -384,7 +397,10 @@ export async function applyDelta(
 ): Promise<DeltaStats> {
   const before = deriveGraph(prev);
   const after = deriveGraph(next);
-  const stats: DeltaStats = { nodesRemoved: 0, edgesRemoved: 0, edgesWritten: 0 };
+  const stats: DeltaStats = { nodesRemoved: 0, nodesAdded: 0, edgesRemoved: 0, edgesWritten: 0 };
+  for (const [now, was] of [[after.functions, before.functions], [after.classes, before.classes], [after.modules, before.modules]] as const) {
+    for (const id of now) if (!was.has(id)) stats.nodesAdded += 1;
+  }
 
   const gone = (a: Set<string>, b: Set<string>): string[] => [...a].filter((id) => !b.has(id));
   const goneFns = gone(before.functions, after.functions);

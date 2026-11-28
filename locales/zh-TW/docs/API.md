@@ -87,8 +87,8 @@ tree-sitter 將 `.ts` / `.tsx` / `.js` 解析為 `Function` / `Class` / `Module`
   擷取 + 寫入單檔。`IndexResult = { module, functions, classes, calls }`。
 - `indexProject(conn, files: ProjectFile[]): Promise<ProjectIndexResult>` —
   索引整個 repo（跨檔 CALLS）。`ProjectIndexResult = { files, functions,
-  classes, calls, ambiguous, unresolved }`（ambiguous = 被呼叫名稱比對到 > 1 個函式；
-  unresolved = 比對不到——兩者都略過）。
+  classes, calls, ambiguous, unresolved }`（ambiguous = 被呼叫名稱比對到 > 1 個函式，
+  且呼叫端的 import 也挑不出其中一個；unresolved = 比對不到——兩者都略過）。
 
 `ProjectFile = { path, source, language? }`；省略 `language` 時由路徑副檔名推斷。
 

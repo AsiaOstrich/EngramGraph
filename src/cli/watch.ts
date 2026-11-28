@@ -344,7 +344,10 @@ export function startWatch(opts: WatchOptions): Watcher {
     else finish(0);
   };
 
-  log(`[watch] watching ${dir} (debounce ${opts.debounceMs} ms); catching up first with: egr index ${basename(dir)} --incremental`);
+  // The path as the user typed it (`.`, `src`, an absolute path), so the line can be pasted and run from where `egr watch`
+  // was started; the folder's bare name (what this printed before) is a different directory from there.
+  const typed = /\s/.test(opts.dir) ? `"${opts.dir}"` : opts.dir;
+  log(`[watch] watching ${dir} (debounce ${opts.debounceMs} ms); catching up first with: egr index ${typed} --incremental`);
   void (async () => {
     running = true;
     const first = await runIndex("initial");

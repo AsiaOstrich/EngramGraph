@@ -42,7 +42,7 @@ egr <command> [args] [options]
 
 ## 命令
 
-### `index <dir> [--docs] [--clean] [--scip <path>] [--incremental [--changed-from <git-ref>]]`
+### `index <dir> [--docs] [--clean [--allow-downgrade]] [--scip <path>] [--incremental [--changed-from <git-ref>]]`
 
 遞迴將 `<dir>` 下的原始碼索引進**程式碼圖譜**（tree-sitter → `Function` / `Class` /
 `Module` 節點 + 跨檔 `CALLS`）。加上 `--docs` 時，也會把 `*.md` 索引進**知識圖譜**
@@ -56,6 +56,19 @@ egr <command> [args] [options]
   （例如 `packages/`）會和其他目錄一樣被索引。
 - `--clean`：索引前先清空圖譜資料。索引本是 upsert（MERGE）從不刪除，程式裡被移除的節點
   會殘留；`--clean` 從頭重建以清掉它。
+- **較新版 egr 寫過的圖。** 圖旁邊的解析健康 manifest（`<graph>.parse-manifest.json`）會記錄寫過這張圖的
+  最新 egr 版本（`graphEgrVersion`；版本依 semver 比較，所以 `0.16.0-beta.2` 比 `0.16.0` 舊）。
+  當它比你正在執行的 egr 新，每個開啟這張圖的 `egr` 指令都會在 stderr 印出警告（MCP server 不會；stdout 與 `--json` 仍只有答案）。
+  警告開頭是 `[egr] warning: this graph was last written by egr <版本>, which is newer than this egr <版本>`，
+  結尾是 `Upgrade egr (npm install -g engramgraph@latest) to work with this graph.`
+  而 `--clean` 會在**動任何東西之前被拒絕**
+  （`--clean refused: this graph was last written by egr <版本>, newer than this egr <版本>` ... `The graph was not emptied.`）：
+  它會清空圖並用目前執行的 egr 重建，較新版 egr 保留的 SAGE
+  `confidence` 會被重設，重新索引也找不回來。請升級 egr（`npm install -g engramgraph@latest`）；若仍要重建，加上 `--allow-downgrade`
+  （confidence 會重設，記錄改為目前的 egr）。不加 `--clean` 時 `--allow-downgrade` 沒有作用。較舊版 egr 的一般寫入或 `--incremental` 寫入會照常進行並印出警告，
+  不會把記錄調低。沒有記錄的圖（舊版 egr 建的，或 manifest 不見了）視為「未知、較舊」：不警告、也不拒絕。
+- **這次執行有沒有結束？** `egr index` 會在同一個 manifest 裡記下每次執行怎麼結束；某個根目錄的上一次執行失敗或沒有結束時，
+  查詢會說出來。這不只給 `egr watch` 的使用者：見下方 `watch` 的「上一次索引有沒有結束？」。
 - `--incremental`：只重新解析自上次 `--incremental` 索引後**內容**有變的檔案，只寫入差異。
   「有變」指原始碼的 sha256 不同，不看 mtime（升級 grammar 或保留時間戳的 checkout 不會動 mtime）。
   結果與對同一份原始碼執行 `egr index <dir> --clean` 的圖相同（節點與邊都相同）；被刪除、改名離開、
@@ -67,8 +80,9 @@ egr <command> [args] [options]
   就地更新，所以 SAGE 的 `confidence` 會保留。摘要會說做了什麼：`incremental: 4 file(s) parsed
   (3 changed, 1 new), 5 reused unchanged, 1 removed; …`（`--json` 為 `incremental.reparsed` 等欄位）。
   在 egr 自己的 repo（210 個檔）上，全量重建約 26 秒，改 3 個檔後的增量索引約 0.4 秒。
-  **下列情況會改為全量索引，並印出原因**：第一次 `--incremental`；egr 或 tree-sitter grammar 版本與寫入狀態時不同
-  （所以升級 grammar 會全部重新解析）；之後有人不加 `--incremental` 又索引過這張圖（狀態以 token 綁在 manifest 上）；
+  **下列情況會改為全量索引，並印出原因**：第一次 `--incremental`；egr 比寫入狀態的版本**新**，或 tree-sitter grammar 版本不同
+  （所以升級 grammar 會全部重新解析；egr 比寫入狀態的版本**舊**時，會接著用該狀態，印出上面的警告，
+  `--json` 有 `stateWrittenByNewerEgr`，不會全部重新解析）；之後有人不加 `--incremental` 又索引過這張圖（狀態以 token 綁在 manifest 上）；
   圖裡的檔案比狀態記得的少；或這張圖是舊版 egr 用「相對路徑相同的多個 root」建的（見下方「同一張圖的多個 root」）。
   不加 `--incremental` 的 `egr index` 行為與以前完全相同。不能與 `--scip` 併用（會拒絕）；`--docs` 仍會索引全部文件。
   若圖是早先用一般 `egr index` 建的，可能留有一般索引從不清除、狀態也不知道的殘留：請從空圖開始，
@@ -112,8 +126,15 @@ egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 ```
 
 輸出計數：`files`、`functions`、`classes`、`calls`，以及 `ambiguous`（被呼叫名稱比對到
-> 1 個函式——略過）與 `unresolved`（比對不到——略過）；加上 `--docs` 時還有
+> 1 個函式，且呼叫端的 import 也挑不出其中一個——略過）與 `unresolved`（比對不到——略過）；加上 `--docs` 時還有
 `specs` / `decisions` / `impacts` / `supersedes` / `relates` / `decisionRelates`。
+
+名稱比對到多個函式時，由呼叫端自己的 import 決定（0.17 起；Python、TypeScript、JavaScript）：
+`from a.util import render`、`import b.util as bu` 後的 `bu.render()`、`import { render } from "./a"`
+都會把這次呼叫連到那個模組裡的 `render`，並沿著 `__init__.py` 與 barrel `index.ts` 的再匯出找下去。
+這種邊的 `confidence` 是 0.7（同檔 0.8、全專案唯一名稱 0.5）。import 挑不出唯一定義時——
+套件在 repo 之外、變數上的 `obj.render()`、兩個互相衝突的 import、`tsconfig` 路徑別名——
+這次呼叫仍然是 `ambiguous`，不猜。Go 與其他語言不在範圍內。
 
 #### `--scip <path>` —— 疊加 SCIP 索引以提升 CALLS 精確度
 
@@ -156,7 +177,7 @@ egr index . --scip index.scip
 - 若圖譜資料庫的 `CALLS`（或 `Function`/`Class`）表是在像這次
   `provider`/`confidence` 欄位這樣的 schema 變動之前建立的，任何**以寫入模式**
   開啟這個資料庫的 `egr` 指令（例如 `index`、`feedback`、`related`、`god-nodes`；
-  唯讀查詢與 MCP 伺服器不會遷移）一開啟它，就會**自動、非破壞性地**遷移：透過 `ALTER TABLE ... ADD`
+  唯讀查詢與 MCP server 不會遷移）一開啟它，就會**自動、非破壞性地**遷移：透過 `ALTER TABLE ... ADD`
   就地補上缺的欄位（既有資料列的其他屬性都保留），動手改之前會先 checkpoint
   再把資料庫檔案備份到 `.pre-migration-backup` 附屬檔（不會覆蓋既有的備份）；
   旁邊另有一個小檔 `.pre-migration-backup.pending-columns`，記錄這份備份涵蓋哪些
@@ -198,10 +219,10 @@ egr index . --scip index.scip
 ```bash
 egr watch .                        # 放在終端機或行程管理員底下一直跑
 egr watch ./src --debounce 1000 --exclude "generated/**"
-# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index proj --incremental
+# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index . --incremental
 # [watch] index done (initial): incremental: indexed in full — the first --incremental run; 210 file(s) parsed, state saved for the next run
 # [watch] ready
-# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: ...
+# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: 0 node(s) and 0 edge(s) removed, 0 node(s) added, 3 edge(s) written
 ```
 
 - **什麼會觸發一次執行。** 變動的檔案是 `egr index` 會讀的：有原始碼副檔名的檔案、**沒有**副檔名的檔案
@@ -241,6 +262,18 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   監看器會索引它，但沒有東西先把它算進來），以及被修改的 Markdown 文件（文件不在 manifest 裡）。
   只被 touch 而內容沒變的檔案會一直算到下一次執行，因為那次執行比對的是雜湊。檢查的成本是每個已索引檔案一次 `stat`
   （MCP server 會把答案重用 1 秒）。
+- **上一次索引有沒有結束？** `egr index` 在同一個 manifest 裡寫紀錄（`indexAttempts`，每個索引根目錄一筆）：
+  執行開始時寫一筆，結束時再寫一筆，是 `succeeded`，或 `failed` 加原因。查詢讀取 manifest 時，若某個根目錄的上一次執行
+  **沒有**好好結束，就會說出來：
+  `` ⚠ the last index run of /work/proj (started 2026-11-24T06:30:00.000Z) failed: <原因> — … run `egr index /work/proj` again ``；
+  若那次執行只寫了開始、沒有結束（行程被殺、機器斷電、終端機被關），則是
+  `… wrote no ending: it was stopped before it finished — …`。JSON 裡是 `indexHealth.lastIndexAttempts`，
+  每個這樣的根目錄一筆：`root`、`outcome`（`"failed"` 或 `"interrupted"`）、`startedAt`、`fix`；
+  只有 `failed` 另有 `finishedAt` 與 `error`（`interrupted` 沒有結束時間，也沒有原因）。它只陳述發生了什麼，不判斷圖譜是否過舊。
+  行程還活著的執行視為進行中，不會被報告。上一次成功的圖譜，以及舊版 egr 寫的 manifest（沒有紀錄），都不會多出任何東西：
+  **沒有這一行，不等於上一次一定成功**，只表示沒有任何紀錄說它沒成功。紀錄由 `egr index` 自己寫，所以 post-commit hook、
+  開 shell、`egr watch` 與手動執行都涵蓋。圖譜被別的寫入者鎖住時不會寫（那次執行根本沒開始）；manifest 寫不進去時只會在
+  stderr 出現警告，索引不會因此失敗。
 - **限制。** 它使用 Node 的 `fs.watch` 搭配 `recursive`。每次執行都會雜湊每個檔案，所以在非常大的目錄樹上，
   一次執行的成本是讀完整棵樹的成本，而不是改動本身的成本。**未在 Windows 上測試**；檔案被其他程式占用時的行為未驗證。
 
@@ -253,7 +286,8 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
 1. **名稱或檔案路徑**與字詞相符的符號（camelCase、snake_case 與複數會被折疊，「how」「does」這類疑問詞會被丟掉）；
 2. 它們呼叫與被呼叫的函式，往外兩層，以相符處為起點用 seeded PageRank 排序；
 3. 所列符號之間的呼叫路徑（`ServeHTTP → handleHTTPRequest → Next`）；
-4. 每個符號的原始碼，從記錄的行號讀到該檔下一個定義之前（最多 40 行）。
+4. 每個符號的原始碼，從記錄的行號讀到該檔下一個定義之前（最多 40 行）；
+5. 最相關的幾個符號，**改了它會影響誰**（`Impact` 區塊）：直接呼叫它的函式，以及走得到它的測試。
 
 ```bash
 egr explore "how does it route requests through its middleware chain"
@@ -267,10 +301,13 @@ egr explore "where is the session token validated" --path src/auth --max-chars 3
 再拿掉符號，並用「Not expanded」一節列出被拿掉的內容（`--json`：`notExpanded`，並有 `truncated: true`）。
 不會靜默截斷。最後一節 `Next:` 給出可接著用的點查詢（`egr callers <name>`），絕不從測試程式碼或被當成雜訊排後面的符號起算。
 
+**Impact：改了一個符號會影響誰**（dev-platform #266）。前五個既不是測試程式碼、也沒有被當成雜訊排後面的符號，回答裡會有一個 `Impact` 區塊，分兩份清單，查法與 `egr callers` 和 MCP 工具 `call_chain` 相同：`callers` 是直接呼叫該符號的函式（不含測試程式碼），`tests` 是測試檔裡走得到它的函式，最多往外 3 層呼叫，自己直接呼叫它的排前面。測試檔裡不只有測試函式：測試會經過的輔助函式也會列出。每一筆寫成 `name (file:line)`，`line` 是定義開始的行號。`--json` 把它放在符號的 `impact`：`{ "callers": ["ServeHTTP (gin.go:21)"], "callersTotal": 1, "tests": ["TestEngineServeRunsMiddleware (gin_test.go:9)", ...], "testsTotal": 3 }`，清單被截短時才有 `fullList`，內容是能拿到完整清單的 `call_chain` 呼叫；文字輸出則是一行 `full list: egr callers <name> --depth 3 --file <file>`。清單最多 5 筆，版面不夠時更少；`callersTotal` 與 `testsTotal` 永遠是完整數量，文字輸出以 `(+N more)` 表示。這一節最多佔用 `--max-chars` 在不含原始碼的回答之後剩下版面的 40%，其餘留給原始碼；放不下的符號會在「Not expanded」寫成 `impact left out for: ...`（`--json`：`notExpanded.impact`，並有 `impactTotal`），完整內容用 `egr callers <name> --depth 3` 取得（`--json`：名稱有列出時，`notExpanded.impactFullList` 是同一個查詢的 `call_chain` 呼叫）。**不論有沒有 `--include-tests`，測試都會列出**：那個開關只決定測試程式碼要不要當成符號列出。`callers: none found in the graph` 是呼叫關係邊的說法，不是「沒有人呼叫」的證明：經由介面、回呼函式或反射的呼叫沒有邊；而在 JavaScript 與 TypeScript，寫在匿名回呼（vitest、jest 的 `it("...", () => { ... })`）裡的呼叫沒有可掛上的呼叫者，所以這樣寫的測試常常找不到。
+
 **預設不列出測試程式碼**（`*_test.go`、`*.test.*`、`*.spec.*`，以及 `test/`、`tests/`、`__tests__/`、`__test__/`、`testdata/` 下的檔案）：測試會重複它所測功能的字詞，分數因此高過程式碼、佔掉版面。它們既不列出、也不用來沿呼叫關係往外走，回答會說明略過了幾個（`--json`：`testsLeftOut`）。`--include-tests` 則把它們當一般程式碼列出。名稱過於泛用的函式（`has`、`get`、`save`、`error`、`config`、`init`、`new` ⋯⋯）與建置／工具設定檔中的函式（`vite.config.*`、`*.config.*`、`scripts/`）排名會降為原本的十分之一（`--json`：`noise`），版面有空間時仍會列出。**這兩條規則可能抓得比你預期的多：** `start`、`run`、`open` 在泛用名稱清單裡，`testdata/` 目錄算測試程式碼，所以預期中的符號不見時，先看 `testsLeftOut` 與 `noise`。完整規則是 `src/code-graph/explore.ts` 的 `isTestPath` 與 `GENERIC_NAMES`，也寫在 [MCP.md](./MCP.md) 的 `explore` 那一列。輸出的列表之後有一句話（`--json`：`note`）：每個 snippet 是該檔案從那一行開始的原文（最多 40 行、到下一個定義為止），不是整個檔案；沒有顯示的內容由 `Not expanded` 列名。
 
 `NO MATCH`（`--json`：`status: "no-match"`，結束碼 `0`）表示沒有任何符號或檔案路徑含這些字詞。這不等於「程式碼沒有做這件事」：
-名稱可能用了別的字，或程式碼根本沒有被索引。顯示時沒有原始碼的符號會說明原因：檔案位置未知（經 MCP `index_code`
+名稱可能用了別的字，或程式碼根本沒有被索引。問句含中文、日文或韓文字元時，訊息還會說程式碼裡的名稱多半是英文，請改用英文關鍵字再查；
+這些文字沒有斷詞，連續的一段仍算一個字詞，只在它與拉丁字母或數字相接處切開（`解析parseInvoice流程` 會以 `解析`、`parse`、`invoice`、`流程` 搜尋）。顯示時沒有原始碼的符號會說明原因：檔案位置未知（經 MCP `index_code`
 填入的圖沒有索引根目錄）、已被移動，或索引之後已被修改（請重新執行 `egr index`）。主題沒有可搜尋的字詞、圖中沒有程式碼，
 或 `--limit`／`--max-chars` 不合法，結束碼為 `1`。
 

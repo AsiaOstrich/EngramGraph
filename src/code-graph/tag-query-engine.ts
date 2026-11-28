@@ -51,6 +51,60 @@ export interface DefinitionCapture {
 export interface CallSiteCapture {
   name: string;
   node: Parser.SyntaxNode;
+  /**
+   * What the callee was called ON, when the grammar says so (decision 736A; see {@link receiverOf}): absent for a
+   * bare call (`f()`) and for a function passed by reference; the dotted text of the receiver for `a.b.f()`;
+   * {@link UNKNOWN_RECEIVER} for a receiver that is not a plain name chain (`f().g()`, `x[0].g()`).
+   */
+  receiver?: string;
+}
+
+/** `receiver` of a call made on something that is not a plain chain of names, so no import can say what it is. */
+export const UNKNOWN_RECEIVER = "?";
+
+/**
+ * Member-access node types of the grammars whose imports egr reads (Python `attribute`, TypeScript / JavaScript
+ * `member_expression`, Go `selector_expression`) -> the field holding the thing the member is read from.
+ */
+const RECEIVER_FIELD: Record<string, string> = {
+  attribute: "object",
+  member_expression: "object",
+  selector_expression: "operand",
+};
+const MEMBER_FIELD: Record<string, string> = {
+  attribute: "attribute",
+  member_expression: "property",
+  selector_expression: "field",
+};
+
+/** The dotted text of a receiver that is a chain of plain names (`a`, `a.b`, `this`, `self`), else {@link UNKNOWN_RECEIVER}. */
+function chainText(node: Parser.SyntaxNode): string {
+  const field = RECEIVER_FIELD[node.type];
+  if (field === undefined) {
+    // a plain name: identifier, `this`, Go's package_identifier. Anything else (a call, a subscript, a literal) is not one.
+    return /^[A-Za-z_$][\w$]*$/.test(node.text) && node.namedChildCount === 0 ? node.text : UNKNOWN_RECEIVER;
+  }
+  const object = node.childForFieldName(field);
+  const member = node.childForFieldName(MEMBER_FIELD[node.type]!);
+  if (!object || !member) return UNKNOWN_RECEIVER;
+  const head = chainText(object);
+  return head === UNKNOWN_RECEIVER ? UNKNOWN_RECEIVER : `${head}.${member.text}`;
+}
+
+/**
+ * The receiver of a call whose callee name is `nameNode`: what stands left of the dot in `recv.name(...)`.
+ * `undefined` when the name is not a member read at all (a bare call). Languages whose member-access node is not in
+ * {@link RECEIVER_FIELD} always give `undefined` — nothing reads it for them.
+ */
+export function receiverOf(nameNode: Parser.SyntaxNode): string | undefined {
+  const parent = nameNode.parent;
+  if (!parent) return undefined;
+  const field = RECEIVER_FIELD[parent.type];
+  if (field === undefined) return undefined;
+  const member = parent.childForFieldName(MEMBER_FIELD[parent.type]!);
+  if (!member || member.id !== nameNode.id) return undefined; // the name is the object side (`name.x`), not the member
+  const object = parent.childForFieldName(field);
+  return object ? chainText(object) : UNKNOWN_RECEIVER;
 }
 
 /**
@@ -142,6 +196,7 @@ export function runTagQuery(
     let defKind: "function" | "class" | null = null;
     let defNode: Parser.SyntaxNode | null = null;
     let name: string | null = null;
+    let nameNode: Parser.SyntaxNode | null = null;
     let callNode: Parser.SyntaxNode | null = null;
 
     for (const capture of match.captures) {
@@ -159,6 +214,7 @@ export function runTagQuery(
           break;
         case "name":
           name = capture.node.text;
+          nameNode = capture.node;
           break;
         case "reference.call":
           callNode = capture.node;
@@ -172,7 +228,10 @@ export function runTagQuery(
     if (defKind && defNode && name) {
       definitions.push({ kind: defKind, name, node: defNode });
     } else if (callNode && name) {
-      if (!isPlainAssignmentTarget(callNode)) callSites.push({ name, node: callNode });
+      if (!isPlainAssignmentTarget(callNode)) {
+        const receiver = nameNode ? receiverOf(nameNode) : undefined;
+        callSites.push({ name, node: callNode, ...(receiver !== undefined ? { receiver } : {}) });
+      }
     }
   }
 

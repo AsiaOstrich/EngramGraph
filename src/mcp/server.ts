@@ -131,6 +131,7 @@ const READ_ONLY_INSTRUCTIONS =
  */
 const INDEX_HEALTH_NOTE =
   "The answer may carry `indexHealth`. `indexHealth.staleFiles` is how many indexed files were changed on disk after the last index (or are gone), counted for the whole graph, not for this answer: the answer may describe their old content, so re-run `egr index <dir> --incremental` (or keep `egr watch <dir>` running) before relying on it. " +
+  "`indexHealth.lastIndexAttempts` lists roots whose last `egr index` run failed or started and never ended; each carries the command to run (`fix`). " +
   "To judge whether the answer is complete read `indexHealth.possiblyIncomplete`, not whether `indexHealth` is present.";
 
 /**
@@ -153,18 +154,28 @@ const ROUTING_INSTRUCTIONS =
   "`doctor` says whether the index exists, is current, and belongs to this checkout; `blindspots` lists the files that did not parse fully, which makes answers near them possibly incomplete. " +
   "A result that carries `possiblyIncomplete` or `truncated: true` says so itself — read that before relying on the list.";
 
-/** The environment variable that lists tools to load at the start of every conversation instead of on demand (comma-separated tool names). */
+/**
+ * The environment variable that lists the tools to load at the start of every conversation instead of on demand
+ * (comma-separated tool names). Unset means the default list, {@link ALWAYS_LOAD_DEFAULT}; any value that is set
+ * replaces the default, so `none` (or an empty value) turns every up-front load off.
+ */
 export const ALWAYS_LOAD_ENV = "ENGRAM_MCP_ALWAYS_LOAD";
 
+/** The tools loaded up front when {@link ALWAYS_LOAD_ENV} is not set. Only `explore`; every other tool stays deferred. */
+export const ALWAYS_LOAD_DEFAULT = "explore";
+
 /**
- * `_meta` for a tool definition: `{ "anthropic/alwaysLoad": true }` when the tool is named in {@link ALWAYS_LOAD_ENV},
- * nothing otherwise. Claude Code defers MCP tool definitions and fetches one when it searches for it; this key asks
- * it to have the definition in context from the first turn. Off by default: it is a cost on every conversation (the
- * tool's whole description is loaded whether or not the tool is used), so it is for people who want that trade. Read at
- * server creation, so the value comes from the environment the client launched `egr-mcp` with.
+ * `_meta` for a tool definition: `{ "anthropic/alwaysLoad": true }` when the tool is named in {@link ALWAYS_LOAD_ENV}
+ * (or, when that is not set, in {@link ALWAYS_LOAD_DEFAULT}), nothing otherwise. Claude Code defers MCP tool
+ * definitions and fetches one when it searches for it; this key asks it to have the definition in context from the
+ * first turn. **On by default for `explore` since 0.17**: with it deferred, an assistant asked "how does X work" never
+ * searched for `explore` (0 of 8 runs called it); with it loaded, 8 of 8 did (one project, eight runs each; see
+ * docs/MCP.md for the cost and the limits of that sample). It is still a cost on every conversation (the tool's whole description is loaded
+ * whether or not the tool is used), so it can be turned off with `ENGRAM_MCP_ALWAYS_LOAD=none`. Read at server
+ * creation, so the value comes from the environment the client launched `egr-mcp` with.
  */
 function alwaysLoadMeta(tool: string): { _meta: Record<string, unknown> } | Record<string, never> {
-  const wanted = (process.env[ALWAYS_LOAD_ENV] ?? "")
+  const wanted = (process.env[ALWAYS_LOAD_ENV] ?? ALWAYS_LOAD_DEFAULT)
     .split(",")
     .map((n) => n.trim().toLowerCase())
     .filter((n) => n.length > 0);
@@ -467,11 +478,11 @@ export function createMcpServer(graph: GraphConnection | GraphSource, opts: { ma
       description:
         "When you don't have a symbol name yet (how does X work / where is Y handled), call this first, before grep. Takes a plain-language topic (words, not an exact name) and returns, in one answer: " +
         "the symbols whose names or paths match, the functions they call and are called by (ranked by seeded PageRank around the matches), the call paths among them, " +
-        "and each symbol's source. No model, deterministic. Use it for architecture questions (\"how does it route requests through its middleware chain\") before reading files one by one. " +
+        "each symbol's source, and for the most relevant symbols `impact`: who is affected if you change one (the functions that call it, and the tests that reach it, each as `name (file:line)`). No model, deterministic. Use it for architecture questions (\"how does it route requests through its middleware chain\") before reading files one by one. " +
         "`path` limits the search to files under a directory or file, relative to the directory given to `egr index` (the form of the file paths in the answer). `limit` (default " + DEFAULT_EXPLORE_LIMIT + ") is the number of symbols listed, at most " + MAX_EXPLORE_LIMIT + ". The WHOLE answer stays within `maxChars` (default " + DEFAULT_EXPLORE_MAX_CHARS + ", minimum 400 and maximum " + MAX_EXPLORE_MAX_CHARS + ": a value outside that range is clamped, not an error); " +
-        "when it does not fit, source is left out from the least relevant symbol first and `notExpanded` names everything left out — `truncated: true` means look there. " +
+        "when it does not fit, `impact` lists are shortened and source is left out from the least relevant symbol first, and `notExpanded` names everything left out — `truncated: true` means look there. An `impact` with `fullList` was cut: that is the `call_chain` call (direction `callers`) with the whole list. " +
         "`status: \"no-match\"` means no symbol or file path carried the words (not that the code does not exist). A symbol with no `snippet` carries a `snippetNote` saying why (file not known, moved, or changed since it was indexed). " +
-        "Test code (`*_test.go`, `*.test.*`, `*.spec.*`, `test/`, `tests/`, `__tests__/`) is left out and only counted in `testsLeftOut`, because tests repeat the topic's words and crowd out the code they test; pass `includeTests: true` to list them like any other code. " +
+        "Test code (`*_test.go`, `*.test.*`, `*.spec.*`, `test/`, `tests/`, `__tests__/`) is left out and only counted in `testsLeftOut`, because tests repeat the topic's words and crowd out the code they test; pass `includeTests: true` to list them like any other code. The tests in `impact` are listed either way: they are the point of it. " +
         "Symbols with a very generic name (`has`, `get`, `save` ...) or in build/tool configuration files are ranked low and marked with `noise`. " +
         "`next` lists point queries (`call_chain`) to continue from the symbols found, never from test code or `noise`. A topic with no searchable word, or an empty graph, is an error result. " +
         INDEX_HEALTH_NOTE,

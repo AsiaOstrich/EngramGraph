@@ -205,6 +205,25 @@ describe("usableState: the reasons a remembered state is refused (XSPEC-508 R6)"
     expect(r).toEqual({ ok: true, prev });
   });
 
+  it("accepts a state written by a NEWER egr than the running one, and says which (dev-platform #309)", () => {
+    const prev = { ...rootState(facts, "tok"), egrVersion: "10.0.0" };
+    const r = usableState({ root: "/r", manifest: manifestWith({ incrementalToken: "tok" }), state: stateWith(prev), egrVersion: "9.9.9" });
+    expect(r).toEqual({ ok: true, prev, olderEgr: "10.0.0" });
+  });
+
+  it("orders a pre-release below its release: 9.9.9-beta.2 running over a 9.9.9 state carries on, 9.9.9 over a 9.9.9-beta.2 state parses again", () => {
+    const manifest = manifestWith({ incrementalToken: "tok" });
+    const older = usableState({ root: "/r", manifest, state: stateWith({ ...rootState(facts, "tok"), egrVersion: "9.9.9" }), egrVersion: "9.9.9-beta.2" });
+    expect(older.ok).toBe(true);
+    const newer = usableState({ root: "/r", manifest, state: stateWith({ ...rootState(facts, "tok"), egrVersion: "9.9.9-beta.2" }), egrVersion: "9.9.9" });
+    expect(newer.ok).toBe(false);
+  });
+
+  it("an egr version it cannot order keeps the conservative answer: parse again", () => {
+    const r = usableState({ root: "/r", manifest: manifestWith({ incrementalToken: "tok" }), state: stateWith({ ...rootState(facts, "tok"), egrVersion: "not-a-version" }), egrVersion: "9.9.9" });
+    expect(r.ok).toBe(false);
+  });
+
   it.each([
     ["no manifest", { manifest: null, state: stateWith(rootState(facts)) }, "first index of this graph"],
     ["a manifest without this root", { manifest: manifestWith(undefined), state: stateWith(rootState(facts)) }, "has not been indexed into this graph before"],
@@ -223,8 +242,8 @@ describe("usableState: the reasons a remembered state is refused (XSPEC-508 R6)"
       { manifest: manifestWith({ incrementalToken: "t1" }), state: stateWith({ ...rootState(facts, "t1"), grammarVersions: { "tree-sitter": "1" } }) },
       "parser fingerprint differs",
     ],
-    ["no state, and the file was written by an older egr", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "older", version: 1 } }, "written by an older egr (state version 1, now 2)"],
-    ["no state, and the file was written by a newer egr", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "newer", version: 3 } }, "written by a newer egr (state version 3, now 2)"],
+    ["no state, and the file was written by an older egr", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "older", version: 1 } }, `written by an older egr (state version 1, now ${STATE_VERSION})`],
+    ["no state, and the file was written by a newer egr", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "newer", version: STATE_VERSION + 1 } }, `written by a newer egr (state version ${STATE_VERSION + 1}, now ${STATE_VERSION})`],
     ["no state, because the file could not be read", { manifest: manifestWith({ incrementalToken: "t1" }), state: null, stateProblem: { kind: "unreadable" } }, "could not be read"],
   ] as const)("refuses %s", (_name, input, reason) => {
     const r = usableState({ root: "/r", egrVersion: "9.9.9", ...input });

@@ -37,7 +37,7 @@ The directory is created on demand and the schema is ensured on every open
 
 ## Commands
 
-### `index <dir> [--docs] [--clean] [--scip <path>] [--incremental [--changed-from <git-ref>]]`
+### `index <dir> [--docs] [--clean [--allow-downgrade]] [--scip <path>] [--incremental [--changed-from <git-ref>]]`
 
 Recursively indexes source files under `<dir>` into the **code graph**
 (tree-sitter → `Function` / `Class` / `Module` nodes + cross-file `CALLS`).
@@ -83,6 +83,29 @@ only the `supersedes` field makes a `SUPERSEDES` edge).
 - `--clean`: drop the graph's data before indexing. Indexing is otherwise an
   upsert (MERGE) that never deletes, so a node removed from the code lingers;
   `--clean` rebuilds from scratch to prune it.
+- **A graph written by a newer egr.** The graph's parse-health manifest
+  (`<graph>.parse-manifest.json`) records the newest egr version that has written
+  it (`graphEgrVersion`; versions compare as semver, so `0.16.0-beta.2` is older
+  than `0.16.0`). When that is newer than the egr you run, every `egr` command that
+  opens the graph prints a warning on stderr (the MCP server does not; stdout, and
+  `--json`, stay the answer alone). The warning starts `[egr] warning: this graph was
+  last written by egr <version>, which is newer than this egr <version>`, and ends
+  `Upgrade egr (npm install -g engramgraph@latest) to work with this graph.`
+  `--clean` is **refused before anything is changed**
+  (`--clean refused: this graph was last written by egr <version>, newer than this
+  egr <version>` ... `The graph was not emptied.`): it
+  empties the graph and rebuilds it with the egr that is running, which resets the
+  SAGE `confidence` the newer egr kept, and a re-index does not bring that back.
+  Upgrade egr (`npm install -g engramgraph@latest`), or add `--allow-downgrade` to
+  rebuild anyway (the confidence is reset, and the record becomes the running egr).
+  `--allow-downgrade` does nothing without `--clean`. An older egr's plain or
+  `--incremental` write goes ahead with the warning and does not lower the record.
+  A graph with no record (built by an earlier egr, or its manifest is gone) is
+  treated as unknown and older: never warned about, never refused.
+- **Did the run end?** `egr index` records how each run ends in the same manifest,
+  and a query says so when a root's last run failed or never finished. It is not
+  only for `egr watch` users: see "Did the last index run end?" under `watch`
+  below.
 - `--incremental`: parse only the files whose **content** changed since the last
   `--incremental` index, and write only the difference. Changed means a different
   sha256 of the source text — not mtime, which a grammar upgrade or a
@@ -105,9 +128,12 @@ only the `supersedes` field makes a `SUPERSEDES` edge).
   **It indexes in full instead — and prints the reason — when** it is the first
   `--incremental` run; the state file was written by an older egr whose state
   format differs (`incremental state was written by an older egr (state version
-  1, now 2)`; a newer egr's file says `newer`, and a file that is damaged says it
-  could not be read); egr or a tree-sitter grammar version differs from the one
-  that wrote the state (so a grammar upgrade re-parses everything); the graph was
+  1, now 3)`; a newer egr's file says `newer`, and a file that is damaged says it
+  could not be read); egr is NEWER than the one that wrote the state, or a
+  tree-sitter grammar version differs (so a grammar upgrade re-parses everything;
+  an OLDER egr than the one that wrote the state carries on from it, with the
+  warning above and `stateWrittenByNewerEgr` in `--json`, instead of parsing
+  everything again); the graph was
   indexed again without `--incremental` since (the state is tied to the
   manifest by a token); the graph holds fewer files than the state remembers; or
   the graph was built by an older egr from roots that share a relative path (see
@@ -185,8 +211,18 @@ egr index . --docs --exclude ".uds-backup-*" --exclude "docs/archive/**"
 ```
 
 Output counts: `files`, `functions`, `classes`, `calls`, plus `ambiguous`
-(callee name matched > 1 function — skipped) and `unresolved` (callee matched
-none — skipped); with `--docs`, `specs` / `decisions` / `impacts` / `supersedes` / `relates` / `decisionRelates`.
+(callee name matched > 1 function and the caller's imports did not pick one —
+skipped) and `unresolved` (callee matched none — skipped); with `--docs`, `specs` / `decisions` / `impacts` / `supersedes` / `relates` / `decisionRelates`.
+
+When a name matches more than one function, the caller's own imports decide
+(since 0.17; Python, TypeScript and JavaScript): `from a.util import render`,
+`import b.util as bu` then `bu.render()` and `import { render } from "./a"` tie
+the call to the `render` of that module, following `__init__.py` and barrel
+`index.ts` re-exports. Such an edge has `confidence` 0.7 (a same-file edge 0.8,
+a name that is unique project-wide 0.5). When the imports do not name exactly
+one definition — a package outside the repo, `obj.render()` on a variable, two
+conflicting imports, a `tsconfig` path alias — the call stays `ambiguous` and
+is not guessed. Go and the other languages are not covered.
 
 #### `--scip <path>` — overlay a SCIP index for higher-precision CALLS
 
@@ -283,10 +319,10 @@ difference). Runs until you stop it (Ctrl-C, or SIGTERM where the platform has o
 ```bash
 egr watch .                        # leave it running in a terminal, or under a process manager
 egr watch ./src --debounce 1000 --exclude "generated/**"
-# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index proj --incremental
+# [watch] watching /work/proj (debounce 500 ms); catching up first with: egr index . --incremental
 # [watch] index done (initial): incremental: indexed in full — the first --incremental run; 210 file(s) parsed, state saved for the next run
 # [watch] ready
-# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: ...
+# [watch] index done (src/model.ts): incremental: 1 file(s) parsed (1 changed, 0 new), 209 reused unchanged, 0 removed; graph updated: 0 node(s) and 0 edge(s) removed, 0 node(s) added, 3 edge(s) written
 ```
 
 - **What starts a run.** A change to a file `egr index` would read: a source
@@ -352,6 +388,25 @@ egr watch ./src --debounce 1000 --exclude "generated/**"
   changed Markdown document (documents are not in the manifest). A file that was
   touched without a change counts until the next run, which compares hashes.
   The check costs one `stat` per indexed file (the MCP server reuses the answer for 1 s).
+- **Did the last index run end?** `egr index` writes a record into the same manifest
+  (`indexAttempts`, one entry per index root) when a run starts and another when it
+  ends: `succeeded`, or `failed` with the reason. A query that reads the manifest
+  says so when a root's last run did **not** end well:
+  `` ⚠ the last index run of /work/proj (started 2026-11-24T06:30:00.000Z) failed: <reason> — … run `egr index /work/proj` again ``,
+  or, for a run that wrote a start and no ending (its process
+  was killed, the machine lost power, the terminal was closed),
+  `… wrote no ending: it was stopped before it finished — …`. In JSON this is
+  `indexHealth.lastIndexAttempts`, one entry per such root: `root`, `outcome`
+  (`"failed"` or `"interrupted"`), `startedAt`, `fix`, and, for `failed` only,
+  `finishedAt` and `error` (an `interrupted` run has no end time and no reason). It
+  states what happened, not whether the graph is old. A run whose process is still alive is in progress and is not reported. A
+  graph whose last run succeeded, and a manifest an earlier egr wrote (no record),
+  add nothing: **the absence of this line is not proof that the last run
+  succeeded**, only that nothing recorded says it did not. The record is written by
+  `egr index` itself, so a post-commit hook, a shell start, `egr watch` and a
+  manual run are all covered. It is not written when the graph is locked by another
+  writer (the run never starts), and a manifest that cannot be written only
+  produces a warning on stderr; the index does not fail because of it.
 - **Limits.** It uses Node's `fs.watch` with `recursive`. Every run hashes every
   file, so on a very large tree a run costs what reading the tree costs, not
   what the change costs. **Not tested on Windows**; what happens there when
@@ -371,7 +426,10 @@ quotes are optional). No model is used. It prints, in one answer:
    PageRank around the matches;
 3. the call paths among the listed symbols (`ServeHTTP → handleHTTPRequest → Next`);
 4. each symbol's source, read from the file between its recorded line and the
-   next definition in that file (at most 40 lines).
+   next definition in that file (at most 40 lines);
+5. for the most relevant symbols, **who is affected if you change them**
+   (the `Impact` block): the functions that call each one directly, and the tests that
+   reach it.
 
 ```bash
 egr explore "how does it route requests through its middleware chain"
@@ -389,11 +447,18 @@ relevant symbol first, then symbols, and a `Not expanded` section names what was
 left out (`--json`: `notExpanded`, with `truncated: true`). Nothing is cut
 silently. The last section, `Next:`, gives point queries (`egr callers <name>`) to continue with, never from test code or from a symbol that was ranked low as noise.
 
+**Impact: who is affected if you change a symbol** (dev-platform #266). For the first five symbols that are neither test code nor ranked low as noise, the answer has an `Impact` block with two lists, read with the same query as `egr callers` and the MCP tool `call_chain`: `callers`, the functions that call the symbol directly (not test code), and `tests`, the functions in test files that reach it through up to 3 calls, the ones that call it themselves first. A test file does not have to hold only test functions: a helper in it that a test goes through is listed too. Each entry is `name (file:line)`, `line` being where the definition starts. `--json` has it as `impact` on the symbol: `{ "callers": ["ServeHTTP (gin.go:21)"], "callersTotal": 1, "tests": ["TestEngineServeRunsMiddleware (gin_test.go:9)", ...], "testsTotal": 3 }`, and `fullList` (only on a list that was cut) with the `call_chain` call that returns everything; in text it is the line `full list: egr callers <name> --depth 3 --file <file>`. A list is cut to 5 entries, or fewer when the room is short; `callersTotal` and `testsTotal` are always the full counts, and `(+N more)` says so in text. The section may take at most 40% of the room `--max-chars` leaves once the answer without source is counted, so source gets the rest; a symbol whose section does not fit is named in `Not expanded` (`--json`: `notExpanded.impact`, with `impactTotal`) as `impact left out for: ...`, and `egr callers <name> --depth 3` gives it in full (`--json`: `notExpanded.impactFullList` is the same query as a `call_chain` call, as long as the names are listed). **The tests are listed with or without `--include-tests`**: that switch only decides whether test code is listed as symbols. `callers: none found in the graph` is what the call edges say, not proof that nobody calls it: a call through an interface, a callback or reflection has no edge, and in JavaScript and TypeScript a call made inside an anonymous callback (`it("...", () => { ... })` in vitest or jest) has no caller to attach to, so those tests are often not found.
+
 **Test code is left out by default** (`*_test.go`, `*.test.*`, `*.spec.*`, and files under `test/`, `tests/`, `__tests__/`, `__test__/`, `testdata/`): tests repeat the words of the feature they test, so they out-score the code and take the room. They are neither listed nor used to walk the calls, and the answer says how many were left out (`--json`: `testsLeftOut`). `--include-tests` lists them like any other code. Functions with a very generic name (`has`, `get`, `save`, `error`, `config`, `init`, `new` ...) and functions in build/tool configuration files (`vite.config.*`, `*.config.*`, `scripts/`) have their rank cut to a tenth (`--json`: `noise`) and are still listed when there is room. **Both rules can catch more than you expect:** `start`, `run` and `open` are on the generic list, and a `testdata/` directory counts as test code, so when a symbol you expected is missing, look at `testsLeftOut` and `noise`. The full rules are `isTestPath` and `GENERIC_NAMES` in `src/code-graph/explore.ts`, and in the `explore` row of [MCP.md](./MCP.md). The output ends its listing with one sentence (`--json`: `note`): each snippet is the file's own text starting at that line (up to 40 lines, to the next definition), not the whole file, and what was not shown is named under `Not expanded`.
 
 `NO MATCH` (`--json`: `status: "no-match"`, exit `0`) means no symbol or file
 path carried the words. It is not the same as "the code does not do this": the
-name may use other words, or the code may not be indexed. A symbol shown without
+name may use other words, or the code may not be indexed. When the question
+contains Chinese, Japanese or Korean characters the message also says that names in
+code are mostly English and to search again with English keywords; there is no
+word segmentation for those scripts, so a run of them stays one word, and it is cut
+only where it meets Latin letters or digits (`解析parseInvoice流程` is searched as
+`解析`, `parse`, `invoice`, `流程`). A symbol shown without
 source says why: the file is not known (a graph filled through MCP `index_code`
 has no index root), it has moved, or it has changed since it was indexed (run
 `egr index` again). A topic with no searchable word, an empty graph, or a bad
